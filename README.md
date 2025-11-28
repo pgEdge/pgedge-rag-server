@@ -108,8 +108,7 @@ make fmt
 
 ## Documentation
 
-Full documentation is available in the [docs/](docs/) directory or at
-[https://pgedge.github.io/pgedge-rag-server](https://pgedge.github.io/pgedge-rag-server).
+Full documentation is available in the [docs/](docs/) directory.
 
 ## License
 
