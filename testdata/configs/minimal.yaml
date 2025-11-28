@@ -1,0 +1,16 @@
+# Minimal valid configuration - relies on defaults
+pipelines:
+  - name: "minimal-pipeline"
+    database:
+      host: "localhost"
+      database: "testdb"
+    column_pairs:
+      - table: "documents"
+        text_column: "content"
+        vector_column: "embedding"
+    embedding_llm:
+      provider: "openai"
+      model: "text-embedding-3-small"
+    rag_llm:
+      provider: "anthropic"
+      model: "claude-sonnet-4-20250514"

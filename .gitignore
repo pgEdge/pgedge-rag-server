@@ -1,0 +1,37 @@
+# Build output
+bin/
+
+# Test coverage
+coverage.out
+coverage.html
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment and secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Config files with potential secrets
+config.yaml
+config.yml
+!config.example.yaml
+
+# Go
+vendor/
+
+# MkDocs build output
+site/
+
+# AI
+.claude/settings.local.json

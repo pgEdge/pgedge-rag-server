@@ -1,0 +1,311 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "pgEdge RAG Server API",
+    "description": "REST API for querying RAG (Retrieval-Augmented Generation) pipelines",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/v1",
+      "description": "API v1"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "description": "Check if the server is running and healthy",
+        "operationId": "getHealth",
+        "tags": [
+          "System"
+        ],
+        "responses": {
+          "200": {
+            "description": "Server is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pipelines": {
+      "get": {
+        "summary": "List pipelines",
+        "description": "Get a list of all available RAG pipelines",
+        "operationId": "listPipelines",
+        "tags": [
+          "Pipelines"
+        ],
+        "responses": {
+          "200": {
+            "description": "List of pipelines",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelinesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pipelines/{name}": {
+      "post": {
+        "summary": "Query pipeline",
+        "description": "Execute a RAG query against a specific pipeline",
+        "operationId": "queryPipeline",
+        "tags": [
+          "Pipelines"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Pipeline name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Query request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Query response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Server-Sent Events stream"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Pipeline not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorDetail": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Error code"
+          },
+          "message": {
+            "type": "string",
+            "description": "Error message"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Health status"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Message content"
+          },
+          "role": {
+            "type": "string",
+            "description": "Message role (user or assistant)"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ]
+      },
+      "PipelineInfo": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Pipeline description"
+          },
+          "name": {
+            "type": "string",
+            "description": "Pipeline name"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "PipelinesResponse": {
+        "type": "object",
+        "properties": {
+          "pipelines": {
+            "type": "array",
+            "description": "List of available pipelines",
+            "items": {
+              "$ref": "#/components/schemas/PipelineInfo"
+            }
+          }
+        },
+        "required": [
+          "pipelines"
+        ]
+      },
+      "QueryRequest": {
+        "type": "object",
+        "properties": {
+          "include_sources": {
+            "type": "boolean",
+            "description": "Include source documents in response",
+            "default": false
+          },
+          "messages": {
+            "type": "array",
+            "description": "Previous conversation history for context",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          },
+          "query": {
+            "type": "string",
+            "description": "The question to answer"
+          },
+          "stream": {
+            "type": "boolean",
+            "description": "Enable streaming response (SSE)",
+            "default": false
+          },
+          "top_n": {
+            "type": "integer",
+            "description": "Override default result limit"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "QueryResponse": {
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "string",
+            "description": "The generated answer"
+          },
+          "sources": {
+            "type": "array",
+            "description": "Source documents (only if include_sources=true)",
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            }
+          },
+          "tokens_used": {
+            "type": "integer",
+            "description": "Total tokens consumed"
+          }
+        },
+        "required": [
+          "answer",
+          "tokens_used"
+        ]
+      },
+      "Source": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Document content"
+          },
+          "id": {
+            "type": "string",
+            "description": "Document identifier"
+          },
+          "score": {
+            "type": "number",
+            "format": "double",
+            "description": "Relevance score"
+          }
+        },
+        "required": [
+          "content",
+          "score"
+        ]
+      }
+    }
+  }
+}

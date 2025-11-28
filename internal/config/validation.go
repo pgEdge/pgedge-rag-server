@@ -1,0 +1,302 @@
+//-------------------------------------------------------------------------
+//
+// pgEdge RAG Server
+//
+// Portions copyright (c) 2025, pgEdge, Inc.
+// This software is released under The PostgreSQL License
+//
+//-------------------------------------------------------------------------
+
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// expandPath expands ~ to the user's home directory.
+func expandPath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return filepath.Join(homeDir, path[2:])
+	}
+	return path
+}
+
+// ValidationError represents a single configuration validation error.
+type ValidationError struct {
+	Field   string
+	Message string
+}
+
+func (e ValidationError) Error() string {
+	return fmt.Sprintf("%s: %s", e.Field, e.Message)
+}
+
+// ValidationErrors is a collection of validation errors.
+type ValidationErrors []ValidationError
+
+func (e ValidationErrors) Error() string {
+	if len(e) == 0 {
+		return ""
+	}
+
+	msgs := make([]string, 0, len(e))
+	for _, err := range e {
+		msgs = append(msgs, err.Error())
+	}
+	return strings.Join(msgs, "; ")
+}
+
+// Validate checks the configuration for errors and returns all validation
+// errors found.
+func (c *Config) Validate() error {
+	var errs ValidationErrors
+
+	// Validate server config
+	errs = append(errs, c.validateServer()...)
+
+	// Validate pipelines
+	errs = append(errs, c.validatePipelines()...)
+
+	if len(errs) > 0 {
+		return errs
+	}
+	return nil
+}
+
+// validateServer validates server configuration.
+func (c *Config) validateServer() ValidationErrors {
+	var errs ValidationErrors
+
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		errs = append(errs, ValidationError{
+			Field:   "server.port",
+			Message: "must be between 1 and 65535",
+		})
+	}
+
+	if c.Server.TLS.Enabled {
+		if c.Server.TLS.CertFile == "" {
+			errs = append(errs, ValidationError{
+				Field:   "server.tls.cert_file",
+				Message: "required when TLS is enabled",
+			})
+		} else if _, err := os.Stat(expandPath(c.Server.TLS.CertFile)); err != nil {
+			errs = append(errs, ValidationError{
+				Field:   "server.tls.cert_file",
+				Message: fmt.Sprintf("file not found: %s", c.Server.TLS.CertFile),
+			})
+		}
+
+		if c.Server.TLS.KeyFile == "" {
+			errs = append(errs, ValidationError{
+				Field:   "server.tls.key_file",
+				Message: "required when TLS is enabled",
+			})
+		} else if _, err := os.Stat(expandPath(c.Server.TLS.KeyFile)); err != nil {
+			errs = append(errs, ValidationError{
+				Field:   "server.tls.key_file",
+				Message: fmt.Sprintf("file not found: %s", c.Server.TLS.KeyFile),
+			})
+		}
+	}
+
+	return errs
+}
+
+// validatePipelines validates all pipeline configurations.
+func (c *Config) validatePipelines() ValidationErrors {
+	var errs ValidationErrors
+
+	if len(c.Pipelines) == 0 {
+		errs = append(errs, ValidationError{
+			Field:   "pipelines",
+			Message: "at least one pipeline must be configured",
+		})
+		return errs
+	}
+
+	// Check for duplicate pipeline names
+	names := make(map[string]bool)
+	for i, p := range c.Pipelines {
+		if names[p.Name] {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("pipelines[%d].name", i),
+				Message: fmt.Sprintf("duplicate pipeline name: %s", p.Name),
+			})
+		}
+		names[p.Name] = true
+
+		errs = append(errs, c.validatePipeline(i, p)...)
+	}
+
+	return errs
+}
+
+// validatePipeline validates a single pipeline configuration.
+func (c *Config) validatePipeline(index int, p Pipeline) ValidationErrors {
+	var errs ValidationErrors
+	prefix := fmt.Sprintf("pipelines[%d]", index)
+
+	// Required fields
+	if p.Name == "" {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".name",
+			Message: "required",
+		})
+	}
+
+	// Database validation
+	errs = append(errs, c.validateDatabase(prefix+".database", p.Database)...)
+
+	// Column pairs validation
+	if len(p.ColumnPairs) == 0 {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".column_pairs",
+			Message: "at least one column pair must be configured",
+		})
+	} else {
+		for j, cp := range p.ColumnPairs {
+			errs = append(errs, c.validateColumnPair(
+				fmt.Sprintf("%s.column_pairs[%d]", prefix, j), cp)...)
+		}
+	}
+
+	// LLM validation
+	errs = append(errs, c.validateLLM(prefix+".embedding_llm", p.EmbeddingLLM,
+		[]string{"openai", "voyage", "ollama"})...)
+	errs = append(errs, c.validateLLM(prefix+".rag_llm", p.RAGLLM,
+		[]string{"anthropic", "openai", "ollama"})...)
+
+	// Token budget validation
+	if p.TokenBudget < 0 {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".token_budget",
+			Message: "must be non-negative",
+		})
+	}
+
+	// Top N validation
+	if p.TopN < 0 {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".top_n",
+			Message: "must be non-negative",
+		})
+	}
+
+	return errs
+}
+
+// validateDatabase validates database configuration.
+func (c *Config) validateDatabase(prefix string, db DatabaseConfig) ValidationErrors {
+	var errs ValidationErrors
+
+	if db.Host == "" {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".host",
+			Message: "required",
+		})
+	}
+
+	if db.Database == "" {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".database",
+			Message: "required",
+		})
+	}
+
+	if db.Port < 1 || db.Port > 65535 {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".port",
+			Message: "must be between 1 and 65535",
+		})
+	}
+
+	// Validate SSL mode
+	validSSLModes := map[string]bool{
+		"disable":     true,
+		"allow":       true,
+		"prefer":      true,
+		"require":     true,
+		"verify-ca":   true,
+		"verify-full": true,
+	}
+	if db.SSLMode != "" && !validSSLModes[db.SSLMode] {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".ssl_mode",
+			Message: "must be one of: disable, allow, prefer, require, verify-ca, verify-full",
+		})
+	}
+
+	return errs
+}
+
+// validateColumnPair validates a column pair configuration.
+func (c *Config) validateColumnPair(prefix string, cp ColumnPair) ValidationErrors {
+	var errs ValidationErrors
+
+	if cp.Table == "" {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".table",
+			Message: "required",
+		})
+	}
+
+	if cp.TextColumn == "" {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".text_column",
+			Message: "required",
+		})
+	}
+
+	if cp.VectorColumn == "" {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".vector_column",
+			Message: "required",
+		})
+	}
+
+	return errs
+}
+
+// validateLLM validates LLM configuration.
+func (c *Config) validateLLM(prefix string, llm LLMConfig, validProviders []string) ValidationErrors {
+	var errs ValidationErrors
+
+	if llm.Provider == "" {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".provider",
+			Message: "required",
+		})
+	} else {
+		provider := strings.ToLower(llm.Provider)
+		valid := false
+		for _, vp := range validProviders {
+			if provider == vp {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".provider",
+				Message: fmt.Sprintf("must be one of: %s", strings.Join(validProviders, ", ")),
+			})
+		}
+	}
+
+	if llm.Model == "" {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".model",
+			Message: "required",
+		})
+	}
+
+	return errs
+}

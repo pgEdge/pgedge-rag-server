@@ -1,0 +1,6 @@
+# Invalid: no pipelines defined
+server:
+  listen_address: "0.0.0.0"
+  port: 8080
+
+pipelines: []
