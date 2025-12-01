@@ -78,17 +78,11 @@ func NewManagerWithLogger(cfg ManagerConfig) (*Manager, error) {
 		logger:    logger,
 	}
 
-	// Load API keys from config file paths, environment variables, or defaults
-	keyLoader := config.NewAPIKeyLoader(cfg.Config.APIKeys)
-	apiKeys, err := keyLoader.LoadRequiredKeys(cfg.Config.Pipelines)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load API keys: %w", err)
-	}
-
 	// Create pipelines from configuration
+	// Each pipeline loads its own API keys (cascaded from pipeline -> defaults -> global)
 	ctx := context.Background()
 	for _, pCfg := range cfg.Config.Pipelines {
-		p, err := m.createPipeline(ctx, pCfg, apiKeys)
+		p, err := m.createPipeline(ctx, pCfg)
 		if err != nil {
 			// Clean up any already created pipelines
 			for _, existing := range m.pipelines {
@@ -111,9 +105,15 @@ func NewManagerWithLogger(cfg ManagerConfig) (*Manager, error) {
 func (m *Manager) createPipeline(
 	ctx context.Context,
 	pCfg config.Pipeline,
-	apiKeys *config.LoadedKeys,
 ) (*Pipeline, error) {
 	pipelineLogger := m.logger.With("pipeline", pCfg.Name)
+
+	// Load API keys for this pipeline (uses pipeline-specific config, cascaded from defaults/global)
+	keyLoader := config.NewAPIKeyLoader(pCfg.APIKeys)
+	apiKeys, err := keyLoader.LoadKeysForPipeline(pCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load API keys: %w", err)
+	}
 
 	// Create database connection pool
 	dbPool, err := database.NewPool(ctx, pCfg.Database)

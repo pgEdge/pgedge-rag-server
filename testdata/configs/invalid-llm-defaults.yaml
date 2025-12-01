@@ -1,0 +1,18 @@
+# Configuration with invalid LLM defaults provider
+defaults:
+  embedding_llm:
+    provider: "invalid-provider"
+    model: "some-model"
+  rag_llm:
+    provider: "anthropic"
+    model: "claude-sonnet-4-20250514"
+
+pipelines:
+  - name: "test"
+    database:
+      host: "localhost"
+      database: "testdb"
+    column_pairs:
+      - table: "documents"
+        text_column: "content"
+        vector_column: "embedding"

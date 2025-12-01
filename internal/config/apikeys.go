@@ -147,6 +147,7 @@ func expandKeyPath(path string) string {
 }
 
 // LoadRequiredKeys loads only the API keys required by the given pipelines.
+// Deprecated: Use LoadKeysForPipeline for per-pipeline API key loading.
 func (l *APIKeyLoader) LoadRequiredKeys(pipelines []Pipeline) (*LoadedKeys, error) {
 	keys := &LoadedKeys{}
 	needed := make(map[string]bool)
@@ -156,6 +157,47 @@ func (l *APIKeyLoader) LoadRequiredKeys(pipelines []Pipeline) (*LoadedKeys, erro
 		needed[strings.ToLower(p.EmbeddingLLM.Provider)] = true
 		needed[strings.ToLower(p.RAGLLM.Provider)] = true
 	}
+
+	// Load required keys
+	if needed["anthropic"] {
+		key, err := l.LoadAnthropicKey()
+		if err != nil {
+			return nil, err
+		}
+		keys.Anthropic = key
+	}
+
+	if needed["openai"] {
+		key, err := l.LoadOpenAIKey()
+		if err != nil {
+			return nil, err
+		}
+		keys.OpenAI = key
+	}
+
+	if needed["voyage"] {
+		key, err := l.LoadVoyageKey()
+		if err != nil {
+			return nil, err
+		}
+		keys.Voyage = key
+	}
+
+	// Ollama doesn't require an API key
+
+	return keys, nil
+}
+
+// LoadKeysForPipeline loads only the API keys required by a single pipeline.
+// The loader should be initialized with the pipeline's effective API key config
+// (already cascaded from pipeline -> defaults -> global).
+func (l *APIKeyLoader) LoadKeysForPipeline(pipeline Pipeline) (*LoadedKeys, error) {
+	keys := &LoadedKeys{}
+	needed := make(map[string]bool)
+
+	// Determine which providers are needed for this pipeline
+	needed[strings.ToLower(pipeline.EmbeddingLLM.Provider)] = true
+	needed[strings.ToLower(pipeline.RAGLLM.Provider)] = true
 
 	// Load required keys
 	if needed["anthropic"] {

@@ -126,6 +126,45 @@ func applyDefaults(cfg *Config) {
 			p.TopN = cfg.Defaults.TopN
 		}
 
+		// Apply embedding LLM defaults
+		if p.EmbeddingLLM.Provider == "" {
+			p.EmbeddingLLM.Provider = cfg.Defaults.EmbeddingLLM.Provider
+		}
+		if p.EmbeddingLLM.Model == "" {
+			p.EmbeddingLLM.Model = cfg.Defaults.EmbeddingLLM.Model
+		}
+
+		// Apply RAG LLM defaults
+		if p.RAGLLM.Provider == "" {
+			p.RAGLLM.Provider = cfg.Defaults.RAGLLM.Provider
+		}
+		if p.RAGLLM.Model == "" {
+			p.RAGLLM.Model = cfg.Defaults.RAGLLM.Model
+		}
+
+		// Apply API key defaults (cascade: pipeline -> defaults -> global)
+		if p.APIKeys.Anthropic == "" {
+			if cfg.Defaults.APIKeys.Anthropic != "" {
+				p.APIKeys.Anthropic = cfg.Defaults.APIKeys.Anthropic
+			} else {
+				p.APIKeys.Anthropic = cfg.APIKeys.Anthropic
+			}
+		}
+		if p.APIKeys.OpenAI == "" {
+			if cfg.Defaults.APIKeys.OpenAI != "" {
+				p.APIKeys.OpenAI = cfg.Defaults.APIKeys.OpenAI
+			} else {
+				p.APIKeys.OpenAI = cfg.APIKeys.OpenAI
+			}
+		}
+		if p.APIKeys.Voyage == "" {
+			if cfg.Defaults.APIKeys.Voyage != "" {
+				p.APIKeys.Voyage = cfg.Defaults.APIKeys.Voyage
+			} else {
+				p.APIKeys.Voyage = cfg.APIKeys.Voyage
+			}
+		}
+
 		// Apply database port default
 		if p.Database.Port == 0 {
 			p.Database.Port = 5432

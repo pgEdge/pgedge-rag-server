@@ -246,6 +246,221 @@ func TestExpandPath(t *testing.T) {
 	}
 }
 
+func TestLoad_LLMDefaults(t *testing.T) {
+	cfg, err := Load("../../testdata/configs/llm-defaults.yaml")
+	if err != nil {
+		t.Fatalf("failed to load llm-defaults config: %v", err)
+	}
+
+	// Check that defaults were applied
+	if cfg.Defaults.EmbeddingLLM.Provider != "openai" {
+		t.Errorf("expected defaults embedding provider 'openai', got '%s'",
+			cfg.Defaults.EmbeddingLLM.Provider)
+	}
+	if cfg.Defaults.EmbeddingLLM.Model != "text-embedding-3-small" {
+		t.Errorf("expected defaults embedding model 'text-embedding-3-small', got '%s'",
+			cfg.Defaults.EmbeddingLLM.Model)
+	}
+
+	// Check pipeline that inherits all defaults
+	p1 := cfg.Pipelines[0]
+	if p1.Name != "inherits-all" {
+		t.Fatalf("expected first pipeline 'inherits-all', got '%s'", p1.Name)
+	}
+	if p1.EmbeddingLLM.Provider != "openai" {
+		t.Errorf("pipeline '%s': expected embedding provider 'openai', got '%s'",
+			p1.Name, p1.EmbeddingLLM.Provider)
+	}
+	if p1.EmbeddingLLM.Model != "text-embedding-3-small" {
+		t.Errorf("pipeline '%s': expected embedding model 'text-embedding-3-small', got '%s'",
+			p1.Name, p1.EmbeddingLLM.Model)
+	}
+	if p1.RAGLLM.Provider != "anthropic" {
+		t.Errorf("pipeline '%s': expected rag provider 'anthropic', got '%s'",
+			p1.Name, p1.RAGLLM.Provider)
+	}
+	if p1.RAGLLM.Model != "claude-sonnet-4-20250514" {
+		t.Errorf("pipeline '%s': expected rag model 'claude-sonnet-4-20250514', got '%s'",
+			p1.Name, p1.RAGLLM.Model)
+	}
+	if p1.TokenBudget != 3000 {
+		t.Errorf("pipeline '%s': expected token_budget 3000, got %d",
+			p1.Name, p1.TokenBudget)
+	}
+
+	// Check pipeline that overrides rag_llm
+	p2 := cfg.Pipelines[1]
+	if p2.Name != "overrides-rag" {
+		t.Fatalf("expected second pipeline 'overrides-rag', got '%s'", p2.Name)
+	}
+	if p2.EmbeddingLLM.Provider != "openai" {
+		t.Errorf("pipeline '%s': expected embedding provider 'openai', got '%s'",
+			p2.Name, p2.EmbeddingLLM.Provider)
+	}
+	if p2.RAGLLM.Provider != "openai" {
+		t.Errorf("pipeline '%s': expected rag provider 'openai', got '%s'",
+			p2.Name, p2.RAGLLM.Provider)
+	}
+	if p2.RAGLLM.Model != "gpt-4o-mini" {
+		t.Errorf("pipeline '%s': expected rag model 'gpt-4o-mini', got '%s'",
+			p2.Name, p2.RAGLLM.Model)
+	}
+
+	// Check pipeline that overrides only model (inherits provider)
+	p3 := cfg.Pipelines[2]
+	if p3.Name != "overrides-model-only" {
+		t.Fatalf("expected third pipeline 'overrides-model-only', got '%s'", p3.Name)
+	}
+	if p3.EmbeddingLLM.Provider != "openai" {
+		t.Errorf("pipeline '%s': expected embedding provider 'openai', got '%s'",
+			p3.Name, p3.EmbeddingLLM.Provider)
+	}
+	if p3.EmbeddingLLM.Model != "text-embedding-3-large" {
+		t.Errorf("pipeline '%s': expected embedding model 'text-embedding-3-large', got '%s'",
+			p3.Name, p3.EmbeddingLLM.Model)
+	}
+}
+
+func TestLoad_InvalidLLMDefaults(t *testing.T) {
+	_, err := Load("../../testdata/configs/invalid-llm-defaults.yaml")
+	if err == nil {
+		t.Fatal("expected validation error for invalid LLM defaults")
+	}
+
+	if !contains(err.Error(), "defaults.embedding_llm.provider") {
+		t.Errorf("expected error about defaults.embedding_llm.provider, got: %s",
+			err.Error())
+	}
+}
+
+func TestValidation_DefaultsLLMProviderOnly(t *testing.T) {
+	// Test that when defaults has provider but no model, it's an error
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Defaults: Defaults{
+			TokenBudget: 1000,
+			TopN:        10,
+			EmbeddingLLM: LLMConfig{
+				Provider: "openai",
+				// Missing model
+			},
+		},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Host:     "localhost",
+					Port:     5432,
+					Database: "testdb",
+				},
+				ColumnPairs: []ColumnPair{
+					{
+						Table:        "docs",
+						TextColumn:   "content",
+						VectorColumn: "embedding",
+					},
+				},
+				// Will inherit defaults
+			},
+		},
+	}
+
+	// Apply defaults before validation
+	applyDefaults(cfg)
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for defaults with provider but no model")
+	}
+
+	if !contains(err.Error(), "defaults.embedding_llm.model") {
+		t.Errorf("expected error about defaults.embedding_llm.model, got: %s",
+			err.Error())
+	}
+}
+
+func TestApplyDefaults_APIKeysCascade(t *testing.T) {
+	// Test the API keys cascade: pipeline -> defaults -> global
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		APIKeys: APIKeysConfig{
+			Anthropic: "/global/anthropic.key",
+			OpenAI:    "/global/openai.key",
+			Voyage:    "/global/voyage.key",
+		},
+		Defaults: Defaults{
+			TokenBudget: 1000,
+			TopN:        10,
+			APIKeys: APIKeysConfig{
+				OpenAI: "/defaults/openai.key", // Override global
+				// Anthropic not set - should cascade from global
+			},
+			EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+			RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+		},
+		Pipelines: []Pipeline{
+			{
+				Name: "pipeline1",
+				Database: DatabaseConfig{
+					Host:     "localhost",
+					Database: "testdb",
+				},
+				ColumnPairs: []ColumnPair{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				APIKeys: APIKeysConfig{
+					// No API keys set - should inherit from defaults/global
+				},
+			},
+			{
+				Name: "pipeline2",
+				Database: DatabaseConfig{
+					Host:     "localhost",
+					Database: "testdb",
+				},
+				ColumnPairs: []ColumnPair{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				APIKeys: APIKeysConfig{
+					Anthropic: "/pipeline/anthropic.key", // Override all
+				},
+			},
+		},
+	}
+
+	applyDefaults(cfg)
+
+	// Pipeline 1: Should cascade from defaults (OpenAI) and global (Anthropic, Voyage)
+	p1 := cfg.Pipelines[0]
+	if p1.APIKeys.OpenAI != "/defaults/openai.key" {
+		t.Errorf("pipeline1 OpenAI: expected '/defaults/openai.key', got '%s'",
+			p1.APIKeys.OpenAI)
+	}
+	if p1.APIKeys.Anthropic != "/global/anthropic.key" {
+		t.Errorf("pipeline1 Anthropic: expected '/global/anthropic.key', got '%s'",
+			p1.APIKeys.Anthropic)
+	}
+	if p1.APIKeys.Voyage != "/global/voyage.key" {
+		t.Errorf("pipeline1 Voyage: expected '/global/voyage.key', got '%s'",
+			p1.APIKeys.Voyage)
+	}
+
+	// Pipeline 2: Should use pipeline-specific Anthropic, defaults OpenAI, global Voyage
+	p2 := cfg.Pipelines[1]
+	if p2.APIKeys.Anthropic != "/pipeline/anthropic.key" {
+		t.Errorf("pipeline2 Anthropic: expected '/pipeline/anthropic.key', got '%s'",
+			p2.APIKeys.Anthropic)
+	}
+	if p2.APIKeys.OpenAI != "/defaults/openai.key" {
+		t.Errorf("pipeline2 OpenAI: expected '/defaults/openai.key', got '%s'",
+			p2.APIKeys.OpenAI)
+	}
+	if p2.APIKeys.Voyage != "/global/voyage.key" {
+		t.Errorf("pipeline2 Voyage: expected '/global/voyage.key', got '%s'",
+			p2.APIKeys.Voyage)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchSubstring(s, substr)
 }

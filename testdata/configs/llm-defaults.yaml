@@ -1,0 +1,46 @@
+# Configuration with LLM defaults - pipelines inherit them
+defaults:
+  token_budget: 3000
+  top_n: 8
+  embedding_llm:
+    provider: "openai"
+    model: "text-embedding-3-small"
+  rag_llm:
+    provider: "anthropic"
+    model: "claude-sonnet-4-20250514"
+
+pipelines:
+  - name: "inherits-all"
+    database:
+      host: "localhost"
+      database: "testdb"
+    column_pairs:
+      - table: "documents"
+        text_column: "content"
+        vector_column: "embedding"
+    # No embedding_llm or rag_llm - inherits from defaults
+
+  - name: "overrides-rag"
+    database:
+      host: "localhost"
+      database: "testdb"
+    column_pairs:
+      - table: "documents"
+        text_column: "content"
+        vector_column: "embedding"
+    # Override only rag_llm
+    rag_llm:
+      provider: "openai"
+      model: "gpt-4o-mini"
+
+  - name: "overrides-model-only"
+    database:
+      host: "localhost"
+      database: "testdb"
+    column_pairs:
+      - table: "documents"
+        text_column: "content"
+        vector_column: "embedding"
+    # Override only the model, inherit provider
+    embedding_llm:
+      model: "text-embedding-3-large"

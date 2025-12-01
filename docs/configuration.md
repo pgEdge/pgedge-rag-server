@@ -27,6 +27,7 @@ The configuration file has the following top-level sections:
 
 - `server` - HTTP/HTTPS server settings
 - `api_keys` - Optional paths to API key files
+- `defaults` - Default values for pipelines (LLM providers, token budget, etc.)
 - `pipelines` - RAG pipeline definitions
 
 ## Server Configuration
@@ -48,6 +49,39 @@ server:
 | `tls.enabled`    | Enable TLS/HTTPS                   | `false`       |
 | `tls.cert_file`  | Path to TLS certificate            | Required if TLS enabled |
 | `tls.key_file`   | Path to TLS private key            | Required if TLS enabled |
+
+## Defaults Configuration
+
+The `defaults` section allows you to set default values for LLM providers,
+API keys, and other settings that can be overridden per-pipeline. This is
+useful when most pipelines share the same configuration.
+
+```yaml
+defaults:
+  token_budget: 4000
+  top_n: 10
+  embedding_llm:
+    provider: "openai"
+    model: "text-embedding-3-small"
+  rag_llm:
+    provider: "anthropic"
+    model: "claude-sonnet-4-20250514"
+  api_keys:
+    openai: "/etc/pgedge/keys/openai.key"
+    anthropic: "/etc/pgedge/keys/anthropic.key"
+```
+
+| Field            | Description                              | Default |
+|------------------|------------------------------------------|---------|
+| `token_budget`   | Default token budget for context         | `4000`  |
+| `top_n`          | Default number of results to retrieve    | `10`    |
+| `embedding_llm`  | Default embedding provider configuration | None    |
+| `rag_llm`        | Default completion provider configuration| None    |
+| `api_keys`       | Default API key file paths               | None    |
+
+When defaults are set, individual pipelines can omit the corresponding fields
+and will inherit the default values. Pipelines can also override specific
+fields while inheriting others.
 
 ## Pipeline Configuration
 
@@ -87,10 +121,11 @@ pipelines:
 | `description`  | Human-readable description                     | No       |
 | `database`     | PostgreSQL connection settings                 | Yes      |
 | `column_pairs` | Tables and columns to search                   | Yes      |
-| `embedding_llm`| Embedding provider configuration               | Yes      |
-| `rag_llm`      | Completion provider configuration              | Yes      |
-| `token_budget` | Maximum tokens for context documents           | No (default: 4000) |
-| `top_n`        | Maximum number of results to retrieve          | No (default: 10) |
+| `embedding_llm`| Embedding provider configuration               | Yes (unless set in defaults) |
+| `rag_llm`      | Completion provider configuration              | Yes (unless set in defaults) |
+| `api_keys`     | API key file paths (overrides defaults/global) | No       |
+| `token_budget` | Maximum tokens for context documents           | No (uses defaults) |
+| `top_n`        | Maximum number of results to retrieve          | No (uses defaults) |
 
 ### Database Fields
 
@@ -152,21 +187,48 @@ embeddings with Anthropic for completions.
 
 ## API Keys
 
-API keys are loaded using the following priority order:
+API keys can be configured at three levels with the following priority order
+(highest to lowest):
 
-1. **Configuration file paths** (if specified in `api_keys` section)
-2. **Environment variables**
-3. **Default file locations** in your home directory
+1. **Per-pipeline** (`pipelines[].api_keys`)
+2. **Defaults** (`defaults.api_keys`)
+3. **Global** (`api_keys` at root level)
+4. **Environment variables**
+5. **Default file locations** in your home directory
+
+This allows different pipelines to use different API keys or accounts while
+sharing common defaults.
 
 ### Configuration File Paths
 
-You can specify paths to files containing API keys:
+You can specify paths to files containing API keys at any level:
+
+**Global (applies to all pipelines unless overridden):**
 
 ```yaml
 api_keys:
   anthropic: "/etc/pgedge/keys/anthropic.key"
   voyage: "/etc/pgedge/keys/voyage.key"
   openai: "~/secrets/openai-api-key"
+```
+
+**Defaults (overrides global, can be overridden per-pipeline):**
+
+```yaml
+defaults:
+  api_keys:
+    openai: "/etc/pgedge/keys/default-openai.key"
+    anthropic: "/etc/pgedge/keys/default-anthropic.key"
+```
+
+**Per-pipeline (highest priority):**
+
+```yaml
+pipelines:
+  - name: "production"
+    api_keys:
+      anthropic: "/etc/pgedge/keys/prod-anthropic.key"
+    # ... other pipeline config
 ```
 
 | Field       | Description                           |
@@ -180,8 +242,8 @@ only the API key (no other content).
 
 ### Environment Variables
 
-If no configuration file path is specified, the server checks environment
-variables:
+If no configuration file path is specified at any level, the server checks
+environment variables:
 
 ```bash
 export OPENAI_API_KEY="sk-..."
@@ -290,6 +352,64 @@ pipelines:
       model: "llama3.2"
     token_budget: 2000
     top_n: 5
+```
+
+### Using Defaults for Multiple Pipelines
+
+This configuration uses defaults to avoid repeating LLM settings across
+multiple pipelines. Individual pipelines can override specific settings:
+
+```yaml
+defaults:
+  token_budget: 4000
+  top_n: 10
+  embedding_llm:
+    provider: "openai"
+    model: "text-embedding-3-small"
+  rag_llm:
+    provider: "anthropic"
+    model: "claude-sonnet-4-20250514"
+
+pipelines:
+  # This pipeline uses all defaults
+  - name: "docs"
+    description: "Documentation search"
+    database:
+      host: "localhost"
+      database: "docs_db"
+    column_pairs:
+      - table: "documents"
+        text_column: "content"
+        vector_column: "embedding"
+
+  # This pipeline overrides the completion model
+  - name: "support"
+    description: "Support knowledge base"
+    database:
+      host: "localhost"
+      database: "support_db"
+    column_pairs:
+      - table: "tickets"
+        text_column: "resolution"
+        vector_column: "embedding"
+    rag_llm:
+      provider: "anthropic"
+      model: "claude-haiku-3-5-20241022"
+    token_budget: 2000
+
+  # This pipeline uses a different embedding provider
+  - name: "research"
+    description: "Research papers"
+    database:
+      host: "localhost"
+      database: "research_db"
+    column_pairs:
+      - table: "papers"
+        text_column: "abstract"
+        vector_column: "embedding"
+    embedding_llm:
+      provider: "voyage"
+      model: "voyage-3"
 ```
 
 ### Voyage Embeddings with Anthropic Completion

@@ -61,6 +61,9 @@ func (c *Config) Validate() error {
 	// Validate server config
 	errs = append(errs, c.validateServer()...)
 
+	// Validate defaults
+	errs = append(errs, c.validateDefaults()...)
+
 	// Validate pipelines
 	errs = append(errs, c.validatePipelines()...)
 
@@ -105,6 +108,25 @@ func (c *Config) validateServer() ValidationErrors {
 				Message: fmt.Sprintf("file not found: %s", c.Server.TLS.KeyFile),
 			})
 		}
+	}
+
+	return errs
+}
+
+// validateDefaults validates the defaults configuration.
+func (c *Config) validateDefaults() ValidationErrors {
+	var errs ValidationErrors
+
+	// Validate embedding LLM if provider is specified
+	if c.Defaults.EmbeddingLLM.Provider != "" {
+		errs = append(errs, c.validateLLMOptional("defaults.embedding_llm",
+			c.Defaults.EmbeddingLLM, []string{"openai", "voyage", "ollama"})...)
+	}
+
+	// Validate RAG LLM if provider is specified
+	if c.Defaults.RAGLLM.Provider != "" {
+		errs = append(errs, c.validateLLMOptional("defaults.rag_llm",
+			c.Defaults.RAGLLM, []string{"anthropic", "openai", "ollama"})...)
 	}
 
 	return errs
@@ -265,7 +287,7 @@ func (c *Config) validateColumnPair(prefix string, cp ColumnPair) ValidationErro
 	return errs
 }
 
-// validateLLM validates LLM configuration.
+// validateLLM validates LLM configuration (required fields).
 func (c *Config) validateLLM(prefix string, llm LLMConfig, validProviders []string) ValidationErrors {
 	var errs ValidationErrors
 
@@ -296,6 +318,41 @@ func (c *Config) validateLLM(prefix string, llm LLMConfig, validProviders []stri
 			Field:   prefix + ".model",
 			Message: "required",
 		})
+	}
+
+	return errs
+}
+
+// validateLLMOptional validates LLM configuration when provider is set.
+// Unlike validateLLM, this doesn't require provider/model to be present,
+// but validates them if they are.
+func (c *Config) validateLLMOptional(prefix string, llm LLMConfig, validProviders []string) ValidationErrors {
+	var errs ValidationErrors
+
+	// Validate provider if set
+	if llm.Provider != "" {
+		provider := strings.ToLower(llm.Provider)
+		valid := false
+		for _, vp := range validProviders {
+			if provider == vp {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".provider",
+				Message: fmt.Sprintf("must be one of: %s", strings.Join(validProviders, ", ")),
+			})
+		}
+
+		// Model is required when provider is set
+		if llm.Model == "" {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".model",
+				Message: "required when provider is set",
+			})
+		}
 	}
 
 	return errs

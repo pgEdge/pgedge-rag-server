@@ -44,8 +44,11 @@ type TLSConfig struct {
 
 // Defaults contains default values that can be overridden per-pipeline.
 type Defaults struct {
-	TokenBudget int `yaml:"token_budget"`
-	TopN        int `yaml:"top_n"`
+	TokenBudget  int           `yaml:"token_budget"`
+	TopN         int           `yaml:"top_n"`
+	EmbeddingLLM LLMConfig     `yaml:"embedding_llm"` // Default embedding provider
+	RAGLLM       LLMConfig     `yaml:"rag_llm"`       // Default completion provider
+	APIKeys      APIKeysConfig `yaml:"api_keys"`      // Default API key paths
 }
 
 // Pipeline defines a single RAG pipeline configuration.
@@ -56,6 +59,7 @@ type Pipeline struct {
 	ColumnPairs  []ColumnPair   `yaml:"column_pairs"`
 	EmbeddingLLM LLMConfig      `yaml:"embedding_llm"`
 	RAGLLM       LLMConfig      `yaml:"rag_llm"`
+	APIKeys      APIKeysConfig  `yaml:"api_keys"` // Pipeline-specific API key paths
 	TokenBudget  int            `yaml:"token_budget"`
 	TopN         int            `yaml:"top_n"`
 }
