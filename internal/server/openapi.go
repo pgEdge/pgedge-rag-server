@@ -309,6 +309,10 @@ func BuildOpenAPISpec() OpenAPISpec {
 							Type:        "integer",
 							Description: "Override default result limit",
 						},
+						"filter": {
+							Type:        "string",
+							Description: "SQL WHERE clause to filter search results (e.g., \"product = 'pgAdmin' AND version = 'v9.0'\")",
+						},
 						"include_sources": {
 							Type:        "boolean",
 							Description: "Include source documents in response",

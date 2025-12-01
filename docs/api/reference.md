@@ -114,6 +114,7 @@ POST /v1/pipelines/{name}
   "query": "How do I configure replication?",
   "stream": false,
   "top_n": 10,
+  "filter": "product = 'pgEdge' AND version = 'v5.0'",
   "include_sources": true,
   "messages": [
     {"role": "user", "content": "What is pgEdge?"},
@@ -127,8 +128,22 @@ POST /v1/pipelines/{name}
 | `query`           | string  | Yes      | The question to answer                    |
 | `stream`          | boolean | No       | Enable streaming response (SSE)           |
 | `top_n`           | integer | No       | Override default result limit             |
+| `filter`          | string  | No       | SQL WHERE clause to filter results        |
 | `include_sources` | boolean | No       | Include source documents (default: false) |
 | `messages`        | array   | No       | Previous conversation history for context |
+
+The `filter` parameter allows you to pass a SQL WHERE clause fragment to
+filter search results. This is useful when your data contains multiple
+products or versions and you want to restrict results. For example:
+
+- `"product = 'pgAdmin'"` - Filter by product
+- `"version = 'v9.0'"` - Filter by version
+- `"product = 'pgAdmin' AND version >= 'v8.0'"` - Combined filters
+
+!!! warning "Security Note"
+
+    The filter is passed directly to the database. Ensure your application
+    validates filter values if they come from untrusted sources.
 
 ##### Message Object
 
@@ -252,6 +267,14 @@ curl http://localhost:8080/v1/pipelines
 curl -X POST http://localhost:8080/v1/pipelines/my-docs \
   -H "Content-Type: application/json" \
   -d '{"query": "How do I get started?"}'
+```
+
+**Query with filter:**
+
+```bash
+curl -X POST http://localhost:8080/v1/pipelines/my-docs \
+  -H "Content-Type: application/json" \
+  -d '{"query": "How do I configure backups?", "filter": "product = '\''pgAdmin'\'' AND version = '\''v9.0'\''"}'
 ```
 
 **Streaming query:**

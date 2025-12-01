@@ -81,6 +81,7 @@ type ColumnPair struct {
 	Table        string `yaml:"table"`
 	TextColumn   string `yaml:"text_column"`
 	VectorColumn string `yaml:"vector_column"`
+	Filter       string `yaml:"filter"` // Optional SQL WHERE clause fragment
 }
 
 // LLMConfig contains settings for an LLM provider.

@@ -43,26 +43,51 @@ type SearchResult struct {
 	SourceInfo map[string]interface{} `json:"source_info,omitempty"`
 }
 
+// buildFilterClause combines config and request filters into a WHERE clause.
+// Returns empty string if no filters, or " WHERE <conditions>" if filters exist.
+func buildFilterClause(configFilter, requestFilter string) string {
+	filters := []string{}
+
+	if configFilter != "" {
+		filters = append(filters, "("+configFilter+")")
+	}
+	if requestFilter != "" {
+		filters = append(filters, "("+requestFilter+")")
+	}
+
+	if len(filters) == 0 {
+		return ""
+	}
+
+	return " WHERE " + strings.Join(filters, " AND ")
+}
+
 // VectorSearch performs a vector similarity search using pgvector.
 // Returns results ordered by similarity (highest first).
+// The filter parameter allows additional SQL WHERE conditions to be applied.
 func (p *Pool) VectorSearch(
 	ctx context.Context,
 	embedding []float32,
 	columnPair config.ColumnPair,
 	topN int,
+	filter string,
 ) ([]SearchResult, error) {
+	// Build filter clause combining config and request filters
+	filterClause := buildFilterClause(columnPair.Filter, filter)
+
 	// Build the query using cosine distance operator from pgvector
 	// The <=> operator returns cosine distance, so we subtract from 1 for similarity
 	query := fmt.Sprintf(`
 		SELECT
 			%s AS content,
 			1 - (%s <=> $1::vector) AS score
-		FROM %s
+		FROM %s%s
 		ORDER BY %s <=> $1::vector
 		LIMIT $2`,
 		pgx.Identifier{columnPair.TextColumn}.Sanitize(),
 		pgx.Identifier{columnPair.VectorColumn}.Sanitize(),
 		parseTableIdentifier(columnPair.Table).Sanitize(),
+		filterClause,
 		pgx.Identifier{columnPair.VectorColumn}.Sanitize(),
 	)
 
@@ -90,20 +115,33 @@ func (p *Pool) VectorSearch(
 
 // FetchDocuments fetches all documents from a table for BM25 indexing.
 // Returns a map of document ID to content.
+// The filter parameter allows additional SQL WHERE conditions to be applied.
 func (p *Pool) FetchDocuments(
 	ctx context.Context,
 	columnPair config.ColumnPair,
+	filter string,
 ) (map[string]string, error) {
+	// Build base WHERE clause for non-null content
+	baseCondition := fmt.Sprintf("%s IS NOT NULL",
+		pgx.Identifier{columnPair.TextColumn}.Sanitize())
+
+	// Combine with any additional filters
+	filterClause := buildFilterClause(columnPair.Filter, filter)
+	if filterClause == "" {
+		filterClause = " WHERE " + baseCondition
+	} else {
+		filterClause = filterClause + " AND " + baseCondition
+	}
+
 	// Try to use ctid as a unique identifier if no ID column exists
 	query := fmt.Sprintf(`
 		SELECT
 			ctid::text AS id,
 			%s AS content
-		FROM %s
-		WHERE %s IS NOT NULL`,
+		FROM %s%s`,
 		pgx.Identifier{columnPair.TextColumn}.Sanitize(),
 		parseTableIdentifier(columnPair.Table).Sanitize(),
-		pgx.Identifier{columnPair.TextColumn}.Sanitize(),
+		filterClause,
 	)
 
 	rows, err := p.pool.Query(ctx, query)

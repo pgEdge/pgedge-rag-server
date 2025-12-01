@@ -27,6 +27,7 @@ type QueryRequest struct {
 	Query          string    `json:"query"`
 	Stream         bool      `json:"stream"`
 	TopN           int       `json:"top_n,omitempty"`    // Override default top-N results
+	Filter         string    `json:"filter,omitempty"`   // SQL WHERE clause to filter results
 	IncludeSources bool      `json:"include_sources"`    // Include source documents (default: false)
 	Messages       []Message `json:"messages,omitempty"` // Previous conversation history
 }

@@ -94,8 +94,8 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 			continue
 		}
 
-		// Vector search
-		vectorResults, err := o.dbPool.VectorSearch(ctx, embedding, columnPair, topN*2)
+		// Vector search (with optional filter from request)
+		vectorResults, err := o.dbPool.VectorSearch(ctx, embedding, columnPair, topN*2, req.Filter)
 		if err != nil {
 			o.logger.Warn("vector search failed",
 				"table", columnPair.Table,
@@ -105,7 +105,7 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 		}
 
 		// BM25 search - need to fetch documents first and index them
-		docs, err := o.dbPool.FetchDocuments(ctx, columnPair)
+		docs, err := o.dbPool.FetchDocuments(ctx, columnPair, req.Filter)
 		if err != nil {
 			o.logger.Warn("failed to fetch documents for BM25",
 				"table", columnPair.Table,
@@ -220,13 +220,13 @@ func (o *Orchestrator) ExecuteStream(
 				continue
 			}
 
-			vectorResults, err := o.dbPool.VectorSearch(ctx, embedding, columnPair, topN*2)
+			vectorResults, err := o.dbPool.VectorSearch(ctx, embedding, columnPair, topN*2, req.Filter)
 			if err != nil {
 				o.logger.Warn("vector search failed", "error", err)
 				continue
 			}
 
-			docs, err := o.dbPool.FetchDocuments(ctx, columnPair)
+			docs, err := o.dbPool.FetchDocuments(ctx, columnPair, req.Filter)
 			if err != nil {
 				allResults = append(allResults, vectorResults...)
 				continue
