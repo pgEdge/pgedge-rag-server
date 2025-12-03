@@ -99,7 +99,7 @@ pipelines:
       username: "postgres"
       password: ""
       ssl_mode: "prefer"
-    column_pairs:
+    tables:
       - table: "documents"
         text_column: "content"
         vector_column: "embedding"
@@ -120,7 +120,7 @@ pipelines:
 | `name`         | Unique pipeline identifier (used in API URLs)  | Yes      |
 | `description`  | Human-readable description                     | No       |
 | `database`     | PostgreSQL connection settings                 | Yes      |
-| `column_pairs` | Tables and columns to search                   | Yes      |
+| `tables`       | Tables and columns to search                   | Yes      |
 | `embedding_llm`| Embedding provider configuration               | Yes (unless set in defaults) |
 | `rag_llm`      | Completion provider configuration              | Yes (unless set in defaults) |
 | `api_keys`     | API key file paths (overrides defaults/global) | No       |
@@ -138,9 +138,9 @@ pipelines:
 | `password` | Database password                        | `""`       |
 | `ssl_mode` | SSL mode (disable, allow, prefer, etc.)  | `prefer`   |
 
-### Column Pair Fields
+### Table Fields
 
-Each column pair specifies a table with text content and its corresponding
+Each table entry specifies a table with text content and its corresponding
 vector embeddings.
 
 | Field           | Description                          | Required |
@@ -151,12 +151,12 @@ vector embeddings.
 | `filter`        | Filter to apply to results           | No       |
 
 The `filter` field allows you to specify a filter that will be applied to all
-queries for this column pair. It can be specified in two formats:
+queries for this table. It can be specified in two formats:
 
 **Raw SQL (for complex queries like subqueries):**
 
 ```yaml
-column_pairs:
+tables:
   - table: "documents"
     text_column: "content"
     vector_column: "embedding"
@@ -166,7 +166,7 @@ column_pairs:
 **Structured filter (using conditions):**
 
 ```yaml
-column_pairs:
+tables:
   - table: "documents"
     text_column: "content"
     vector_column: "embedding"
@@ -310,7 +310,7 @@ pipelines:
     database:
       host: "localhost"
       database: "mydb"
-    column_pairs:
+    tables:
       - table: "documents"
         text_column: "content"
         vector_column: "embedding"
@@ -342,7 +342,7 @@ pipelines:
       database: "knowledge"
       username: "rag_user"
       ssl_mode: "require"
-    column_pairs:
+    tables:
       - table: "articles"
         text_column: "body"
         vector_column: "embedding"
@@ -368,7 +368,7 @@ pipelines:
     database:
       host: "localhost"
       database: "devdb"
-    column_pairs:
+    tables:
       - table: "docs"
         text_column: "content"
         vector_column: "embedding"
@@ -405,7 +405,7 @@ pipelines:
     database:
       host: "localhost"
       database: "docs_db"
-    column_pairs:
+    tables:
       - table: "documents"
         text_column: "content"
         vector_column: "embedding"
@@ -416,7 +416,7 @@ pipelines:
     database:
       host: "localhost"
       database: "support_db"
-    column_pairs:
+    tables:
       - table: "tickets"
         text_column: "resolution"
         vector_column: "embedding"
@@ -431,7 +431,7 @@ pipelines:
     database:
       host: "localhost"
       database: "research_db"
-    column_pairs:
+    tables:
       - table: "papers"
         text_column: "abstract"
         vector_column: "embedding"
@@ -459,7 +459,7 @@ pipelines:
       database: "documents"
       username: "rag_service"
       ssl_mode: "require"
-    column_pairs:
+    tables:
       - table: "knowledge_base"
         text_column: "content"
         vector_column: "embedding"

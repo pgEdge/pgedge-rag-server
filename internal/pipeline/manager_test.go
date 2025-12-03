@@ -78,7 +78,7 @@ func newTestPipeline(name, description string) *Pipeline {
 	pCfg := config.Pipeline{
 		Name:        name,
 		Description: description,
-		ColumnPairs: []config.ColumnPair{},
+		Tables:      []config.TableSource{},
 	}
 
 	orchestrator := &Orchestrator{
@@ -112,7 +112,7 @@ func testConfig() *config.Config {
 					Port:     5432,
 					Database: "testdb",
 				},
-				ColumnPairs: []config.ColumnPair{
+				Tables: []config.TableSource{
 					{
 						Table:        "documents",
 						TextColumn:   "content",
@@ -138,7 +138,7 @@ func testConfig() *config.Config {
 					Port:     5432,
 					Database: "testdb2",
 				},
-				ColumnPairs: []config.ColumnPair{
+				Tables: []config.TableSource{
 					{
 						Table:        "docs",
 						TextColumn:   "text",
@@ -255,7 +255,7 @@ func TestPipeline_ExecuteStream_NoDocuments(t *testing.T) {
 	pCfg := config.Pipeline{
 		Name:        "stream-test",
 		Description: "Streaming test pipeline",
-		ColumnPairs: []config.ColumnPair{},
+		Tables:      []config.TableSource{},
 	}
 
 	orchestrator := &Orchestrator{

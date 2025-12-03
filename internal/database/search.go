@@ -45,16 +45,16 @@ type SearchResult struct {
 
 // VectorSearch performs a vector similarity search using pgvector.
 // Returns results ordered by similarity (highest first).
-// The filter parameter allows additional SQL WHERE conditions to be applied.
+// The filter parameter allows additional WHERE conditions from the API request.
 func (p *Pool) VectorSearch(
 	ctx context.Context,
 	embedding []float32,
-	columnPair config.ColumnPair,
+	table config.TableSource,
 	topN int,
 	filter *config.Filter,
 ) ([]SearchResult, error) {
 	// Build filter clause combining config and request filters
-	filterClause, filterArgs, err := buildFilterClause(columnPair.Filter, filter)
+	filterClause, filterArgs, err := buildFilterClause(table.Filter, filter)
 	if err != nil {
 		return nil, fmt.Errorf("invalid filter: %w", err)
 	}
@@ -68,11 +68,11 @@ func (p *Pool) VectorSearch(
 		FROM %s%s
 		ORDER BY %s <=> $1::vector
 		LIMIT $2`,
-		pgx.Identifier{columnPair.TextColumn}.Sanitize(),
-		pgx.Identifier{columnPair.VectorColumn}.Sanitize(),
-		parseTableIdentifier(columnPair.Table).Sanitize(),
+		pgx.Identifier{table.TextColumn}.Sanitize(),
+		pgx.Identifier{table.VectorColumn}.Sanitize(),
+		parseTableIdentifier(table.Table).Sanitize(),
 		filterClause,
-		pgx.Identifier{columnPair.VectorColumn}.Sanitize(),
+		pgx.Identifier{table.VectorColumn}.Sanitize(),
 	)
 
 	// Combine vector embedding and topN with filter args
@@ -101,21 +101,21 @@ func (p *Pool) VectorSearch(
 
 // FetchDocuments fetches all documents from a table for BM25 indexing.
 // Returns a map of document ID to content.
-// The filter parameter allows additional SQL WHERE conditions to be applied.
+// The filter parameter allows additional WHERE conditions from the API request.
 func (p *Pool) FetchDocuments(
 	ctx context.Context,
-	columnPair config.ColumnPair,
+	table config.TableSource,
 	filter *config.Filter,
 ) (map[string]string, error) {
 	// Build filter clause combining config and request filters
-	filterClause, filterArgs, err := buildFilterClause(columnPair.Filter, filter)
+	filterClause, filterArgs, err := buildFilterClause(table.Filter, filter)
 	if err != nil {
 		return nil, fmt.Errorf("invalid filter: %w", err)
 	}
 
 	// Build base WHERE clause for non-null content
 	baseCondition := fmt.Sprintf("%s IS NOT NULL",
-		pgx.Identifier{columnPair.TextColumn}.Sanitize())
+		pgx.Identifier{table.TextColumn}.Sanitize())
 
 	// Combine filter with IS NOT NULL condition
 	if filterClause == "" {
@@ -130,8 +130,8 @@ func (p *Pool) FetchDocuments(
 			ctid::text AS id,
 			%s AS content
 		FROM %s%s`,
-		pgx.Identifier{columnPair.TextColumn}.Sanitize(),
-		parseTableIdentifier(columnPair.Table).Sanitize(),
+		pgx.Identifier{table.TextColumn}.Sanitize(),
+		parseTableIdentifier(table.Table).Sanitize(),
 		filterClause,
 	)
 
@@ -160,7 +160,7 @@ func (p *Pool) FetchDocuments(
 // FetchDocumentsByIDs fetches documents by their IDs (ctids).
 func (p *Pool) FetchDocumentsByIDs(
 	ctx context.Context,
-	columnPair config.ColumnPair,
+	table config.TableSource,
 	ids []string,
 ) (map[string]string, error) {
 	if len(ids) == 0 {
@@ -173,8 +173,8 @@ func (p *Pool) FetchDocumentsByIDs(
 			%s AS content
 		FROM %s
 		WHERE ctid = ANY($1::tid[])`,
-		pgx.Identifier{columnPair.TextColumn}.Sanitize(),
-		parseTableIdentifier(columnPair.Table).Sanitize(),
+		pgx.Identifier{table.TextColumn}.Sanitize(),
+		parseTableIdentifier(table.Table).Sanitize(),
 	)
 
 	rows, err := p.pool.Query(ctx, query, ids)

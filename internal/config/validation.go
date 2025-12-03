@@ -177,16 +177,16 @@ func (c *Config) validatePipeline(index int, p Pipeline) ValidationErrors {
 	// Database validation
 	errs = append(errs, c.validateDatabase(prefix+".database", p.Database)...)
 
-	// Column pairs validation
-	if len(p.ColumnPairs) == 0 {
+	// Tables validation
+	if len(p.Tables) == 0 {
 		errs = append(errs, ValidationError{
-			Field:   prefix + ".column_pairs",
-			Message: "at least one column pair must be configured",
+			Field:   prefix + ".tables",
+			Message: "at least one table must be configured",
 		})
 	} else {
-		for j, cp := range p.ColumnPairs {
-			errs = append(errs, c.validateColumnPair(
-				fmt.Sprintf("%s.column_pairs[%d]", prefix, j), cp)...)
+		for j, ts := range p.Tables {
+			errs = append(errs, c.validateTable(
+				fmt.Sprintf("%s.tables[%d]", prefix, j), ts)...)
 		}
 	}
 
@@ -259,25 +259,25 @@ func (c *Config) validateDatabase(prefix string, db DatabaseConfig) ValidationEr
 	return errs
 }
 
-// validateColumnPair validates a column pair configuration.
-func (c *Config) validateColumnPair(prefix string, cp ColumnPair) ValidationErrors {
+// validateTable validates a table source configuration.
+func (c *Config) validateTable(prefix string, ts TableSource) ValidationErrors {
 	var errs ValidationErrors
 
-	if cp.Table == "" {
+	if ts.Table == "" {
 		errs = append(errs, ValidationError{
 			Field:   prefix + ".table",
 			Message: "required",
 		})
 	}
 
-	if cp.TextColumn == "" {
+	if ts.TextColumn == "" {
 		errs = append(errs, ValidationError{
 			Field:   prefix + ".text_column",
 			Message: "required",
 		})
 	}
 
-	if cp.VectorColumn == "" {
+	if ts.VectorColumn == "" {
 		errs = append(errs, ValidationError{
 			Field:   prefix + ".vector_column",
 			Message: "required",

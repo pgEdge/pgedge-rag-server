@@ -146,7 +146,7 @@ func TestValidation_MissingFields(t *testing.T) {
 					// Missing host and database
 					Port: 5432,
 				},
-				ColumnPairs: []ColumnPair{
+				Tables: []TableSource{
 					{
 						// Missing table, text_column, vector_column
 					},
@@ -170,9 +170,9 @@ func TestValidation_MissingFields(t *testing.T) {
 	expectedErrors := []string{
 		"database.host",
 		"database.database",
-		"column_pairs[0].table",
-		"column_pairs[0].text_column",
-		"column_pairs[0].vector_column",
+		"tables[0].table",
+		"tables[0].text_column",
+		"tables[0].vector_column",
 		"embedding_llm.provider",
 		"embedding_llm.model",
 		"rag_llm.provider",
@@ -197,7 +197,7 @@ func TestValidation_InvalidLLMProvider(t *testing.T) {
 					Port:     5432,
 					Database: "testdb",
 				},
-				ColumnPairs: []ColumnPair{
+				Tables: []TableSource{
 					{
 						Table:        "docs",
 						TextColumn:   "content",
@@ -353,7 +353,7 @@ func TestValidation_DefaultsLLMProviderOnly(t *testing.T) {
 					Port:     5432,
 					Database: "testdb",
 				},
-				ColumnPairs: []ColumnPair{
+				Tables: []TableSource{
 					{
 						Table:        "docs",
 						TextColumn:   "content",
@@ -405,7 +405,7 @@ func TestApplyDefaults_APIKeysCascade(t *testing.T) {
 					Host:     "localhost",
 					Database: "testdb",
 				},
-				ColumnPairs: []ColumnPair{
+				Tables: []TableSource{
 					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
 				},
 				APIKeys: APIKeysConfig{
@@ -418,7 +418,7 @@ func TestApplyDefaults_APIKeysCascade(t *testing.T) {
 					Host:     "localhost",
 					Database: "testdb",
 				},
-				ColumnPairs: []ColumnPair{
+				Tables: []TableSource{
 					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
 				},
 				APIKeys: APIKeysConfig{

@@ -18,7 +18,7 @@ pipelines:
       username: "testuser"
       password: "testpass"
       ssl_mode: "disable"
-    column_pairs:
+    tables:
       - table: "documents"
         text_column: "content"
         vector_column: "embedding"

@@ -58,7 +58,7 @@ type Pipeline struct {
 	Name         string         `yaml:"name"`
 	Description  string         `yaml:"description"`
 	Database     DatabaseConfig `yaml:"database"`
-	ColumnPairs  []ColumnPair   `yaml:"column_pairs"`
+	Tables       []TableSource  `yaml:"tables"`
 	EmbeddingLLM LLMConfig      `yaml:"embedding_llm"`
 	RAGLLM       LLMConfig      `yaml:"rag_llm"`
 	APIKeys      APIKeysConfig  `yaml:"api_keys"` // Pipeline-specific API key paths
@@ -81,9 +81,8 @@ type DatabaseConfig struct {
 	SSLRootCA string `yaml:"ssl_root_ca"`
 }
 
-// ColumnPair defines a text column and its corresponding vector column
-// for hybrid search.
-type ColumnPair struct {
+// TableSource defines a table with text and vector columns for hybrid search.
+type TableSource struct {
 	Table        string        `yaml:"table"`
 	TextColumn   string        `yaml:"text_column"`
 	VectorColumn string        `yaml:"vector_column"`

@@ -69,7 +69,7 @@ pipelines:
     database:
       host: "localhost"
       database: "mydb"
-    column_pairs:
+    tables:
       - table: "documents"
         text_column: "content"
         vector_column: "embedding"

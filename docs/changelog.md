@@ -15,6 +15,10 @@ and this project adheres to
   to eliminate SQL injection vulnerabilities. API filters must use conditions,
   operators, and values (parameterized queries prevent injection).
 
+- **Config Rename**: The `column_pairs` field in pipeline configuration has
+  been renamed to `tables` for clarity. The internal type `ColumnPair` is now
+  `TableSource`.
+
 ### Changed
 
 - Filter system now uses parameterized queries for API request filters
@@ -74,6 +78,26 @@ filter:
 
 **Supported operators (for structured filters):** `=`, `!=`, `<`, `>`, `<=`,
 `>=`, `LIKE`, `ILIKE`, `IN`, `NOT IN`, `IS NULL`, `IS NOT NULL`
+
+**Config field rename:**
+
+Old:
+
+```yaml
+column_pairs:
+  - table: "documents"
+    text_column: "content"
+    vector_column: "embedding"
+```
+
+New:
+
+```yaml
+tables:
+  - table: "documents"
+    text_column: "content"
+    vector_column: "embedding"
+```
 
 ## [1.0.0-alpha3] - 2025-12-01
 

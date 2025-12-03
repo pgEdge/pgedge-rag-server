@@ -54,7 +54,7 @@ pipelines:
       host: "localhost"
       port: 5432
       database: "mydb"
-    column_pairs:
+    tables:
       - table: "documents"
         text_column: "content"
         vector_column: "embedding"

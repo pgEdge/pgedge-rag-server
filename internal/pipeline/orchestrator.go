@@ -82,33 +82,33 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 		return nil, fmt.Errorf("failed to generate embedding: %w", err)
 	}
 
-	// Step 2: Perform hybrid search for each column pair
+	// Step 2: Perform hybrid search for each table
 	var allResults []database.SearchResult
 
-	for _, columnPair := range o.cfg.ColumnPairs {
+	for _, table := range o.cfg.Tables {
 		// Skip if no database pool (shouldn't happen in production)
 		if o.dbPool == nil {
 			o.logger.Warn("no database pool configured",
-				"table", columnPair.Table,
+				"table", table.Table,
 			)
 			continue
 		}
 
 		// Vector search (with optional filter from request)
-		vectorResults, err := o.dbPool.VectorSearch(ctx, embedding, columnPair, topN*2, req.Filter)
+		vectorResults, err := o.dbPool.VectorSearch(ctx, embedding, table, topN*2, req.Filter)
 		if err != nil {
 			o.logger.Warn("vector search failed",
-				"table", columnPair.Table,
+				"table", table.Table,
 				"error", err,
 			)
 			continue
 		}
 
 		// BM25 search - need to fetch documents first and index them
-		docs, err := o.dbPool.FetchDocuments(ctx, columnPair, req.Filter)
+		docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter)
 		if err != nil {
 			o.logger.Warn("failed to fetch documents for BM25",
-				"table", columnPair.Table,
+				"table", table.Table,
 				"error", err,
 			)
 			// Continue with just vector results
@@ -211,22 +211,22 @@ func (o *Orchestrator) ExecuteStream(
 		// Step 2: Perform hybrid search
 		var allResults []database.SearchResult
 
-		for _, columnPair := range o.cfg.ColumnPairs {
+		for _, table := range o.cfg.Tables {
 			// Skip if no database pool (shouldn't happen in production)
 			if o.dbPool == nil {
 				o.logger.Warn("no database pool configured",
-					"table", columnPair.Table,
+					"table", table.Table,
 				)
 				continue
 			}
 
-			vectorResults, err := o.dbPool.VectorSearch(ctx, embedding, columnPair, topN*2, req.Filter)
+			vectorResults, err := o.dbPool.VectorSearch(ctx, embedding, table, topN*2, req.Filter)
 			if err != nil {
 				o.logger.Warn("vector search failed", "error", err)
 				continue
 			}
 
-			docs, err := o.dbPool.FetchDocuments(ctx, columnPair, req.Filter)
+			docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter)
 			if err != nil {
 				allResults = append(allResults, vectorResults...)
 				continue
