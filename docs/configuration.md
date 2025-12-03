@@ -148,21 +148,32 @@ vector embeddings.
 | `table`         | Table name                           | Yes      |
 | `text_column`   | Column containing text content       | Yes      |
 | `vector_column` | Column containing vector embeddings  | Yes      |
-| `filter`        | SQL WHERE clause to filter results   | No       |
+| `filter`        | Structured filter to apply to results| No       |
 
-The `filter` field allows you to specify a SQL WHERE clause fragment that
-will be applied to all queries for this column pair. For example:
+The `filter` field allows you to specify a structured filter that will be
+applied to all queries for this column pair. For example:
 
 ```yaml
 column_pairs:
   - table: "documents"
     text_column: "content"
     vector_column: "embedding"
-    filter: "product = 'pgAdmin' AND status = 'published'"
+    filter:
+      conditions:
+        - column: "product"
+          operator: "="
+          value: "pgAdmin"
+        - column: "status"
+          operator: "="
+          value: "published"
+      logic: "AND"
 ```
 
 Filters can also be specified per-request via the API's `filter` parameter,
 which will be combined with any configured filter using AND.
+
+**Supported operators:** `=`, `!=`, `<`, `>`, `<=`, `>=`, `LIKE`, `ILIKE`,
+`IN`, `NOT IN`, `IS NULL`, `IS NOT NULL`
 
 ### LLM Provider Configuration
 

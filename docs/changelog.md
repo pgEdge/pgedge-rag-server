@@ -7,6 +7,61 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking Changes
+
+- **Security Fix**: Replaced raw SQL filter strings with structured filter
+  format to eliminate SQL injection vulnerabilities. All filters must now
+  use the structured format with conditions, operators, and values.
+
+### Changed
+
+- Filter system now uses parameterized queries for all WHERE conditions
+- Config `filter` field changed from string to structured object
+- API `filter` parameter changed from string to structured object
+
+### Migration Guide
+
+**Old format (removed):**
+
+```yaml
+filter: "product = 'pgAdmin' AND status = 'published'"
+```
+
+```json
+{"filter": "product = 'pgAdmin'"}
+```
+
+**New format:**
+
+```yaml
+filter:
+  conditions:
+    - column: "product"
+      operator: "="
+      value: "pgAdmin"
+    - column: "status"
+      operator: "="
+      value: "published"
+  logic: "AND"
+```
+
+```json
+{
+  "filter": {
+    "conditions": [
+      {"column": "product", "operator": "=", "value": "pgAdmin"},
+      {"column": "status", "operator": "=", "value": "published"}
+    ],
+    "logic": "AND"
+  }
+}
+```
+
+**Supported operators:** `=`, `!=`, `<`, `>`, `<=`, `>=`, `LIKE`, `ILIKE`,
+`IN`, `NOT IN`, `IS NULL`, `IS NOT NULL`
+
 ## [1.0.0-alpha3] - 2025-12-01
 
 ### Added

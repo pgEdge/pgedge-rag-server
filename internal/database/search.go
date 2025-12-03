@@ -43,25 +43,6 @@ type SearchResult struct {
 	SourceInfo map[string]interface{} `json:"source_info,omitempty"`
 }
 
-// buildFilterClause combines config and request filters into a WHERE clause.
-// Returns empty string if no filters, or " WHERE <conditions>" if filters exist.
-func buildFilterClause(configFilter, requestFilter string) string {
-	filters := []string{}
-
-	if configFilter != "" {
-		filters = append(filters, "("+configFilter+")")
-	}
-	if requestFilter != "" {
-		filters = append(filters, "("+requestFilter+")")
-	}
-
-	if len(filters) == 0 {
-		return ""
-	}
-
-	return " WHERE " + strings.Join(filters, " AND ")
-}
-
 // VectorSearch performs a vector similarity search using pgvector.
 // Returns results ordered by similarity (highest first).
 // The filter parameter allows additional SQL WHERE conditions to be applied.
@@ -70,10 +51,13 @@ func (p *Pool) VectorSearch(
 	embedding []float32,
 	columnPair config.ColumnPair,
 	topN int,
-	filter string,
+	filter *config.Filter,
 ) ([]SearchResult, error) {
 	// Build filter clause combining config and request filters
-	filterClause := buildFilterClause(columnPair.Filter, filter)
+	filterClause, filterArgs, err := buildFilterClause(columnPair.Filter, filter)
+	if err != nil {
+		return nil, fmt.Errorf("invalid filter: %w", err)
+	}
 
 	// Build the query using cosine distance operator from pgvector
 	// The <=> operator returns cosine distance, so we subtract from 1 for similarity
@@ -91,7 +75,9 @@ func (p *Pool) VectorSearch(
 		pgx.Identifier{columnPair.VectorColumn}.Sanitize(),
 	)
 
-	rows, err := p.pool.Query(ctx, query, formatVector(embedding), topN)
+	// Combine vector embedding and topN with filter args
+	args := append([]interface{}{formatVector(embedding), topN}, filterArgs...)
+	rows, err := p.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("vector search failed: %w", err)
 	}
@@ -119,14 +105,19 @@ func (p *Pool) VectorSearch(
 func (p *Pool) FetchDocuments(
 	ctx context.Context,
 	columnPair config.ColumnPair,
-	filter string,
+	filter *config.Filter,
 ) (map[string]string, error) {
+	// Build filter clause combining config and request filters
+	filterClause, filterArgs, err := buildFilterClause(columnPair.Filter, filter)
+	if err != nil {
+		return nil, fmt.Errorf("invalid filter: %w", err)
+	}
+
 	// Build base WHERE clause for non-null content
 	baseCondition := fmt.Sprintf("%s IS NOT NULL",
 		pgx.Identifier{columnPair.TextColumn}.Sanitize())
 
-	// Combine with any additional filters
-	filterClause := buildFilterClause(columnPair.Filter, filter)
+	// Combine filter with IS NOT NULL condition
 	if filterClause == "" {
 		filterClause = " WHERE " + baseCondition
 	} else {
@@ -144,7 +135,7 @@ func (p *Pool) FetchDocuments(
 		filterClause,
 	)
 
-	rows, err := p.pool.Query(ctx, query)
+	rows, err := p.pool.Query(ctx, query, filterArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch documents: %w", err)
 	}

@@ -114,7 +114,13 @@ POST /v1/pipelines/{name}
   "query": "How do I configure replication?",
   "stream": false,
   "top_n": 10,
-  "filter": "product = 'pgEdge' AND version = 'v5.0'",
+  "filter": {
+    "conditions": [
+      {"column": "product", "operator": "=", "value": "pgEdge"},
+      {"column": "version", "operator": "=", "value": "v5.0"}
+    ],
+    "logic": "AND"
+  },
   "include_sources": true,
   "messages": [
     {"role": "user", "content": "What is pgEdge?"},
@@ -128,22 +134,52 @@ POST /v1/pipelines/{name}
 | `query`           | string  | Yes      | The question to answer                    |
 | `stream`          | boolean | No       | Enable streaming response (SSE)           |
 | `top_n`           | integer | No       | Override default result limit             |
-| `filter`          | string  | No       | SQL WHERE clause to filter results        |
+| `filter`          | object  | No       | Structured filter to apply to results     |
 | `include_sources` | boolean | No       | Include source documents (default: false) |
 | `messages`        | array   | No       | Previous conversation history for context |
 
-The `filter` parameter allows you to pass a SQL WHERE clause fragment to
-filter search results. This is useful when your data contains multiple
-products or versions and you want to restrict results. For example:
+The `filter` parameter accepts a structured filter object with conditions
+and operators. This is useful when your data contains multiple products or
+versions and you want to restrict results.
 
-- `"product = 'pgAdmin'"` - Filter by product
-- `"version = 'v9.0'"` - Filter by version
-- `"product = 'pgAdmin' AND version >= 'v8.0'"` - Combined filters
+Filter examples:
 
-!!! warning "Security Note"
+**Single condition:**
 
-    The filter is passed directly to the database. Ensure your application
-    validates filter values if they come from untrusted sources.
+```json
+{
+  "conditions": [
+    {"column": "product", "operator": "=", "value": "pgAdmin"}
+  ]
+}
+```
+
+**Multiple conditions with AND:**
+
+```json
+{
+  "conditions": [
+    {"column": "product", "operator": "=", "value": "pgAdmin"},
+    {"column": "version", "operator": ">=", "value": "v8.0"}
+  ],
+  "logic": "AND"
+}
+```
+
+**Multiple conditions with OR:**
+
+```json
+{
+  "conditions": [
+    {"column": "status", "operator": "=", "value": "published"},
+    {"column": "status", "operator": "=", "value": "draft"}
+  ],
+  "logic": "OR"
+}
+```
+
+**Supported operators:** `=`, `!=`, `<`, `>`, `<=`, `>=`, `LIKE`, `ILIKE`,
+`IN`, `NOT IN`, `IS NULL`, `IS NOT NULL`
 
 ##### Message Object
 
@@ -274,7 +310,16 @@ curl -X POST http://localhost:8080/v1/pipelines/my-docs \
 ```bash
 curl -X POST http://localhost:8080/v1/pipelines/my-docs \
   -H "Content-Type: application/json" \
-  -d '{"query": "How do I configure backups?", "filter": "product = '\''pgAdmin'\'' AND version = '\''v9.0'\''"}'
+  -d '{
+    "query": "How do I configure backups?",
+    "filter": {
+      "conditions": [
+        {"column": "product", "operator": "=", "value": "pgAdmin"},
+        {"column": "version", "operator": "=", "value": "v9.0"}
+      ],
+      "logic": "AND"
+    }
+  }'
 ```
 
 **Streaming query:**

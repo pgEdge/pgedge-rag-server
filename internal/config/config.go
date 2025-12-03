@@ -82,10 +82,23 @@ type DatabaseConfig struct {
 // ColumnPair defines a text column and its corresponding vector column
 // for hybrid search.
 type ColumnPair struct {
-	Table        string `yaml:"table"`
-	TextColumn   string `yaml:"text_column"`
-	VectorColumn string `yaml:"vector_column"`
-	Filter       string `yaml:"filter"` // Optional SQL WHERE clause fragment
+	Table        string  `yaml:"table"`
+	TextColumn   string  `yaml:"text_column"`
+	VectorColumn string  `yaml:"vector_column"`
+	Filter       *Filter `yaml:"filter"` // Optional structured filter
+}
+
+// FilterCondition represents a single filter condition.
+type FilterCondition struct {
+	Column   string      `json:"column" yaml:"column"`
+	Operator string      `json:"operator" yaml:"operator"`
+	Value    interface{} `json:"value" yaml:"value"`
+}
+
+// Filter represents a collection of conditions with logical operators.
+type Filter struct {
+	Conditions []FilterCondition `json:"conditions" yaml:"conditions"`
+	Logic      string            `json:"logic,omitempty" yaml:"logic,omitempty"` // "AND" or "OR", default "AND"
 }
 
 // LLMConfig contains settings for an LLM provider.

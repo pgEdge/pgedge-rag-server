@@ -10,6 +10,10 @@
 // Package pipeline provides the RAG pipeline execution and management.
 package pipeline
 
+import (
+	"github.com/pgEdge/pgedge-rag-server/internal/config"
+)
+
 // Info contains basic pipeline information for listing.
 type Info struct {
 	Name        string `json:"name"`
@@ -24,12 +28,12 @@ type Message struct {
 
 // QueryRequest represents a RAG query request.
 type QueryRequest struct {
-	Query          string    `json:"query"`
-	Stream         bool      `json:"stream"`
-	TopN           int       `json:"top_n,omitempty"`    // Override default top-N results
-	Filter         string    `json:"filter,omitempty"`   // SQL WHERE clause to filter results
-	IncludeSources bool      `json:"include_sources"`    // Include source documents (default: false)
-	Messages       []Message `json:"messages,omitempty"` // Previous conversation history
+	Query          string         `json:"query"`
+	Stream         bool           `json:"stream"`
+	TopN           int            `json:"top_n,omitempty"`    // Override default top-N results
+	Filter         *config.Filter `json:"filter,omitempty"`   // Structured filter to filter results
+	IncludeSources bool           `json:"include_sources"`    // Include source documents (default: false)
+	Messages       []Message      `json:"messages,omitempty"` // Previous conversation history
 }
 
 // QueryResponse represents a non-streaming RAG query response.

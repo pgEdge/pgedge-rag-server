@@ -310,8 +310,8 @@ func BuildOpenAPISpec() OpenAPISpec {
 							Description: "Override default result limit",
 						},
 						"filter": {
-							Type:        "string",
-							Description: "SQL WHERE clause to filter search results (e.g., \"product = 'pgAdmin' AND version = 'v9.0'\")",
+							Ref:         "#/components/schemas/Filter",
+							Description: "Structured filter to apply to search results",
 						},
 						"include_sources": {
 							Type:        "boolean",
@@ -367,6 +367,41 @@ func BuildOpenAPISpec() OpenAPISpec {
 						},
 					},
 					Required: []string{"content", "score"},
+				},
+				"Filter": {
+					Type: "object",
+					Properties: map[string]OpenAPISchema{
+						"conditions": {
+							Type:        "array",
+							Description: "Filter conditions to apply",
+							Items: &OpenAPISchema{
+								Ref: "#/components/schemas/FilterCondition",
+							},
+						},
+						"logic": {
+							Type:        "string",
+							Default:     "AND",
+							Description: "Logical operator to combine conditions: AND or OR (default: AND)",
+						},
+					},
+					Required: []string{"conditions"},
+				},
+				"FilterCondition": {
+					Type: "object",
+					Properties: map[string]OpenAPISchema{
+						"column": {
+							Type:        "string",
+							Description: "Column name to filter on",
+						},
+						"operator": {
+							Type:        "string",
+							Description: "Comparison operator: =, !=, <, >, <=, >=, LIKE, ILIKE, IN, NOT IN, IS NULL, IS NOT NULL",
+						},
+						"value": {
+							Description: "Value to compare against (not required for IS NULL / IS NOT NULL)",
+						},
+					},
+					Required: []string{"column", "operator"},
 				},
 				"ErrorResponse": {
 					Type: "object",
