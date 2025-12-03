@@ -19,7 +19,7 @@ import (
 func TestBuildFilterClause(t *testing.T) {
 	tests := []struct {
 		name          string
-		configFilter  *config.Filter
+		configFilter  *config.ConfigFilter
 		requestFilter *config.Filter
 		expectedSQL   string
 		expectedArgs  []interface{}
@@ -125,10 +125,12 @@ func TestBuildFilterClause(t *testing.T) {
 			expectedArgs: []interface{}{"%backup%"},
 		},
 		{
-			name: "config and request filters combined",
-			configFilter: &config.Filter{
-				Conditions: []config.FilterCondition{
-					{Column: "product", Operator: "=", Value: "pgAdmin"},
+			name: "config structured and request filters combined",
+			configFilter: &config.ConfigFilter{
+				Structured: &config.Filter{
+					Conditions: []config.FilterCondition{
+						{Column: "product", Operator: "=", Value: "pgAdmin"},
+					},
 				},
 			},
 			requestFilter: &config.Filter{
@@ -141,12 +143,14 @@ func TestBuildFilterClause(t *testing.T) {
 		},
 		{
 			name: "complex multi-condition filters",
-			configFilter: &config.Filter{
-				Conditions: []config.FilterCondition{
-					{Column: "status", Operator: "=", Value: "published"},
-					{Column: "category", Operator: "=", Value: "docs"},
+			configFilter: &config.ConfigFilter{
+				Structured: &config.Filter{
+					Conditions: []config.FilterCondition{
+						{Column: "status", Operator: "=", Value: "published"},
+						{Column: "category", Operator: "=", Value: "docs"},
+					},
+					Logic: "AND",
 				},
-				Logic: "AND",
 			},
 			requestFilter: &config.Filter{
 				Conditions: []config.FilterCondition{
@@ -157,6 +161,36 @@ func TestBuildFilterClause(t *testing.T) {
 			},
 			expectedSQL:  " WHERE (\"status\" = $1 AND \"category\" = $2) AND (\"product\" = $3 AND \"version\" >= $4)",
 			expectedArgs: []interface{}{"published", "docs", "pgAdmin", "v8.0"},
+		},
+		// Raw SQL config filter tests
+		{
+			name: "raw SQL config filter",
+			configFilter: &config.ConfigFilter{
+				RawSQL: "source_id IN (SELECT id FROM documents WHERE product='pgEdge')",
+			},
+			expectedSQL:  " WHERE (source_id IN (SELECT id FROM documents WHERE product='pgEdge'))",
+			expectedArgs: nil,
+		},
+		{
+			name: "raw SQL config filter with request filter",
+			configFilter: &config.ConfigFilter{
+				RawSQL: "category = 'docs'",
+			},
+			requestFilter: &config.Filter{
+				Conditions: []config.FilterCondition{
+					{Column: "version", Operator: ">=", Value: "v8.0"},
+				},
+			},
+			expectedSQL:  " WHERE (category = 'docs') AND (\"version\" >= $1)",
+			expectedArgs: []interface{}{"v8.0"},
+		},
+		{
+			name: "raw SQL with subquery",
+			configFilter: &config.ConfigFilter{
+				RawSQL: "id IN (SELECT doc_id FROM access_control WHERE user_id = 123)",
+			},
+			expectedSQL:  " WHERE (id IN (SELECT doc_id FROM access_control WHERE user_id = 123))",
+			expectedArgs: nil,
 		},
 		{
 			name: "unsupported operator",

@@ -11,29 +11,54 @@ and this project adheres to
 
 ### Breaking Changes
 
-- **Security Fix**: Replaced raw SQL filter strings with structured filter
-  format to eliminate SQL injection vulnerabilities. All filters must now
-  use the structured format with conditions, operators, and values.
+- **Security Fix**: API filter parameters now require structured filter format
+  to eliminate SQL injection vulnerabilities. API filters must use conditions,
+  operators, and values (parameterized queries prevent injection).
 
 ### Changed
 
-- Filter system now uses parameterized queries for all WHERE conditions
-- Config `filter` field changed from string to structured object
+- Filter system now uses parameterized queries for API request filters
 - API `filter` parameter changed from string to structured object
+- Config `filter` field now accepts either raw SQL strings (for complex
+  queries like subqueries) or structured filter objects
+
+### Added
+
+- Config filters support raw SQL strings for complex expressions (subqueries,
+  JOINs, functions) that cannot be expressed with structured format. Since
+  config files are admin-controlled, raw SQL is safe here.
 
 ### Migration Guide
 
-**Old format (removed):**
+**API filters (JSON) - must use structured format:**
 
-```yaml
-filter: "product = 'pgAdmin' AND status = 'published'"
-```
+Old (removed):
 
 ```json
 {"filter": "product = 'pgAdmin'"}
 ```
 
-**New format:**
+New:
+
+```json
+{
+  "filter": {
+    "conditions": [
+      {"column": "product", "operator": "=", "value": "pgAdmin"}
+    ]
+  }
+}
+```
+
+**Config filters (YAML) - both formats supported:**
+
+Raw SQL (for complex queries):
+
+```yaml
+filter: "source_id IN (SELECT id FROM sources WHERE product='pgEdge')"
+```
+
+Structured:
 
 ```yaml
 filter:
@@ -47,20 +72,8 @@ filter:
   logic: "AND"
 ```
 
-```json
-{
-  "filter": {
-    "conditions": [
-      {"column": "product", "operator": "=", "value": "pgAdmin"},
-      {"column": "status", "operator": "=", "value": "published"}
-    ],
-    "logic": "AND"
-  }
-}
-```
-
-**Supported operators:** `=`, `!=`, `<`, `>`, `<=`, `>=`, `LIKE`, `ILIKE`,
-`IN`, `NOT IN`, `IS NULL`, `IS NOT NULL`
+**Supported operators (for structured filters):** `=`, `!=`, `<`, `>`, `<=`,
+`>=`, `LIKE`, `ILIKE`, `IN`, `NOT IN`, `IS NULL`, `IS NOT NULL`
 
 ## [1.0.0-alpha3] - 2025-12-01
 

@@ -37,24 +37,32 @@ var supportedOperators = map[string]bool{
 // buildFilterClause constructs a parameterized WHERE clause from config and request filters.
 // Returns the WHERE clause string, parameter values, and any error.
 // The WHERE clause uses PostgreSQL parameter placeholders ($1, $2, etc.).
-func buildFilterClause(configFilter, requestFilter *config.Filter) (string, []interface{}, error) {
+//
+// Config filters can be raw SQL strings (admin-controlled, trusted) or structured filters.
+// Request filters must be structured filters (user input, parameterized for security).
+func buildFilterClause(configFilter *config.ConfigFilter, requestFilter *config.Filter) (string, []interface{}, error) {
 	var conditions []string
 	var args []interface{}
 	paramIndex := 1
 
-	// Process config-level filter
+	// Process config-level filter (can be raw SQL or structured)
 	if configFilter != nil {
-		clause, clauseArgs, err := buildFilterFromStruct(configFilter, &paramIndex)
-		if err != nil {
-			return "", nil, fmt.Errorf("config filter error: %w", err)
-		}
-		if clause != "" {
-			conditions = append(conditions, "("+clause+")")
-			args = append(args, clauseArgs...)
+		if configFilter.RawSQL != "" {
+			// Raw SQL from config file - admin controlled, trusted
+			conditions = append(conditions, "("+configFilter.RawSQL+")")
+		} else if configFilter.Structured != nil {
+			clause, clauseArgs, err := buildFilterFromStruct(configFilter.Structured, &paramIndex)
+			if err != nil {
+				return "", nil, fmt.Errorf("config filter error: %w", err)
+			}
+			if clause != "" {
+				conditions = append(conditions, "("+clause+")")
+				args = append(args, clauseArgs...)
+			}
 		}
 	}
 
-	// Process request-level filter
+	// Process request-level filter (must be structured, parameterized for security)
 	if requestFilter != nil {
 		clause, clauseArgs, err := buildFilterFromStruct(requestFilter, &paramIndex)
 		if err != nil {

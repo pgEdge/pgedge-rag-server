@@ -11,6 +11,8 @@
 // pgEdge RAG Server.
 package config
 
+import "fmt"
+
 // Config is the root configuration structure for the server.
 type Config struct {
 	Server    ServerConfig  `yaml:"server"`
@@ -82,10 +84,10 @@ type DatabaseConfig struct {
 // ColumnPair defines a text column and its corresponding vector column
 // for hybrid search.
 type ColumnPair struct {
-	Table        string  `yaml:"table"`
-	TextColumn   string  `yaml:"text_column"`
-	VectorColumn string  `yaml:"vector_column"`
-	Filter       *Filter `yaml:"filter"` // Optional structured filter
+	Table        string        `yaml:"table"`
+	TextColumn   string        `yaml:"text_column"`
+	VectorColumn string        `yaml:"vector_column"`
+	Filter       *ConfigFilter `yaml:"filter"` // Optional filter (raw SQL or structured)
 }
 
 // FilterCondition represents a single filter condition.
@@ -96,9 +98,37 @@ type FilterCondition struct {
 }
 
 // Filter represents a collection of conditions with logical operators.
+// Used for API request filters which must be parameterized for security.
 type Filter struct {
 	Conditions []FilterCondition `json:"conditions" yaml:"conditions"`
 	Logic      string            `json:"logic,omitempty" yaml:"logic,omitempty"` // "AND" or "OR", default "AND"
+}
+
+// ConfigFilter represents a filter in pipeline configuration.
+// It can be either a raw SQL string (for admin use) or a structured Filter.
+type ConfigFilter struct {
+	RawSQL     string  // Raw SQL WHERE clause fragment (admin-only)
+	Structured *Filter // Structured filter with conditions
+}
+
+// UnmarshalYAML implements custom YAML unmarshaling for ConfigFilter.
+// Allows filter to be specified as either a string or structured object.
+func (cf *ConfigFilter) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// Try string first (raw SQL)
+	var s string
+	if err := unmarshal(&s); err == nil {
+		cf.RawSQL = s
+		return nil
+	}
+
+	// Try structured filter
+	var f Filter
+	if err := unmarshal(&f); err == nil {
+		cf.Structured = &f
+		return nil
+	}
+
+	return fmt.Errorf("filter must be a string or structured filter object")
 }
 
 // LLMConfig contains settings for an LLM provider.

@@ -140,7 +140,11 @@ POST /v1/pipelines/{name}
 
 The `filter` parameter accepts a structured filter object with conditions
 and operators. This is useful when your data contains multiple products or
-versions and you want to restrict results.
+versions and you want to restrict results. API filters must use this
+structured format for security (parameterized queries prevent SQL injection).
+
+If the pipeline configuration also specifies a filter, both filters are
+combined using AND logic.
 
 Filter examples:
 

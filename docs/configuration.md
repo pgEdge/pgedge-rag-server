@@ -148,10 +148,22 @@ vector embeddings.
 | `table`         | Table name                           | Yes      |
 | `text_column`   | Column containing text content       | Yes      |
 | `vector_column` | Column containing vector embeddings  | Yes      |
-| `filter`        | Structured filter to apply to results| No       |
+| `filter`        | Filter to apply to results           | No       |
 
-The `filter` field allows you to specify a structured filter that will be
-applied to all queries for this column pair. For example:
+The `filter` field allows you to specify a filter that will be applied to all
+queries for this column pair. It can be specified in two formats:
+
+**Raw SQL (for complex queries like subqueries):**
+
+```yaml
+column_pairs:
+  - table: "documents"
+    text_column: "content"
+    vector_column: "embedding"
+    filter: "source_id IN (SELECT id FROM sources WHERE product='pgEdge')"
+```
+
+**Structured filter (using conditions):**
 
 ```yaml
 column_pairs:
@@ -169,11 +181,16 @@ column_pairs:
       logic: "AND"
 ```
 
-Filters can also be specified per-request via the API's `filter` parameter,
-which will be combined with any configured filter using AND.
+Raw SQL filters are useful when you need complex expressions like subqueries,
+JOINs, or functions that cannot be expressed with the structured format. Since
+config files are controlled by administrators, raw SQL is safe to use here.
 
-**Supported operators:** `=`, `!=`, `<`, `>`, `<=`, `>=`, `LIKE`, `ILIKE`,
-`IN`, `NOT IN`, `IS NULL`, `IS NOT NULL`
+Filters can also be specified per-request via the API's `filter` parameter.
+API filters must use the structured format (for security) and will be combined
+with any configured filter using AND.
+
+**Supported operators (for structured filters):** `=`, `!=`, `<`, `>`, `<=`,
+`>=`, `LIKE`, `ILIKE`, `IN`, `NOT IN`, `IS NULL`, `IS NOT NULL`
 
 ### LLM Provider Configuration
 
