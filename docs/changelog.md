@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-alpha5] - 2025-12-03
+
+### Fixed
+
+- Fixed filter parameter indexing bug where API filters would cause
+  "operator does not exist: text = vector" errors. The filter clause
+  was generating SQL placeholders starting at `$1`, but `VectorSearch`
+  already uses `$1` for the vector and `$2` for LIMIT.
+
 ## [1.0.0-alpha4] - 2025-12-03
 
 ### Breaking Changes
