@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0-alpha4] - 2025-12-03
 
 ### Breaking Changes
 
@@ -119,7 +119,7 @@ tables:
   cascade priority (pipeline > defaults > global), enabling different
   pipelines to use separate API keys or accounts.
 
-- SQL filter support: Column pairs can include a `filter` field with a
+- SQL filter support: Tables can include a `filter` field with a
   SQL WHERE clause fragment applied to all queries. Filters can also be
   specified per-request via the API.
 
