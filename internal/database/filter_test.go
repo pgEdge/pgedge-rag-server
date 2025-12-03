@@ -233,7 +233,7 @@ func TestBuildFilterClause(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sql, args, err := buildFilterClause(tt.configFilter, tt.requestFilter)
+			sql, args, err := buildFilterClause(tt.configFilter, tt.requestFilter, 1)
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("expected error but got none")
@@ -286,7 +286,7 @@ func TestSQLInjectionPrevention(t *testing.T) {
 				},
 			}
 
-			sql, args, err := buildFilterClause(nil, filter)
+			sql, args, err := buildFilterClause(nil, filter, 1)
 			if err != nil {
 				t.Errorf("unexpected error for injection attempt: %v", err)
 				return
@@ -387,6 +387,33 @@ func TestValidateValue(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestBuildFilterClauseWithOffset(t *testing.T) {
+	// Test that filters correctly start at the specified parameter index
+	// This is important for VectorSearch which uses $1 for vector and $2 for limit
+	filter := &config.Filter{
+		Conditions: []config.FilterCondition{
+			{Column: "product", Operator: "=", Value: "pgAdmin"},
+			{Column: "version", Operator: "=", Value: "9.10"},
+		},
+		Logic: "AND",
+	}
+
+	// Start at index 3 (simulating VectorSearch where $1=vector, $2=limit)
+	sql, args, err := buildFilterClause(nil, filter, 3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedSQL := " WHERE (\"product\" = $3 AND \"version\" = $4)"
+	if sql != expectedSQL {
+		t.Errorf("SQL mismatch:\nexpected: %q\ngot:      %q", expectedSQL, sql)
+	}
+
+	if len(args) != 2 {
+		t.Errorf("expected 2 args, got %d", len(args))
 	}
 }
 

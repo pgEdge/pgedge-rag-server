@@ -54,7 +54,8 @@ func (p *Pool) VectorSearch(
 	filter *config.Filter,
 ) ([]SearchResult, error) {
 	// Build filter clause combining config and request filters
-	filterClause, filterArgs, err := buildFilterClause(table.Filter, filter)
+	// Start at param index 3 because $1=vector, $2=limit
+	filterClause, filterArgs, err := buildFilterClause(table.Filter, filter, 3)
 	if err != nil {
 		return nil, fmt.Errorf("invalid filter: %w", err)
 	}
@@ -108,7 +109,8 @@ func (p *Pool) FetchDocuments(
 	filter *config.Filter,
 ) (map[string]string, error) {
 	// Build filter clause combining config and request filters
-	filterClause, filterArgs, err := buildFilterClause(table.Filter, filter)
+	// Start at param index 1 (no initial params in this query)
+	filterClause, filterArgs, err := buildFilterClause(table.Filter, filter, 1)
 	if err != nil {
 		return nil, fmt.Errorf("invalid filter: %w", err)
 	}

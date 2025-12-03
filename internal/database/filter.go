@@ -36,14 +36,14 @@ var supportedOperators = map[string]bool{
 
 // buildFilterClause constructs a parameterized WHERE clause from config and request filters.
 // Returns the WHERE clause string, parameter values, and any error.
-// The WHERE clause uses PostgreSQL parameter placeholders ($1, $2, etc.).
+// The WHERE clause uses PostgreSQL parameter placeholders starting from startParamIndex.
 //
 // Config filters can be raw SQL strings (admin-controlled, trusted) or structured filters.
 // Request filters must be structured filters (user input, parameterized for security).
-func buildFilterClause(configFilter *config.ConfigFilter, requestFilter *config.Filter) (string, []interface{}, error) {
+func buildFilterClause(configFilter *config.ConfigFilter, requestFilter *config.Filter, startParamIndex int) (string, []interface{}, error) {
 	var conditions []string
 	var args []interface{}
-	paramIndex := 1
+	paramIndex := startParamIndex
 
 	// Process config-level filter (can be raw SQL or structured)
 	if configFilter != nil {
