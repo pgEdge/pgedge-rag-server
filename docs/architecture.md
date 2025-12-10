@@ -6,11 +6,11 @@ This document describes the internal architecture of the pgEdge RAG Server.
 
 The RAG server implements a Retrieval-Augmented Generation pipeline that:
 
-1. Receives a user query
-2. Generates an embedding for the query
-3. Searches the database using hybrid search (vector + BM25)
-4. Builds context from the most relevant documents
-5. Generates an answer using an LLM with the context
+1. receives a user query.
+2. generates an embedding for the query.
+3. searches the database using hybrid search (vector + BM25)
+4. builds context from the most relevant documents
+5. generates an answer using an LLM with the context
 
 ```mermaid
 flowchart LR

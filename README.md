@@ -112,4 +112,4 @@ Full documentation is available in the [docs/](docs/) directory.
 
 ## License
 
-See [LICENCE.md](LICENCE.md) for license information.
+This project is licensed under the [PostgreSQL License](docs/LICENCE.md).
