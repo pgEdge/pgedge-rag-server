@@ -9,7 +9,7 @@ Before invoking the [`pgedge-rag-server` executable](usage.md), you need to crea
 
 The default name of the file is `pgedge-rag-server.yaml`.
 
-When you invoke `pgedge-rag-server` you can optionally include the `--config` option to specify the complete path to a custom location for the configuration file.  If you do not specify a location on the command line, the server searches for configuration files in:
+When you invoke `pgedge-rag-server` you can optionally include the `-config` option to specify the complete path to a custom location for the configuration file.  If you do not specify a location on the command line, the server searches for configuration files in:
 
 1. `/etc/pgedge/pgedge-rag-server.yaml`
 2. the directory that contains the `pgedge-rag-server` binary.

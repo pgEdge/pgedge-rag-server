@@ -44,9 +44,9 @@ To use the pgEdge RAG Server, you must:
 
 Before installing pgEdge RAG Server, you should install or obtain:
 
-- Go 1.24 or later
+- Go 1.22 or later
 - PostgreSQL 14 or later, with [pgvector installed](https://github.com/pgvector/pgvector)
-- [API keys](keys.md) for your chosen LLM providers
+- [API keys](docs/keys.md) for your chosen LLM providers
 
 ### Building from Source
 
@@ -82,7 +82,7 @@ Create a configuration file that specifies server connection details and other p
 1. `/etc/pgedge/pgedge-rag-server.yaml`
 2. the directory that contains the `pgedge-rag-server` binary.
 
-You can optionally use the `--config` option on the command line to specify the complete path to a custom location for the configuration file.
+You can optionally use the `-config` option on the command line to specify the complete path to a custom location for the configuration file.
 
 The following sample demonstrates a minimal configuration:
 
@@ -127,7 +127,7 @@ You can include the following options when invoking the server:
 | `-version` | Show version information and exit         |
 | `-help`    | Show help message and exit                |
 
-When you invoke `pgedge-rag-server` you can optionally include the `--config` option to specify the complete path to a custom location for the configuration file.  If you do not specify a location on the command line, the server searches for configuration files in:
+When you invoke `pgedge-rag-server` you can optionally include the `-config` option to specify the complete path to a custom location for the configuration file.  If you do not specify a location on the command line, the server searches for configuration files in:
 
 1. `/etc/pgedge/pgedge-rag-server.yaml`
 2. `pgedge-rag-server.yaml` (in the binary's directory)
