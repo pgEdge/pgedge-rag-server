@@ -58,13 +58,21 @@ copyright: Copyright &copy; 2025 pgEdge, Inc
 repo_url: https://github.com/pgEdge/pgedge-rag-server
 
 nav:
-  - Getting Started:
+  - pgEdge RAG Server:
       - Introduction: index.md
-      - Configuration: configuration.md
-
-  - Reference:
-      - API Reference: api/reference.md
-      - API Browser: api/browser.md
       - Architecture: architecture.md
-
-  - Changelog: changelog.md
+  - Installing pgEdge RAG Server:
+      - Installing pgEdge RAG Server: installation.md
+      - pgEdge RAG Server Quickstart: quickstart.md
+  - Configuring the RAG Server:
+      - Creating a Configuration File: configuration.md
+      - Sample Configuration Files: samples.md
+      - Managing API Keys: keys.md
+  - Invoking the pgEdge RAG Server: usage.md
+  - Using the RAG Server API:
+      - API Reference: api/reference.md
+      - Using the API in a Browser Interface: api/browser.md
+  #- Troubleshooting: troubleshooting.md
+  - pgEdge RAG Server Release Notes: changelog.md
+  - Developer Notes: development.md
+  - Licence: LICENCE.md

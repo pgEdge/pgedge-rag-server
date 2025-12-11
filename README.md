@@ -2,11 +2,28 @@
 
 [![CI](https://github.com/pgEdge/pgedge-rag-server/actions/workflows/ci.yml/badge.svg)](https://github.com/pgEdge/pgedge-rag-server/actions/workflows/ci.yml)
 
-A simple API server for performing Retrieval-Augmented Generation (RAG) of
-text based on content from a PostgreSQL database using
-[pgvector](https://github.com/pgvector/pgvector).
+  - [pgEdge RAG Server](docs/index.md)
+  - [Architecture](docs/architecture.md)
+  - Installing pgEdge RAG Server
+      - [Installing pgEdge RAG Server](docs/installation.md)
+      - [pgEdge RAG Server Quickstart](docs/quickstart.md)
+  - Configuring the pgEdge RAG Server
+      - [Creating a Configuration File](docs/configuration.md)
+      - [Sample Configuration Files](docs/samples.md)
+      - [Managing API Keys](docs/keys.md)
+  - [Using pgEdge RAG Server](docs/usage.md)
+  - Using the RAG Server API
+      - [API Reference](docs/api/reference.md)
+      - [Using the API in a browser](docs/api/browser.md)
+  - [pgEdge RAG Server Release Notes](docs/changelog.md)
+  - [Developer Notes](docs/development.md)
+  - [Licence](docs/LICENCE.md)
 
-## Features
+The pgEdge RAG Server is a simple API server for performing Retrieval-Augmented Generation (RAG) of text based on content from a PostgreSQL database using [pgvector](https://github.com/pgvector/pgvector).
+
+Documentation for the RAG Server is available online at: [https://docs.pgedge.com/pgedge-rag-server/](https://docs.pgedge.com/pgedge-rag-server/)
+
+The RAG Server features:
 
 - Multiple RAG pipelines with configurable embedding and LLM providers
 - Hybrid search combining vector similarity and BM25 text matching
@@ -15,32 +32,59 @@ text based on content from a PostgreSQL database using
 - Optional streaming responses via Server-Sent Events
 - TLS/HTTPS support
 
-## Quick Start
 
-### Prerequisites
+## Quick Start - Using the RAG Server
+
+To use the pgEdge RAG Server, you must:
+
+1. [Build](#building-from-source) the pgedge-rag-server binary.
+2. [Create a configuration file](#creating-a-configuration-file) that specifies details used by the RAG server.
+3. Invoke pgedge-rag-server.
+
+
+Before installing pgEdge RAG Server, you should install or obtain:
 
 - Go 1.22 or later
-- PostgreSQL with pgvector extension
-- API keys for your chosen LLM providers
+- PostgreSQL 14 or later, with [pgvector installed](https://github.com/pgvector/pgvector)
+- [API keys](docs/keys.md) for your chosen LLM providers
 
-### Installation
+### Building from Source
+
+Before building the binary, clone the RAG server repository and navigate into the root of the repo:
 
 ```bash
-# Clone the repository
-git clone https://github.com/pgEdge/pgedge-rag-server.git
+git clone https://github.com/pgedge/pgedge-rag-server.git
 cd pgedge-rag-server
-
-# Build the binary
-make build
-
-# Run the server
-./bin/pgedge-rag-server -config /path/to/config.yaml
 ```
 
-### Configuration
+Build the pgEdge RAG server binary with the command; the binary is created in the bin directory:
 
-Create a configuration file (see [docs/configuration.md](docs/configuration.md)
-for full reference):
+```bash
+make build
+```
+
+After installation, verify the tool is working:
+
+```bash
+pgedge-rag-server version
+```
+
+You can also access online help after building RAG server:
+
+```bash
+pgedge-rag-server help
+```
+
+### Creating a Configuration File
+
+Create a configuration file that specifies server connection details and other properties; (see [the online documentation](docs/configuration.md) for complete details.  The default name of the file is `pgedge-rag-server.yaml`; when invoked, the server searches for configuration file in:
+
+1. `/etc/pgedge/pgedge-rag-server.yaml`
+2. the directory that contains the `pgedge-rag-server` binary.
+
+You can optionally use the `-config` option on the command line to specify the complete path to a custom location for the configuration file.
+
+The following sample demonstrates a minimal configuration:
 
 ```yaml
 server:
@@ -66,15 +110,40 @@ pipelines:
       model: "claude-sonnet-4-20250514"
 ```
 
-## API Usage
+### Invoking the RAG Server
 
-### List Available Pipelines
+After building the binary and creating a configuration file, you can invoke `pgedge-rag-server`.  Use the command:
+
+```bash
+./bin/pgedge-rag-server (options)
+```
+
+You can include the following options when invoking the server:
+
+| Option     | Description                               |
+|------------|-------------------------------------------|
+| `-config`  | Path to configuration file (see below)    |
+| `-openapi` | Output OpenAPI v3 specification and exit  |
+| `-version` | Show version information and exit         |
+| `-help`    | Show help message and exit                |
+
+When you invoke `pgedge-rag-server` you can optionally include the `-config` option to specify the complete path to a custom location for the configuration file.  If you do not specify a location on the command line, the server searches for configuration files in:
+
+1. `/etc/pgedge/pgedge-rag-server.yaml`
+2. `pgedge-rag-server.yaml` (in the binary's directory)
+
+
+## API Usage Reference
+
+The online documentation contains detailed information about [using the API](docs/api/reference.md), and allows you to try the [API in a browser](docs/api/browser.md).
+
+**To List Available Pipelines**
 
 ```bash
 curl http://localhost:8080/v1/pipelines
 ```
 
-### Query a Pipeline
+**To Query a Pipeline**
 
 ```bash
 curl -X POST http://localhost:8080/v1/pipelines/my-docs \
@@ -82,7 +151,7 @@ curl -X POST http://localhost:8080/v1/pipelines/my-docs \
   -d '{"query": "How do I configure replication?"}'
 ```
 
-### Query with Streaming
+**To Query with Streaming**
 
 ```bash
 curl -X POST http://localhost:8080/v1/pipelines/my-docs \
@@ -90,26 +159,7 @@ curl -X POST http://localhost:8080/v1/pipelines/my-docs \
   -d '{"query": "How do I configure replication?", "stream": true}'
 ```
 
-## Development
-
-```bash
-# Run all checks (format, lint, test, build)
-make all
-
-# Run tests only
-make test
-
-# Run linter only
-make lint
-
-# Format code
-make fmt
-```
-
-## Documentation
-
-Full documentation is available in the [docs/](docs/) directory.
 
 ## License
 
-See [LICENCE.md](LICENCE.md) for license information.
+This project is licensed under the [PostgreSQL License](docs/LICENCE.md).
