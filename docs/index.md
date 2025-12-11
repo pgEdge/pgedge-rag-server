@@ -1,8 +1,6 @@
 # pgEdge RAG Server
 
-The pgEdge RAG server is a simple API server for performing Retrieval-Augmented Generation (RAG)
-of text based on content from a Postgres database using
-[pgvector](https://github.com/pgvector/pgvector).
+The pgEdge RAG server is a simple API server for performing Retrieval-Augmented Generation (RAG) of text based on content from a Postgres database using [pgvector](https://github.com/pgvector/pgvector).
 
 ## What is RAG?
 
@@ -17,20 +15,30 @@ solely on an LLM's training data, RAG:
 This approach reduces hallucinations and keeps responses current with your
 data.
 
-A RAG server is ideal when you have a well-defined use case with predictable query 
+The RAG server supports the following providers:
+
+| Provider    | Embedding Support | Completion Support |
+|-------------|-------------------|-------------------|
+| `openai`    | Yes               | Yes               |
+| `anthropic` | No*               | Yes               |
+| `voyage`    | Yes               | No                |
+| `ollama`    | Yes               | Yes               |
+
+
+A RAG server is ideal when you have a well-defined use case with predictable query
 patterns. Consider using a RAG server when:
 
-* users will ask predictable questions of your application about your products, 
+* users will ask predictable questions of your application about your products,
 documentation, or support knowledge base.
 
-* you need to maintain strict control over the specific data that users can access. RAG 
+* you need to maintain strict control over the specific data that users can access. RAG
 defines the searchable corpus, and you define the retrieval logic.
 
-* performance and cost are critical. A RAG system can be heavily optimised for 
-specific query patterns, with caching, pre-computed embeddings, and finely-tuned 
+* performance and cost are critical. A RAG system can be heavily optimised for
+specific query patterns, with caching, pre-computed embeddings, and finely-tuned
 retrieval algorithms.
 
-* your application's queries frequently reference unstructured data like documents, 
+* your application's queries frequently reference unstructured data like documents,
 articles, or support tickets.
 
 ## Features

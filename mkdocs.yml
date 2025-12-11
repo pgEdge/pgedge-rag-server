@@ -64,15 +64,15 @@ nav:
   - Installing pgEdge RAG Server:
       - Installing RAG Server: installation.md
       - pgEdge RAG Server Quickstart: quickstart.md
-  - Managing Configuration Details and API keys:
+  - Configuring the RAG Server:
       - Creating a Configuration File: configuration.md
       - Sample Configuration Files: samples.md
       - Managing API Keys: keys.md
-  - Using pgEdge RAG Server: usage.md
+  - Invoking the pgEdge RAG Server: usage.md
   - Using the RAG Server API:
       - API Reference: api/reference.md
-      - API Browser: api/browser.md
-  - Troubleshooting: troubleshooting.md
+      - Using the API in a Browser Interface: api/browser.md
+  #- Troubleshooting: troubleshooting.md
   - pgEdge RAG Server Release Notes: changelog.md
   - Developer Notes: development.md
   - Licence: LICENCE.md

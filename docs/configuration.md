@@ -1,27 +1,34 @@
 # Configuration Reference
 
-The pgEdge RAG Server is configured with details you specify in a YAML file.  The
-server searches for configuration files in:
+Before invoking the [`pgedge-rag-server` executable](usage.md), you need to create a .YAML file that contains the deployment details for the RAG server.  These details include:
+
+* connection information.
+* AI provider properties.
+* [API key location](keys.md).
+* embedding information for your Postgres database.
+
+The default name of the file is pgedge-rag-server.yaml; the server searches for configuration file in:
 
 1. `/etc/pgedge/pgedge-rag-server.yaml`
-2. `pgedge-rag-server.yaml` (in the binary's directory)
+2. the directory that contains the `pgedge-rag-server` binary.
 
-When you invoke `pgedge-rag-server` you can optionally include the --config option
-to specify the complete path to a custom location for the configuration file.
+When you invoke `pgedge-rag-server` you can optionally include the `--config` option to specify the complete path to a custom location for the configuration file.
 
 
 ## Configuration File Structure
 
-The configuration file has the following top-level sections:
+The configuration file includes the following top-level sections:
 
-- `server` - HTTP/HTTPS server settings
-- `defaults` - Default values for pipelines (LLM providers, token budget, etc.)
-- `pipelines` - RAG pipeline definitions
+- [`server`](#specifying-properties-in-the-server-section) - HTTP/HTTPS server settings
+- [`defaults`](#specifying-properties-in-the-defaults-section) - Default values for pipelines (LLM providers, token budget, etc.)
+- [`pipelines`](#specifying-properties-in-the-server-section) - RAG pipeline definitions
 
 You can optionally [set the API key value](keys.md) in the configuration file,
 on the command line, or in an environment variable.
 
 ## Specifying Properties in the Server Section
+
+Use the properties shown below to specify connection properties for your RAG server:
 
 ```yaml
 server:
@@ -41,11 +48,10 @@ server:
 | `tls.cert_file`  | Path to TLS certificate            | Required if TLS enabled |
 | `tls.key_file`   | Path to TLS private key            | Required if TLS enabled |
 
-## Defaults Configuration
 
-The `defaults` section allows you to set default values for LLM providers,
-API keys, and other settings that can be overridden per-pipeline. This is
-useful when most pipelines share the same configuration.
+## Specifying Properties in the Defaults Section
+
+The `defaults` section allows you to set default values for LLM providers, API keys, and other settings that can be overridden per-pipeline. This is useful when most pipelines share the same configuration.
 
 ```yaml
 defaults:
@@ -70,14 +76,11 @@ defaults:
 | `rag_llm`        | Default completion provider configuration| None    |
 | `api_keys`       | Default API key file paths               | None    |
 
-When defaults are set, individual pipelines can omit the corresponding fields
-and will inherit the default values. Pipelines can also override specific
-fields while inheriting others.
+When you set default values, your individual pipelines definitions can omit the corresponding fields and will inherit the default values. A Pipeline can also override specific fields while inheriting others.
 
 ## Specifying Properties in the Pipeline Section
 
-Each pipeline defines a RAG search configuration with its own database,
-embedding provider, and completion provider.
+Each pipeline defines a RAG search configuration with its own database, embedding provider, and completion provider.  Use the properties in the sections that follow to provide information in the `pipelines` section:
 
 ```yaml
 pipelines:
@@ -104,21 +107,21 @@ pipelines:
     top_n: 10
 ```
 
-### Pipeline Fields
+### Pipeline Properties
 
-| Field          | Description                                    | Required |
-|----------------|------------------------------------------------|----------|
-| `name`         | Unique pipeline identifier (used in API URLs)  | Yes      |
-| `description`  | Human-readable description                     | No       |
-| `database`     | PostgreSQL connection settings                 | Yes      |
-| `tables`       | Tables and columns to search                   | Yes      |
-| `embedding_llm`| Embedding provider configuration               | Yes (unless set in defaults) |
-| `rag_llm`      | Completion provider configuration              | Yes (unless set in defaults) |
-| `api_keys`     | API key file paths (overrides defaults/global) | No       |
-| `token_budget` | Maximum tokens for context documents           | No (uses defaults) |
-| `top_n`        | Maximum number of results to retrieve          | No (uses defaults) |
+| Field           | Description                                                  | Required |
+|-----------------|--------------------------------------------------------------|----------|
+| `name`          | Unique pipeline identifier (used in API URLs)                | Yes      |
+| `description`   | Human-readable description                                   | No       |
+| `database`      | [PostgreSQL connection settings](#database-properties)       | Yes      |
+| `tables`        | [Tables and columns to search](#table-properties)            | Yes      |
+| `embedding_llm` | [Embedding provider configuration](#llm-provider-properties) | Yes (unless set in defaults) |
+| `rag_llm`       | Completion provider configuration                            | Yes (unless set in defaults) |
+| `api_keys`      | API key file paths (overrides defaults/global)               | No       |
+| `token_budget`  | Maximum tokens for context documents                         | No (uses defaults) |
+| `top_n`         | Maximum number of results to retrieve                        | No (uses defaults) |
 
-### Database Fields
+### Database Properties
 
 | Field      | Description                              | Default    |
 |------------|------------------------------------------|------------|
@@ -129,10 +132,9 @@ pipelines:
 | `password` | Database password                        | `""`       |
 | `ssl_mode` | SSL mode (disable, allow, prefer, etc.)  | `prefer`   |
 
-### Table Fields
+### Table Properties
 
-Each table entry specifies a table with text content and its corresponding
-vector embeddings.
+Each table entry specifies a table with text content and its corresponding vector embeddings.
 
 | Field           | Description                          | Required |
 |-----------------|--------------------------------------|----------|
@@ -172,18 +174,14 @@ tables:
       logic: "AND"
 ```
 
-Raw SQL filters are useful when you need complex expressions like subqueries,
-JOINs, or functions that cannot be expressed with the structured format. Since
-config files are controlled by administrators, raw SQL is safe to use here.
+Raw SQL filters are useful when you need complex expressions like subqueries, JOINs, or functions that cannot be expressed with the structured format. Since config files are controlled by administrators, raw SQL is safe to use here.
 
-Filters can also be specified per-request via the API's `filter` parameter.
-API filters must use the structured format (for security) and will be combined
-with any configured filter using AND.
+Filters can also be specified per-request via the API's `filter` parameter. API filters must use the structured format (for security) and will be combined with any configured filter using AND.
 
 **Supported operators (for structured filters):** `=`, `!=`, `<`, `>`, `<=`,
 `>=`, `LIKE`, `ILIKE`, `IN`, `NOT IN`, `IS NULL`, `IS NOT NULL`
 
-### LLM Provider Configuration
+### LLM Provider Properties
 
 The `embedding_llm` and `rag_llm` properties use the same configuration structure:
 
@@ -192,7 +190,7 @@ The `embedding_llm` and `rag_llm` properties use the same configuration structur
 | `provider` | LLM provider name            | Yes      |
 | `model`    | Model name                   | Yes      |
 
-#### Supported Providers
+The RAG server supports the following providers:
 
 | Provider    | Embedding Support | Completion Support |
 |-------------|-------------------|-------------------|
