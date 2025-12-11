@@ -8,9 +8,9 @@ The RAG server implements a Retrieval-Augmented Generation pipeline that:
 
 1. receives a user query.
 2. generates an embedding for the query.
-3. searches the database using hybrid search (vector + BM25)
-4. builds context from the most relevant documents
-5. generates an answer using an LLM with the context
+3. searches the database using hybrid search (vector + BM25).
+4. builds context from the most relevant documents.
+5. generates an answer using an LLM with the context.
 
 ```mermaid
 flowchart LR
@@ -26,7 +26,9 @@ flowchart LR
 
 ## Components
 
-### HTTP Server
+The RAG Server is made up of the following components.
+
+**HTTP Server**
 
 The server uses Go's standard `net/http` package with the following
 endpoints (all under the `/v1` API version prefix):
@@ -41,23 +43,21 @@ specification for API discovery by tools like restish.
 
 Streaming responses use Server-Sent Events (SSE) for real-time output.
 
-### Pipeline Manager
+**Pipeline Manager**
 
 The pipeline manager (`internal/pipeline`) creates and manages pipeline
-instances from the configuration. Each pipeline contains:
+instances from the configuration. Each pipeline contains a:
 
-- Database connection pool
-- Embedding provider
-- Completion provider
-- Orchestrator
+- database connection pool
+- embedding provider
+- completion provider
+- orchestrator
 
-### Orchestrator
+**Orchestrator**
 
-The orchestrator (`internal/pipeline/orchestrator.go`) coordinates the RAG
-pipeline execution:
+The orchestrator (`internal/pipeline/orchestrator.go`) coordinates the RAG pipeline execution via:
 
-1. **Query Embedding** - Converts the query to a vector using the embedding
-   provider
+1. **Query Embedding** - Converts the query to a vector using the embedding provider.
 
 2. **Hybrid Search** - For each configured column pair:
 
@@ -65,19 +65,20 @@ pipeline execution:
    - BM25 text search for keyword matching
    - Results merged using Reciprocal Rank Fusion (RRF)
 
-3. **Deduplication** - Removes duplicate results across column pairs
+3. **Deduplication** - Removes duplicate results across column pairs.
 
 4. **Context Building** - Selects documents within the token budget,
-   truncating the last document if needed to fit
+   truncating the last document if needed to fit.
 
 5. **Completion** - Sends the context and query to the completion provider
-   to generate an answer
+   to generate an answer.
 
-### Hybrid Search
 
-The server combines two search methods:
+## Hybrid Search Support
 
-#### Vector Search
+The server combines two search methods: Vector search and BM25 search.
+
+**Vector Search**
 
 Uses PostgreSQL's pgvector extension for semantic similarity search:
 
@@ -88,7 +89,7 @@ ORDER BY embedding <=> $1
 LIMIT $2
 ```
 
-#### BM25 Search
+**BM25 Search**
 
 Implements the Okapi BM25 algorithm for keyword matching:
 
@@ -107,7 +108,7 @@ Where:
 - N = total number of documents
 - n = number of documents containing the term
 
-#### Reciprocal Rank Fusion
+**Reciprocal Rank Fusion**
 
 Results from both methods are combined using RRF:
 
@@ -118,7 +119,8 @@ RRF(d) = Σ 1 / (k + rank(d))
 Where k=60 (the standard RRF constant). Documents appearing in both result
 sets receive higher combined scores.
 
-### LLM Providers
+
+## LLM Providers
 
 The server supports multiple LLM providers through a common interface:
 
@@ -146,10 +148,10 @@ Supported providers:
 | Voyage    | `internal/llm/voyage`       | Yes       | No         |
 | Ollama    | `internal/llm/ollama`       | Yes       | Yes        |
 
-### Token Budget
 
-The token budget prevents sending too much context to the LLM. The
-orchestrator:
+## Token Budget
+
+The token budget prevents sending too much context to the LLM. The orchestrator:
 
 1. Estimates tokens for each document (approximately 4 characters per token)
 2. Includes documents until the budget is reached
@@ -157,6 +159,7 @@ orchestrator:
    remaining budget
 
 This ensures predictable LLM costs while maximizing relevant context.
+
 
 ## Database Schema Requirements
 
@@ -202,6 +205,7 @@ Error codes:
 - `STREAMING_ERROR` - SSE streaming failed
 - `INTERNAL_ERROR` - Unexpected server error
 
+
 ## Logging
 
 The server uses Go's structured logging (`log/slog`) with JSON output.
@@ -211,6 +215,7 @@ Log levels:
 - `INFO` - Normal operations
 - `WARN` - Non-fatal issues (e.g., search failures on one column pair)
 - `ERROR` - Failures requiring attention
+
 
 ## Concurrency
 

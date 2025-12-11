@@ -75,6 +75,12 @@ defaults:
 | `rag_llm`        | Default completion provider configuration| None    |
 | `api_keys`       | Default API key file paths               | None    |
 
+The token budget prevents sending too much context to the LLM; this ensures predictable LLM costs while maximizing relevant context.  The [orchestrator](architecture.md):
+
+1. Estimates tokens for each document (approximately 4 characters per token).
+2. Includes documents until the budget is reached.
+3. Truncates the final document at a sentence boundary if it exceeds the remaining budget.
+
 When you set default values, your individual pipelines definitions can omit the corresponding fields and will inherit the default values. A Pipeline can also override specific fields while inheriting others.
 
 ## Specifying Properties in the Pipeline Section
@@ -133,7 +139,11 @@ pipelines:
 
 ### Table Properties
 
-Each table entry specifies a table with text content and its corresponding vector embeddings.
+Each table entry specifies a table with text content and its corresponding vector embeddings.  Each table used in a pipeline must have:
+
+- A text column containing the document content
+- A vector column containing the embedding (using pgvector)
+
 
 | Field           | Description                          | Required |
 |-----------------|--------------------------------------|----------|
