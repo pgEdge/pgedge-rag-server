@@ -62,7 +62,7 @@ nav:
       - Introduction: index.md
       - Architecture: architecture.md
   - Installing pgEdge RAG Server:
-      - Installing RAG Server: installation.md
+      - Installing pgEdge RAG Server: installation.md
       - pgEdge RAG Server Quickstart: quickstart.md
   - Configuring the RAG Server:
       - Creating a Configuration File: configuration.md

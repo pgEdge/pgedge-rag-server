@@ -7,12 +7,12 @@ Before invoking the [`pgedge-rag-server` executable](usage.md), you need to crea
 * [API key location](keys.md).
 * embedding information for your Postgres database.
 
-The default name of the file is pgedge-rag-server.yaml; the server searches for configuration file in:
+The default name of the file is `pgedge-rag-server.yaml`.
+
+When you invoke `pgedge-rag-server` you can optionally include the `--config` option to specify the complete path to a custom location for the configuration file.  If you do not specify a location on the command line, the server searches for configuration files in:
 
 1. `/etc/pgedge/pgedge-rag-server.yaml`
 2. the directory that contains the `pgedge-rag-server` binary.
-
-When you invoke `pgedge-rag-server` you can optionally include the `--config` option to specify the complete path to a custom location for the configuration file.
 
 
 ## Configuration File Structure
@@ -23,8 +23,7 @@ The configuration file includes the following top-level sections:
 - [`defaults`](#specifying-properties-in-the-defaults-section) - Default values for pipelines (LLM providers, token budget, etc.)
 - [`pipelines`](#specifying-properties-in-the-server-section) - RAG pipeline definitions
 
-You can optionally [set the API key value](keys.md) in the configuration file,
-on the command line, or in an environment variable.
+You can optionally [set the API key value](keys.md) in the configuration file, on the command line, or in an environment variable.
 
 ## Specifying Properties in the Server Section
 
