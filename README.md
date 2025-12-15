@@ -1,6 +1,6 @@
 # pgEdge RAG Server
 
-[![CI](https://github.com/pgEdge/pgedge-rag-server/actions/workflows/ci.yml/badge.svg)](https://github.com/pgEdge/pgedge-rag-server/actions/workflows/ci.yml)
+[![CI](https://github.com/pgEdge/pgedge-rag-server/actions/workflows/ci.yml/badge.svg)](https://github.com/pgEdge/pgedge-rag-server/actions/workflows/ci.yml) [![Release](https://github.com/pgEdge/pgedge-rag-server/actions/workflows/release.yml/badge.svg)](https://github.com/pgEdge/pgedge-rag-server/actions/workflows/release.yml)
 
   - [pgEdge RAG Server](docs/index.md)
   - [Architecture](docs/architecture.md)
