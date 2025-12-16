@@ -9,6 +9,12 @@ on:
     pull_request:
         branches:
             - main
+    workflow_dispatch:
+        inputs:
+            tag:
+                description: 'Git tag to build from (e.g., v1.0.0)'
+                required: true
+                type: string
 
 env:
     REGISTRY: ghcr.io
@@ -24,6 +30,8 @@ jobs:
         steps:
             - name: Checkout repository
               uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event.inputs.tag || github.ref }}
 
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@v3
