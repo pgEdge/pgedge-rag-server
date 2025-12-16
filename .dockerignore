@@ -1,0 +1,55 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github
+
+# Documentation
+docs/
+site/
+mkdocs.yml
+*.md
+!LICENCE.md
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+bin/
+dist/
+
+# Test files
+*_test.go
+testdata/
+coverage.out
+coverage.html
+
+# Environment and secrets
+.env
+.env.*
+!docker.env.example
+*.pem
+*.key
+
+# Config files (will be mounted at runtime)
+*.yaml
+*.yml
+!go.mod
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Claude
+.claude/

@@ -1,0 +1,57 @@
+# pgEdge RAG Server Configuration Example for Docker Deployment
+# This is a sample configuration file for use with Docker Compose
+
+server:
+    listen_address: "0.0.0.0"
+    port: 8080
+    # TLS configuration (optional)
+    # tls:
+    #   cert_file: "/etc/pgedge/server.crt"
+    #   key_file: "/etc/pgedge/server.key"
+
+# Define one or more RAG pipelines
+pipelines:
+    - name: "example-docs"
+      description: "Example documentation pipeline"
+      database:
+          host: "postgres"
+          port: 5432
+          database: "ragdb"
+          username: "postgres"
+          password: "postgres"
+          # For production, use environment variables or secrets:
+          # password: "${POSTGRES_PASSWORD}"
+      tables:
+          - table: "documents"
+            text_column: "content"
+            vector_column: "embedding"
+            # Optional: specify additional columns to include in context
+            # metadata_columns:
+            #   - "title"
+            #   - "source"
+
+      # Embedding configuration
+      embedding_llm:
+          provider: "openai"
+          model: "text-embedding-3-small"
+          # API key from environment variable
+          api_key: "${OPENAI_API_KEY}"
+
+      # RAG LLM configuration
+      rag_llm:
+          provider: "anthropic"
+          model: "claude-sonnet-4-20250514"
+          # API key from environment variable
+          api_key: "${ANTHROPIC_API_KEY}"
+          # Optional: configure token budget
+          # max_tokens: 4096
+
+      # Search configuration
+      search:
+          # Number of results to retrieve
+          top_k: 10
+          # Enable hybrid search (vector + BM25)
+          hybrid: true
+          # Weight for vector search (0.0 to 1.0)
+          # Higher values favor vector similarity
+          vector_weight: 0.7

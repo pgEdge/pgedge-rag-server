@@ -1,0 +1,50 @@
+services:
+    postgres:
+        image: pgvector/pgvector:pg17
+        container_name: pgedge-rag-postgres
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER:-postgres}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+            POSTGRES_DB: ${POSTGRES_DB:-ragdb}
+        ports:
+            - "${POSTGRES_PORT:-5432}:5432"
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+            - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        networks:
+            - pgedge-rag-network
+
+    rag-server:
+        image: pgedge/rag-server:latest
+        container_name: pgedge-rag-server
+        build:
+            context: .
+            dockerfile: Dockerfile
+        ports:
+            - "${RAG_SERVER_PORT:-8080}:8080"
+        volumes:
+            - ./pgedge-rag-server.yaml:/etc/pgedge/pgedge-rag-server.yaml:ro
+        environment:
+            # API Keys - pass these via environment variables
+            OPENAI_API_KEY: ${OPENAI_API_KEY}
+            ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+            VOYAGE_API_KEY: ${VOYAGE_API_KEY}
+        depends_on:
+            postgres:
+                condition: service_healthy
+        networks:
+            - pgedge-rag-network
+        restart: unless-stopped
+
+volumes:
+    postgres_data:
+        driver: local
+
+networks:
+    pgedge-rag-network:
+        driver: bridge
