@@ -31,6 +31,9 @@ RUN echo "pgedge:x:1000:1000:pgedge:/app:/sbin/nologin" >> /etc/passwd && \
 # Set working directory
 WORKDIR /app
 
+# Copy CA certificates from builder (alpine has them installed)
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
 # Copy binary from builder
 COPY --from=builder /build/pgedge-rag-server .
 
