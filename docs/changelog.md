@@ -15,6 +15,9 @@ and this project adheres to
   Configure with `server.cors.enabled` and `server.cors.allowed_origins` to
   allow web applications to make requests from different origins.
 
+- Configurable system prompt per pipeline. Use the `system_prompt` field in
+  pipeline configuration to customize LLM instructions for generating responses.
+
 ## [1.0.0-beta2] - 2025-12-17
 
 ### Added

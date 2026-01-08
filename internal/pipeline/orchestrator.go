@@ -358,12 +358,19 @@ func (o *Orchestrator) buildContext(results []database.SearchResult) []llm.Conte
 	return contextDocs
 }
 
-// buildSystemPrompt returns the system prompt for RAG.
-func (o *Orchestrator) buildSystemPrompt() string {
-	return `You are a helpful assistant that answers questions based on the provided context.
+// DefaultSystemPrompt is the default system prompt used when none is configured.
+const DefaultSystemPrompt = `You are a helpful assistant that answers questions based on the provided context.
 Answer the question using only the information from the context.
 If the context doesn't contain enough information to answer, say so.
 Be concise and accurate in your responses.`
+
+// buildSystemPrompt returns the system prompt for RAG.
+// Uses the pipeline's configured system_prompt if set, otherwise returns the default.
+func (o *Orchestrator) buildSystemPrompt() string {
+	if o.cfg != nil && o.cfg.SystemPrompt != "" {
+		return o.cfg.SystemPrompt
+	}
+	return DefaultSystemPrompt
 }
 
 // buildSources extracts source information from results.

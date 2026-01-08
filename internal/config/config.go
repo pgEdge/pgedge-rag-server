@@ -71,6 +71,7 @@ type Pipeline struct {
 	APIKeys      APIKeysConfig  `yaml:"api_keys"` // Pipeline-specific API key paths
 	TokenBudget  int            `yaml:"token_budget"`
 	TopN         int            `yaml:"top_n"`
+	SystemPrompt string         `yaml:"system_prompt"` // Custom system prompt for LLM
 }
 
 // DatabaseConfig contains PostgreSQL connection settings.

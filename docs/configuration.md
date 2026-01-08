@@ -159,6 +159,31 @@ pipelines:
 | `api_keys`      | API key file paths (overrides defaults/global)               | No       |
 | `token_budget`  | Maximum tokens for context documents                         | No (uses defaults) |
 | `top_n`         | Maximum number of results to retrieve                        | No (uses defaults) |
+| `system_prompt` | Custom system prompt for the LLM                             | No (uses default) |
+
+### System Prompt
+
+The `system_prompt` field allows you to customize the instructions given to the
+LLM for generating responses. If not specified, the following default is used:
+
+```
+You are a helpful assistant that answers questions based on the provided context.
+Answer the question using only the information from the context.
+If the context doesn't contain enough information to answer, say so.
+Be concise and accurate in your responses.
+```
+
+Example with custom system prompt:
+
+```yaml
+pipelines:
+  - name: "support-docs"
+    system_prompt: |
+      You are a technical support assistant for our product.
+      Answer questions based only on the provided documentation.
+      If you cannot find the answer in the context, suggest contacting support.
+      Use a friendly, professional tone.
+```
 
 ### Database Properties
 
