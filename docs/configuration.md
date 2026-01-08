@@ -37,15 +37,49 @@ server:
     enabled: true
     cert_file: "/path/to/cert.pem"
     key_file: "/path/to/key.pem"
+  cors:
+    enabled: true
+    allowed_origins:
+      - "http://localhost:3000"
+      - "https://myapp.example.com"
 ```
 
-| Field            | Description                        | Default       |
-|------------------|------------------------------------|---------------|
-| `listen_address` | IP address to bind to              | `0.0.0.0`     |
-| `port`           | Port to listen on                  | `8080`        |
-| `tls.enabled`    | Enable TLS/HTTPS                   | `false`       |
-| `tls.cert_file`  | Path to TLS certificate            | Required if TLS enabled |
-| `tls.key_file`   | Path to TLS private key            | Required if TLS enabled |
+| Field                  | Description                        | Default       |
+|------------------------|------------------------------------|---------------|
+| `listen_address`       | IP address to bind to              | `0.0.0.0`     |
+| `port`                 | Port to listen on                  | `8080`        |
+| `tls.enabled`          | Enable TLS/HTTPS                   | `false`       |
+| `tls.cert_file`        | Path to TLS certificate            | Required if TLS enabled |
+| `tls.key_file`         | Path to TLS private key            | Required if TLS enabled |
+| `cors.enabled`         | Enable CORS headers                | `false`       |
+| `cors.allowed_origins` | List of allowed origins            | `[]` (none)   |
+
+### CORS Configuration
+
+CORS (Cross-Origin Resource Sharing) allows browser-based applications to make
+requests to the RAG server from different origins. Enable CORS when you need to
+access the API from web applications hosted on different domains.
+
+To allow all origins, use a wildcard:
+
+```yaml
+server:
+  cors:
+    enabled: true
+    allowed_origins:
+      - "*"
+```
+
+For production, specify exact origins for better security:
+
+```yaml
+server:
+  cors:
+    enabled: true
+    allowed_origins:
+      - "https://myapp.example.com"
+      - "https://docs.example.com"
+```
 
 
 ## Specifying Properties in the Defaults Section

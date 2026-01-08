@@ -32,9 +32,16 @@ type APIKeysConfig struct {
 
 // ServerConfig contains HTTP server settings.
 type ServerConfig struct {
-	ListenAddress string    `yaml:"listen_address"`
-	Port          int       `yaml:"port"`
-	TLS           TLSConfig `yaml:"tls"`
+	ListenAddress string     `yaml:"listen_address"`
+	Port          int        `yaml:"port"`
+	TLS           TLSConfig  `yaml:"tls"`
+	CORS          CORSConfig `yaml:"cors"`
+}
+
+// CORSConfig contains CORS (Cross-Origin Resource Sharing) settings.
+type CORSConfig struct {
+	Enabled        bool     `yaml:"enabled"`
+	AllowedOrigins []string `yaml:"allowed_origins"` // Origins to allow, or ["*"] for all
 }
 
 // TLSConfig contains TLS/HTTPS settings.
