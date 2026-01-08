@@ -1,26 +1,34 @@
 # pgEdge AI Toolkit RAG Server Quickstart
 
-This quickstart guide demonstrates how to get started with the RAG Server. The RAG Server demo includes the following features:
+This quickstart guide demonstrates how to get started with the RAG Server.
+The RAG Server demo includes the following features:
 
 - A PostgreSQL database preseeded with documentation content.
-- A pgEdge RAG Server with two configured pipelines for documentation search.
-- A web client that provides a simple interface for testing RAG pipelines.
+- A pgEdge RAG Server with two configured pipelines for documentation
+  search.
+- A web client that provides a simple interface for testing RAG
+  pipelines.
 
 ## Prerequisites
 
-This section describes the required software and credentials needed to run the demo.
+This section describes the required software and credentials needed to
+run the demo.
 
 - Install Docker Desktop by following the instructions at https://docs.docker.com/get-docker/.
 - Obtain an OpenAI API key by following the guidance at https://platform.openai.com/docs.
 
-After meeting the prerequisites, you can install the RAG Server demo using one of the following options:
+After meeting the prerequisites, you can install the RAG Server demo
+using one of the following options:
 
-- A [One-Step Quickstart](#one-step-quickstart) that uses default settings to launch the demo.
-- A [Three-Step Quickstart](#three-step-quickstart) that allows you to configure settings before launching the demo.
+- A [One-Step Quickstart](#one-step-quickstart) that uses default
+  settings to launch the demo.
+- A [Three-Step Quickstart](#three-step-quickstart) that allows you to
+  configure settings before launching the demo.
 
 ## One-Step Quickstart
 
-The single command option is the fastest way to get started. Execute the following command:
+The single command option is the fastest way to get started. Execute
+the following command:
 
 ```bash
 /bin/sh -c "$(curl -fsSL https://downloads.pgedge.com/quickstart/rag/pgedge-rag-demo.sh)"
@@ -28,14 +36,16 @@ The single command option is the fastest way to get started. Execute the followi
 
 This command performs the following actions:
 
-- Downloads *docker-compose.yml* and *.env.example* from the same location.
+- Downloads *docker-compose.yml* and *.env.example* from the same
+  location.
 - Prompts you for your API key(s) securely.
 - Starts all services automatically.
 - Displays connection details when ready.
 
 !!! note
 
-    The installer creates a temporary workspace in */var* and runs the demo from that location.
+    The installer creates a temporary workspace in */var* and runs the
+    demo from that location.
 
 Sample output from running the demo script:
 
@@ -113,7 +123,9 @@ Documentation: https://docs.pgedge.com/pgedge-rag-server
 ========================================
 ```
 
-Navigate to the URL for the RAG Server web client at http://localhost:3001. The web client provides an overview of the demo and sample queries that can be submitted to the RAG server.
+Navigate to the URL for the RAG Server web client at
+http://localhost:3001. The web client provides an overview of the demo
+and sample queries that can be submitted to the RAG server.
 
 ## Three-Step Quickstart
 
@@ -139,7 +151,8 @@ curl -fsSLO https://downloads.pgedge.com/quickstart/rag/.env.example
 cp .env.example .env
 ```
 
-Edit *.env* and add `OPENAI_API_KEY` and optionally `ANTHROPIC_API_KEY`.
+Edit *.env* and add `OPENAI_API_KEY` and optionally
+`ANTHROPIC_API_KEY`.
 
 Start the Docker container with the following command:
 
@@ -149,11 +162,15 @@ docker compose up -d
 
 During deployment, the following steps occur:
 
-1. PostgreSQL starts and downloads the documentation sets (approximately 35 MB).
-2. The RAG server starts and configures pipelines for the PostgreSQL and pgEdge documentation sets.
-3. A simple web UI becomes available that allows you to submit sample queries.
+1. PostgreSQL starts and downloads the documentation sets
+   (approximately 35 MB).
+2. The RAG server starts and configures pipelines for the PostgreSQL
+   and pgEdge documentation sets.
+3. A simple web UI becomes available that allows you to submit sample
+   queries.
 
-Once all services are healthy (approximately 60 seconds), you can access them as follows:
+Once all services are healthy (approximately 60 seconds), you can
+access them as follows:
 
 ```bash
 # Web Client Interface
@@ -178,7 +195,9 @@ curl -X POST http://localhost:8081/v1/pipelines/postgresql-docs \
   -d '{"query": "How do I create a table?"}'
 ```
 
-Navigate to the URL for the RAG Server web client at http://localhost:3001. The web client provides an overview of the demo and sample queries that can be submitted to the RAG server.
+Navigate to the URL for the RAG Server web client at
+http://localhost:3001. The web client provides an overview of the demo
+and sample queries that can be submitted to the RAG server.
 
 ## Managing the Service and Reviewing Log Files
 
