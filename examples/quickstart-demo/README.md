@@ -183,7 +183,9 @@ docker run -d \
       -c pgedge_vectorizer.batch_size=10 \
       -c pgedge_vectorizer.auto_cleanup_hours=0
 
-docker exec ragdb-test psql -U docuser -d ragdb -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pgedge_vectorizer;"
+docker exec ragdb-test psql -U docuser -d ragdb -c \
+  "CREATE EXTENSION IF NOT EXISTS vector; \
+   CREATE EXTENSION IF NOT EXISTS pgedge_vectorizer;"
 
 gunzip -c /tmp/ragdb-postgres-pgedge.sql.gz | \
 grep -v "pgedge_vectorizer\|CREATE SCHEMA public" | \
