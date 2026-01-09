@@ -1,0 +1,753 @@
+services:
+    # PostgreSQL service with pgEdge extensions
+    ragdb:
+        image: ghcr.io/pgedge/pgedge-postgres:17-spock5-standard
+        pull_policy: always
+        container_name: ragdb
+        command: >
+            postgres
+            -c listen_addresses='*'
+            -c shared_preload_libraries='pgedge_vectorizer'
+            -c pgedge_vectorizer.provider='openai'
+            -c pgedge_vectorizer.api_key_file='/var/lib/pgsql/openai-api-key'
+            -c pgedge_vectorizer.model='text-embedding-3-small'
+            -c pgedge_vectorizer.databases='ragdb'
+            -c pgedge_vectorizer.num_workers=2
+            -c pgedge_vectorizer.batch_size=10
+            -c pgedge_vectorizer.auto_cleanup_hours=0
+        environment:
+            POSTGRES_DB: ragdb
+            POSTGRES_USER: docuser
+            POSTGRES_PASSWORD: docpass
+            OPENAI_API_KEY: ${OPENAI_API_KEY}
+        volumes:
+            - postgres-data:/var/lib/pgsql/17/data
+        ports:
+            - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+        configs:
+            - source: create-api-key-file
+              target: /docker-entrypoint-initdb.d/00-create-api-key.sh
+              mode: 0755
+            - source: init-postgres
+              target: /docker-entrypoint-initdb.d/01-init-postgres.sh
+              mode: 0755
+        networks:
+            - pgedge-rag-network
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U docuser -d ragdb"]
+            interval: 5s
+            timeout: 3s
+            retries: 10
+            start_period: 30s
+
+    # RAG Server
+    rag-server:
+        image: ghcr.io/pgedge/rag-server:main
+        pull_policy: always
+        container_name: rag-server
+        depends_on:
+            ragdb:
+                condition: service_healthy
+        environment:
+            OPENAI_API_KEY: ${OPENAI_API_KEY}
+            ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+        configs:
+            - source: rag-config
+              target: /etc/pgedge/pgedge-rag-server.yaml
+        networks:
+            - pgedge-rag-network
+        ports:
+            - "127.0.0.1:${RAG_SERVER_PORT:-8081}:8080"
+        restart: unless-stopped
+
+    # Web Client - Simple UI for testing RAG pipelines
+    web-client:
+        image: node:18.20-alpine
+        container_name: web-client
+        depends_on:
+            - rag-server
+        environment:
+            RAG_SERVER_URL: http://rag-server:8080
+        working_dir: /app
+        command: sh -c "npm install --no-fund --no-audit express@4.18.2 && node server.js"
+        configs:
+            - source: web-server
+              target: /app/server.js
+            - source: web-index
+              target: /app/public/index.html
+        networks:
+            - pgedge-rag-network
+        ports:
+            - "127.0.0.1:${WEB_CLIENT_PORT:-3001}:3000"
+        restart: unless-stopped
+
+volumes:
+    postgres-data:
+        driver: local
+
+networks:
+    pgedge-rag-network:
+        driver: bridge
+
+configs:
+    create-api-key-file:
+        content: |-
+            #!/usr/bin/env bash
+            set -e
+
+            echo "Creating OpenAI API key file..."
+
+            # Create key file from environment variable
+            echo "$$OPENAI_API_KEY" > /var/lib/pgsql/openai-api-key
+            chmod 600 /var/lib/pgsql/openai-api-key
+            chown postgres:postgres /var/lib/pgsql/openai-api-key
+
+            echo "API key file created successfully"
+
+    init-postgres:
+        content: |-
+            #!/usr/bin/env bash
+            set -e
+
+            echo "Initializing pgEdge RAG demo database..."
+
+            # Enable required extensions
+            psql -v ON_ERROR_STOP=1 --username "$$POSTGRES_USER" --dbname "$$POSTGRES_DB" <<-EOSQL
+                CREATE EXTENSION IF NOT EXISTS vector;
+                CREATE EXTENSION IF NOT EXISTS pgedge_vectorizer;
+
+                -- Verify extensions are loaded
+                SELECT extname, extversion FROM pg_extension
+                WHERE extname IN ('vector', 'pgedge_vectorizer');
+            EOSQL
+
+            echo "Extensions enabled successfully"
+
+            # Download and load seed data
+            echo "Downloading seed data..."
+            SEED_URL="https://downloads.pgedge.com/quickstart/rag/ragdb-postgres-pgedge.sql.gz"
+
+            if command -v wget > /dev/null; then
+                wget -q -O /tmp/seed.sql.gz "$$SEED_URL"
+            elif command -v curl > /dev/null; then
+                curl -sL -o /tmp/seed.sql.gz "$$SEED_URL"
+            else
+                echo "ERROR: Neither wget nor curl is available"
+                exit 1
+            fi
+
+            echo "Loading seed data..."
+            gunzip -c /tmp/seed.sql.gz | psql -v ON_ERROR_STOP=1 --username "$$POSTGRES_USER" --dbname "$$POSTGRES_DB"
+
+            rm -f /tmp/seed.sql.gz
+
+            echo "Database initialization complete"
+
+    rag-config:
+        content: |-
+            # pgEdge RAG Server - Quickstart Demo Configuration
+
+            server:
+                listen_address: "0.0.0.0"
+                port: 8080
+
+            # Default settings for all pipelines
+            defaults:
+                token_budget: 4000
+                top_n: 10
+
+            # Two demonstration pipelines with product-specific filters
+            pipelines:
+                # Pipeline 1: PostgreSQL documentation
+                - name: "postgresql-docs"
+                  description: "Search PostgreSQL product documentation"
+                  database:
+                      host: "ragdb"
+                      port: 5432
+                      database: "ragdb"
+                      username: "docuser"
+                      password: "docpass"
+                      ssl_mode: "disable"
+                  tables:
+                      - table: "documents_content_chunks"
+                        text_column: "content"
+                        vector_column: "embedding"
+                        filter: "source_id IN (SELECT id FROM documents WHERE product = 'PostgreSQL')"
+                  embedding_llm:
+                      provider: "openai"
+                      model: "text-embedding-3-small"
+                  rag_llm:
+                      provider: "openai"
+                      model: "gpt-4o-mini"
+
+                # Pipeline 2: pgEdge Platform documentation
+                - name: "pgedge-docs"
+                  description: "Search pgEdge Platform documentation"
+                  database:
+                      host: "ragdb"
+                      port: 5432
+                      database: "ragdb"
+                      username: "docuser"
+                      password: "docpass"
+                      ssl_mode: "disable"
+                  tables:
+                      - table: "documents_content_chunks"
+                        text_column: "content"
+                        vector_column: "embedding"
+                        filter: "source_id IN (SELECT id FROM documents WHERE product = 'pgEdge Platform')"
+                  embedding_llm:
+                      provider: "openai"
+                      model: "text-embedding-3-small"
+                  rag_llm:
+                      provider: "openai"
+                      model: "gpt-4o-mini"
+
+    web-server:
+        content: |-
+            const express = require('express');
+            const app = express();
+            const port = 3000;
+
+            // Middleware
+            app.use(express.json({ limit: '256kb' }));
+            app.use(express.static('public'));
+
+            // Proxy endpoint to RAG server
+            app.post('/api/query', async (req, res) => {
+                const { pipeline, query } = req.body;
+
+                if (!pipeline || !query) {
+                    return res.status(400).json({ error: 'Missing pipeline or query' });
+                }
+
+                // Validate pipeline name against whitelist to prevent SSRF
+                const allowedPipelines = ['postgresql-docs', 'pgedge-docs'];
+                if (!allowedPipelines.includes(pipeline)) {
+                    return res.status(400).json({ error: 'Invalid pipeline name' });
+                }
+
+                const ragServerUrl = process.env.RAG_SERVER_URL || 'http://rag-server:8080';
+                const url = `$${ragServerUrl}/v1/pipelines/$${pipeline}`;
+
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query })
+                    });
+
+                    const data = await response.json();
+                    res.json(data);
+                } catch (error) {
+                    res.status(500).json({ error: error.message });
+                }
+            });
+
+            app.listen(port, '0.0.0.0', () => {
+                console.log(`Web client running on port $${port}`);
+            });
+
+    web-index:
+        content: |-
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>pgEdge RAG Server - Demo Client</title>
+                <link rel="icon" href="https://www.pgedge.com/static/images/pgEdge-favicon.webp" type="image/x-icon">
+                <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+                <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        background: #f5f5f5;
+                        padding: 20px;
+                    }
+                    .container {
+                        max-width: 1200px;
+                        margin: 0 auto;
+                        background: white;
+                        border-radius: 8px;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                        overflow: hidden;
+                    }
+                    .header {
+                        background: #02062b;
+                        color: white;
+                        padding: 30px;
+                        display: flex;
+                        align-items: center;
+                        gap: 20px;
+                    }
+                    .logo { height: 40px; width: auto; flex-shrink: 0; }
+                    .header-text { flex: 1; }
+                    .header h1 { font-size: 28px; margin-bottom: 8px; }
+                    .header p { opacity: 0.9; font-size: 14px; }
+                    .header-resources {
+                        font-size: 13px;
+                        opacity: 0.9;
+                    }
+                    .header-resources p {
+                        margin-bottom: 6px;
+                        font-weight: 600;
+                    }
+                    .header-resources ul {
+                        list-style: none;
+                        margin: 0;
+                        padding: 0;
+                    }
+                    .header-resources li {
+                        margin-bottom: 4px;
+                    }
+                    .header-resources a {
+                        color: white;
+                        text-decoration: none;
+                        opacity: 0.9;
+                    }
+                    .header-resources a:hover {
+                        opacity: 1;
+                        text-decoration: underline;
+                    }
+                    .description {
+                        background: #f8f9ff;
+                        border-left: 4px solid #667eea;
+                        padding: 20px;
+                        margin-bottom: 30px;
+                        border-radius: 4px;
+                        line-height: 1.7;
+                        color: #333;
+                    }
+                    .description h3 {
+                        color: #667eea;
+                        font-size: 16px;
+                        margin-bottom: 12px;
+                    }
+                    .description p { margin-bottom: 10px; font-size: 14px; }
+                    .description .flow {
+                        font-family: 'Monaco', 'Menlo', monospace;
+                        background: white;
+                        padding: 12px;
+                        border-radius: 4px;
+                        font-size: 12px;
+                        margin-top: 12px;
+                        color: #667eea;
+                        border: 1px solid #e0e0e0;
+                        overflow-x: auto;
+                        white-space: pre;
+                    }
+                    .content { padding: 30px; }
+                    .footer {
+                        margin-top: 40px;
+                        padding-top: 20px;
+                        border-top: 2px solid #e0e0e0;
+                        font-size: 13px;
+                        color: #666;
+                        line-height: 1.6;
+                    }
+                    .footer a {
+                        color: #667eea;
+                        text-decoration: none;
+                    }
+                    .footer a:hover {
+                        text-decoration: underline;
+                    }
+                    .footer ul {
+                        margin: 8px 0 0 20px;
+                        padding: 0;
+                    }
+                    .footer li {
+                        margin: 4px 0;
+                    }
+                    .section { margin-bottom: 30px; }
+                    .query-section {
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 20px;
+                    }
+                    .query-col {
+                        display: flex;
+                        flex-direction: column;
+                    }
+                    .copy-btn {
+                        background: #02062b;
+                        color: white;
+                        border: none;
+                        padding: 12px 32px;
+                        border-radius: 6px;
+                        font-size: 14px;
+                        font-weight: 600;
+                        cursor: pointer;
+                        transition: background 0.2s;
+                    }
+                    .copy-btn:hover { background: #030936; }
+                    .copy-btn.copied {
+                        background: #4caf50;
+                    }
+                    .copy-btn:disabled {
+                        background: #ccc;
+                        cursor: not-allowed;
+                    }
+                    @media (max-width: 768px) {
+                        .query-section {
+                            grid-template-columns: 1fr;
+                        }
+                    }
+                    .section-title {
+                        font-size: 14px;
+                        font-weight: 600;
+                        color: #666;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                        margin-bottom: 12px;
+                    }
+                    .examples {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                        gap: 12px;
+                        margin-bottom: 20px;
+                    }
+                    .example-btn {
+                        padding: 12px 16px;
+                        border: 2px solid #e0e0e0;
+                        border-radius: 6px;
+                        background: white;
+                        cursor: pointer;
+                        text-align: left;
+                        transition: all 0.2s;
+                    }
+                    .example-btn:hover {
+                        border-color: #667eea;
+                        background: #f8f9ff;
+                    }
+                    .example-btn.active {
+                        border-color: #667eea;
+                        background: #667eea;
+                        color: white;
+                    }
+                    .example-btn .title {
+                        font-weight: 600;
+                        font-size: 14px;
+                        margin-bottom: 4px;
+                    }
+                    .example-btn .desc {
+                        font-size: 12px;
+                        opacity: 0.7;
+                    }
+                    textarea {
+                        width: 100%;
+                        padding: 12px;
+                        border: 2px solid #e0e0e0;
+                        border-radius: 6px;
+                        font-family: 'Monaco', 'Menlo', monospace;
+                        font-size: 13px;
+                        resize: vertical;
+                        transition: border-color 0.2s;
+                    }
+                    textarea:focus {
+                        outline: none;
+                        border-color: #667eea;
+                    }
+                    .btn-run {
+                        background: #02062b;
+                        color: white;
+                        border: none;
+                        padding: 12px 32px;
+                        border-radius: 6px;
+                        font-size: 14px;
+                        font-weight: 600;
+                        cursor: pointer;
+                        transition: background 0.2s;
+                    }
+                    .btn-run:hover { background: #030936; }
+                    .btn-run:disabled {
+                        background: #ccc;
+                        cursor: not-allowed;
+                    }
+                    .response {
+                        background: #f8f9fa;
+                        border-left: 4px solid #667eea;
+                        padding: 16px;
+                        border-radius: 4px;
+                        white-space: pre-wrap;
+                        font-family: 'Monaco', 'Menlo', monospace;
+                        font-size: 13px;
+                        line-height: 1.6;
+                    }
+                    .error { border-left-color: #f44336; color: #c62828; }
+                    .loading {
+                        display: inline-block;
+                        width: 16px;
+                        height: 16px;
+                        border: 3px solid rgba(255,255,255,0.3);
+                        border-top-color: white;
+                        border-radius: 50%;
+                        animation: spin 1s linear infinite;
+                    }
+                    @keyframes spin {
+                        to { transform: rotate(360deg); }
+                    }
+                    .formatted-answer {
+                        background: #fff;
+                        border-left: 4px solid #02062b;
+                        padding: 20px;
+                        border-radius: 4px;
+                        line-height: 1.7;
+                        color: #333;
+                    }
+                    .formatted-answer h1,
+                    .formatted-answer h2,
+                    .formatted-answer h3 {
+                        color: #02062b;
+                        margin-top: 20px;
+                        margin-bottom: 10px;
+                    }
+                    .formatted-answer h1 { font-size: 24px; }
+                    .formatted-answer h2 { font-size: 20px; }
+                    .formatted-answer h3 { font-size: 16px; }
+                    .formatted-answer p {
+                        margin-bottom: 12px;
+                    }
+                    .formatted-answer ul,
+                    .formatted-answer ol {
+                        margin-left: 24px;
+                        margin-bottom: 12px;
+                    }
+                    .formatted-answer li {
+                        margin-bottom: 6px;
+                    }
+                    .formatted-answer code {
+                        background: #f5f5f5;
+                        padding: 2px 6px;
+                        border-radius: 3px;
+                        font-family: 'Monaco', 'Menlo', monospace;
+                        font-size: 13px;
+                    }
+                    .formatted-answer pre {
+                        background: #f5f5f5;
+                        padding: 12px;
+                        border-radius: 4px;
+                        overflow-x: auto;
+                        margin-bottom: 12px;
+                    }
+                    .formatted-answer pre code {
+                        background: none;
+                        padding: 0;
+                    }
+                    .formatted-answer blockquote {
+                        border-left: 3px solid #ddd;
+                        padding-left: 16px;
+                        color: #666;
+                        margin-bottom: 12px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <img src="https://a.storyblok.com/f/187930/1199x274/5f1efad385/pgedger_color_white-2x.png" alt="pgEdge" class="logo">
+                        <div class="header-text">
+                            <h1>RAG Server Demo</h1>
+                            <p>Test RAG pipelines with sample queries</p>
+                        </div>
+                        <div class="header-resources">
+                            <p>Resources</p>
+                            <ul>
+                                <li><a href="https://github.com/pgEdge/pgedge-rag-server" target="_blank">RAG Server GitHub Repository</a></li>
+                                <li>Build a RAG Server
+                                    <ul style="margin-left: 16px; margin-top: 4px;">
+                                        <li><a href="https://www.pgedge.com/blog/building-a-rag-server-with-postgresql-part-1-loading-your-content" target="_blank">Part 1 - Loading Content</a></li>
+                                        <li><a href="https://www.pgedge.com/blog/building-a-rag-server-with-postgresql-part-2-chunking-and-embeddings" target="_blank">Part 2 - Chunking & Embedding</a></li>
+                                        <li><a href="https://www.pgedge.com/blog/building-a-rag-server-with-postgresql-part-3-deploying-your-rag-api" target="_blank">Part 3 - RAG API</a></li>
+                                    </ul>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="content">
+                        <div class="description">
+                            <h3>About This Demo</h3>
+                            <p>This demonstration showcases two pre-loaded documentation sets in the PostgreSQL database: <strong>PostgreSQL 17</strong> documentation and <strong>pgEdge Platform</strong> documentation. The pgEdge RAG Server is configured with two separate pipelines, one for each documentation set, allowing you to query each independently.</p>
+                            <p><strong>How it works:</strong> When you submit a query, the request flows from the web client to the RAG server, which generates an embedding using OpenAI's model. This embedding is used to search the specified PostgreSQL database pipeline for relevant documentation chunks. The matching results are sent back to the RAG server, which uses them as context for the LLM to generate a comprehensive answer that's returned to you.</p>
+                            <div class="flow">Web Client → RAG Server → Embedding Model → PostgreSQL Database → RAG Server → LLM → Web Client</div>
+                        </div>
+                        <div class="section">
+                            <div class="section-title">Select an Example Query to Run</div>
+                            <div class="examples" id="examples"></div>
+                        </div>
+
+                        <div class="section">
+                            <div class="query-section">
+                                <div class="query-col">
+                                    <div class="section-title">Query (editable)</div>
+                                    <textarea id="query" rows="6" placeholder="Enter your query here..." oninput="updateCurl()"></textarea>
+                                    <button class="btn-run" id="runBtn" onclick="runQuery()" style="margin-top: 12px; align-self: flex-start;">
+                                        <span id="btnText">Run Query</span>
+                                    </button>
+                                </div>
+                                <div class="query-col">
+                                    <div class="section-title">cURL Command</div>
+                                    <textarea id="curlCommand" rows="6" readonly style="background: #f8f9fa; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px;"></textarea>
+                                    <button class="copy-btn" onclick="copyCurl()" style="margin-top: 12px; align-self: flex-start;">Copy to Clipboard</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="section" id="answerSection">
+                            <div class="section-title">Answer</div>
+                            <div class="formatted-answer" id="formattedAnswer" style="min-height: 150px;">No query executed yet</div>
+                        </div>
+
+                        <div class="section" id="responseSection">
+                            <div class="section-title">Response (JSON)</div>
+                            <div class="response" id="response" style="min-height: 150px;">No query executed yet</div>
+                        </div>
+                    </div>
+                </div>
+
+                <script>
+                    const examples = [
+                        {
+                            pipeline: 'postgresql-docs',
+                            title: 'PostgreSQL: Create Table',
+                            desc: 'PostgreSQL doc pipeline',
+                            query: 'How do I create a table in PostgreSQL?'
+                        },
+                        {
+                            pipeline: 'postgresql-docs',
+                            title: 'PostgreSQL: Indexes',
+                            desc: 'PostgreSQL doc pipeline',
+                            query: 'How do I create an index to improve query performance?'
+                        },
+                        {
+                            pipeline: 'pgedge-docs',
+                            title: 'pgEdge: Containers',
+                            desc: 'pgEdge doc pipeline',
+                            query: 'Tell me about pgEdge containers and any included postgres extensions.'
+                        },
+                        {
+                            pipeline: 'pgedge-docs',
+                            title: 'pgEdge: Spock Replication',
+                            desc: 'pgEdge doc pipeline',
+                            query: 'How does Spock multi-master replication work?'
+                        }
+                    ];
+
+                    let currentPipeline = '';
+
+                    function renderExamples() {
+                        const container = document.getElementById('examples');
+                        container.innerHTML = examples.map((ex, i) =>
+                            '<button class="example-btn" onclick="selectExample(' + i + ')">' +
+                                '<div class="title">' + ex.title + '</div>' +
+                                '<div class="desc">' + ex.desc + '</div>' +
+                            '</button>'
+                        ).join('');
+                    }
+
+                    function selectExample(index) {
+                        const ex = examples[index];
+                        currentPipeline = ex.pipeline;
+                        document.getElementById('query').value = ex.query;
+
+                        document.querySelectorAll('.example-btn').forEach((btn, i) => {
+                            btn.classList.toggle('active', i === index);
+                        });
+
+                        document.getElementById('formattedAnswer').textContent = 'No query executed yet';
+                        document.getElementById('response').textContent = 'No query executed yet';
+                        document.getElementById('response').className = 'response';
+                        updateCurl();
+                    }
+
+                    function updateCurl() {
+                        const query = document.getElementById('query').value.trim();
+                        const curlEl = document.getElementById('curlCommand');
+
+                        if (!query || !currentPipeline) {
+                            curlEl.value = '# Select an example query to see the cURL command';
+                            return;
+                        }
+
+                        const jsonData = JSON.stringify({ query }, null, 2);
+                        const curlCmd = 'curl -X POST http://localhost:8081/v1/pipelines/' + currentPipeline + ' \\\n' +
+                                        '  -H "Content-Type: application/json" \\\n' +
+                                        "  -d '" + jsonData + "'";
+
+                        curlEl.value = curlCmd;
+                    }
+
+                    function copyCurl() {
+                        const curlEl = document.getElementById('curlCommand');
+                        const copyBtn = event.target;
+
+                        curlEl.select();
+                        document.execCommand('copy');
+
+                        // Visual feedback
+                        const originalText = copyBtn.textContent;
+                        copyBtn.textContent = 'Copied!';
+                        copyBtn.classList.add('copied');
+
+                        setTimeout(() => {
+                            copyBtn.textContent = originalText;
+                            copyBtn.classList.remove('copied');
+                        }, 2000);
+                    }
+
+                    async function runQuery() {
+                        const query = document.getElementById('query').value.trim();
+                        if (!query || !currentPipeline) {
+                            alert('Please select an example query first');
+                            return;
+                        }
+
+                        const btn = document.getElementById('runBtn');
+                        const btnText = document.getElementById('btnText');
+                        const responseEl = document.getElementById('response');
+                        const formattedAnswerEl = document.getElementById('formattedAnswer');
+
+                        btn.disabled = true;
+                        btnText.innerHTML = '<span class="loading"></span>';
+                        responseEl.textContent = 'Loading...';
+                        responseEl.className = 'response';
+                        formattedAnswerEl.textContent = 'Loading...';
+
+                        try {
+                            const res = await fetch('/api/query', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ pipeline: currentPipeline, query })
+                            });
+
+                            const data = await res.json();
+
+                            if (res.ok) {
+                                responseEl.className = 'response';
+                                responseEl.textContent = JSON.stringify(data, null, 2);
+
+                                if (data.answer) {
+                                    formattedAnswerEl.innerHTML = marked.parse(data.answer);
+                                } else {
+                                    formattedAnswerEl.textContent = 'No answer field in response';
+                                }
+                            } else {
+                                responseEl.className = 'response error';
+                                responseEl.textContent = 'Error: ' + (data.error || 'Request failed');
+                                formattedAnswerEl.textContent = 'Error: ' + (data.error || 'Request failed');
+                            }
+                        } catch (error) {
+                            responseEl.className = 'response error';
+                            responseEl.textContent = 'Error: ' + error.message;
+                            formattedAnswerEl.textContent = 'Error: ' + error.message;
+                        } finally {
+                            btn.disabled = false;
+                            btnText.textContent = 'Run Query';
+                        }
+                    }
+
+                    renderExamples();
+                </script>
+            </body>
+            </html>
