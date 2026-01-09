@@ -37,7 +37,10 @@ the following command:
 /bin/sh -c "$(curl -fsSL https://downloads.pgedge.com/quickstart/rag/pgedge-rag-demo.sh)"
 ```
 
-This command performs the following actions:
+
+This command:
+
+
 
 - Downloads *docker-compose.yml* and *.env.example* from the same
   location.
