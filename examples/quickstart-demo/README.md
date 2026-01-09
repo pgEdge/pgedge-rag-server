@@ -1,20 +1,26 @@
 # pgEdge AI Toolkit RAG Server Quickstart
 
-This directory contains the AI Toolkit RAG Server Quickstart demo. These files are hosted at https://downloads.pgedge.com/quickstart/rag 
+This directory contains the AI Toolkit RAG Server Quickstart demo.
+These files are hosted at https://downloads.pgedge.com/quickstart/rag
 to support the live demo at https://www.pgedge.com/ai-toolkit.
 
-The purpose of this demo is to provide end users with a working interactive example of the RAG server in action with 
-the fewest configuration steps. Rather than building containers from the repository, the demo pulls the latest public 
-container images from the pgEdge repository.
+The purpose of this demo is to provide end users with a working
+interactive example of the RAG server in action with the fewest
+configuration steps. Rather than building containers from the
+repository, the demo pulls the latest public container images from the
+pgEdge repository.
 
 For more detail, see the [Quick Start Guide](../../docs/quickstart_demo.md).
 
-The vectorization process involves several steps and takes time to complete. The demo uses documentation sets that 
-have been preloaded into the database and vectorized before being captured with `pg_dump`. The *docker-compose.yml* 
-file downloads the content and restores it into the demo database in the user's Docker environment. Downloading the 
-preprocessed data is faster and easier than automating its creation from scratch as part of the demo. The demo directs 
-users to the RAG blog series, which outlines the complete process in detail. For future maintenance, here is how the 
-database dump for the demo was created.
+The vectorization process involves several steps and takes time to
+complete. The demo uses documentation sets that have been preloaded
+into the database and vectorized before being captured with `pg_dump`.
+The *docker-compose.yml* file downloads the content and restores it
+into the demo database in the user's Docker environment. Downloading
+the preprocessed data is faster and easier than automating its creation
+from scratch as part of the demo. The demo directs users to the RAG
+blog series, which outlines the complete process in detail. For future
+maintenance, here is how the database dump for the demo was created.
 
 ```shell
 # Download the repositories
@@ -184,4 +190,6 @@ grep -v "pgedge_vectorizer\|CREATE SCHEMA public" | \
 docker exec -i ragdb-test psql -U docuser -d ragdb
 ```
 
-The *ragdb-postgres-pgedge.sql.gz* artifact is hosted in Amazon S3 on the public download server so *docker-compose.yml* can load it into the demo database in the user's Docker environment.
+The *ragdb-postgres-pgedge.sql.gz* artifact is hosted in Amazon S3 on
+the public download server so *docker-compose.yml* can load it into the
+demo database in the user's Docker environment.
