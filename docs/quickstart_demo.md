@@ -1,4 +1,4 @@
-# pgEdge AI Toolkit RAG Server Quickstart
+# pgEdge AI Toolkit RAG Server Quickstart Demo
 
 This quickstart guide demonstrates how to get started with the RAG Server.
 The RAG Server demo includes the following features:
