@@ -3,7 +3,10 @@
 This quickstart guide demonstrates how to get started with the RAG Server.
 The RAG Server demo includes the following features:
 
-- A PostgreSQL database preseeded with documentation content.
+
+- A PostgreSQL database seeded with documentation content.
+
+
 - A pgEdge RAG Server with two configured pipelines for documentation
   search.
 - A web client that provides a simple interface for testing RAG
