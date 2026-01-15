@@ -2,12 +2,12 @@
 
 The pgEdge RAG Server can be installed by building from source or with
 pgEdge Enterprise Postgres packages. For details about installing the
-RAG server with a package,see the platform-specific documentation for
-[Postgres Enterprise Postgres](https://docs.pgedge.com/enterprise/).
+RAG server with a package, see the platform-specific documentation for
+[pgEdge Enterprise Postgres](https://docs.pgedge.com/enterprise/).
 
 Before installing the pgEdge RAG Server, you should install:
 
-- Go, version 1.24 or later.
+- Go, version 1.23 or later.
 - PostgreSQL 14 or later.
 - [pgvector](https://github.com/pgvector/pgvector).
 
