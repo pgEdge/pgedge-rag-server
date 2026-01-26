@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+
+reviews:
+  # Reduce verbosity
+  poem: false                        # Disable the celebratory poem
+  high_level_summary: false          # Disable high-level summary in PR description
+  collapse_walkthrough: true         # Collapse the walkthrough into a collapsible section
+  changed_files_summary: false       # Disable the file-by-file summary table
+  sequence_diagrams: false           # Disable auto-generated sequence diagrams
+  estimate_code_review_effort: false # Disable effort estimation
+  review_status: false               # Disable the review status block
+  
+  # These add related context - disable if not useful
+  related_issues: false
+  related_prs: false
+  suggested_labels: false
+  suggested_reviewers: false
+  assess_linked_issues: false
+  
+  # Keep the actual reviews enabled
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
