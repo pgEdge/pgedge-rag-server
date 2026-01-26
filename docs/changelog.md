@@ -9,6 +9,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [1.0.0-beta3] - 2026-01-26
+
 ### Added
 
 - CORS (Cross-Origin Resource Sharing) support for browser-based API access.
@@ -17,6 +19,15 @@ and this project adheres to
 
 - Configurable system prompt per pipeline. Use the `system_prompt` field in
   pipeline configuration to customize LLM instructions for generating responses.
+
+### Fixed
+
+- Docker image now includes CA certificates for HTTPS connections to LLM APIs.
+
+### Documentation
+
+- Added quickstart demo guide with step-by-step instructions.
+- Fixed typos and incorrect version references in installation documentation.
 
 ## [1.0.0-beta2] - 2025-12-17
 
