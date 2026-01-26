@@ -315,6 +315,67 @@ func TestBuildSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPrompt_CustomPrompt(t *testing.T) {
+	customPrompt := "You are Ellie, a custom assistant for pgEdge docs."
+
+	orch := &Orchestrator{
+		cfg: &config.Pipeline{
+			Name:         "test-pipeline",
+			SystemPrompt: customPrompt,
+		},
+		bm25Index: bm25.NewIndex(),
+	}
+
+	prompt := orch.buildSystemPrompt()
+
+	if prompt != customPrompt {
+		t.Errorf("expected custom prompt %q, got %q", customPrompt, prompt)
+	}
+}
+
+func TestBuildSystemPrompt_EmptyConfigPrompt(t *testing.T) {
+	// When SystemPrompt is empty string, should fall back to default
+	orch := &Orchestrator{
+		cfg: &config.Pipeline{
+			Name:         "test-pipeline",
+			SystemPrompt: "", // Empty
+		},
+		bm25Index: bm25.NewIndex(),
+	}
+
+	prompt := orch.buildSystemPrompt()
+
+	if prompt != DefaultSystemPrompt {
+		t.Errorf("expected default prompt when config has empty SystemPrompt")
+	}
+}
+
+func TestSystemPromptPassedToCompletion(t *testing.T) {
+	// This test verifies that the custom system prompt is correctly
+	// configured in the orchestrator and would be passed to completion
+	customPrompt := "You are Ellie, a custom assistant."
+
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{
+			Name:         "test-pipeline",
+			SystemPrompt: customPrompt,
+			Tables: []config.TableSource{
+				{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+			},
+		},
+		EmbeddingProv:  &MockEmbeddingProvider{},
+		CompletionProv: &MockCompletionProvider{},
+		TokenBudget:    4000,
+		TopN:           5,
+	})
+
+	// Verify the orchestrator's buildSystemPrompt returns the custom prompt
+	builtPrompt := orch.buildSystemPrompt()
+	if builtPrompt != customPrompt {
+		t.Errorf("buildSystemPrompt() = %q, want %q", builtPrompt, customPrompt)
+	}
+}
+
 func containsPhrase(s, phrase string) bool {
 	return strings.Contains(s, phrase)
 }

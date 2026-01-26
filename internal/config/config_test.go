@@ -461,6 +461,40 @@ func TestApplyDefaults_APIKeysCascade(t *testing.T) {
 	}
 }
 
+func TestLoad_SystemPrompt(t *testing.T) {
+	cfg, err := Load("../../testdata/configs/system-prompt.yaml")
+	if err != nil {
+		t.Fatalf("failed to load system-prompt config: %v", err)
+	}
+
+	if len(cfg.Pipelines) != 1 {
+		t.Fatalf("expected 1 pipeline, got %d", len(cfg.Pipelines))
+	}
+
+	p := cfg.Pipelines[0]
+	if p.Name != "test-with-system-prompt" {
+		t.Errorf("expected pipeline name 'test-with-system-prompt', got '%s'", p.Name)
+	}
+
+	// Verify system_prompt was parsed correctly
+	if p.SystemPrompt == "" {
+		t.Fatal("expected SystemPrompt to be set, but it was empty")
+	}
+
+	// Verify it contains expected content
+	expectedPhrases := []string{
+		"Ellie",
+		"pgEdge documentation",
+		"concise and accurate",
+	}
+
+	for _, phrase := range expectedPhrases {
+		if !contains(p.SystemPrompt, phrase) {
+			t.Errorf("SystemPrompt should contain '%s', got: %s", phrase, p.SystemPrompt)
+		}
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchSubstring(s, substr)
 }
