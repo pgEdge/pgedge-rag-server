@@ -206,10 +206,15 @@ Each table entry specifies a table with text content and its corresponding vecto
 
 | Field           | Description                          | Required |
 |-----------------|--------------------------------------|----------|
-| `table`         | Table name                           | Yes      |
+| `table`         | Table name (or view name)            | Yes      |
 | `text_column`   | Column containing text content       | Yes      |
 | `vector_column` | Column containing vector embeddings  | Yes      |
+| `id_column`     | Column to use as document ID         | No*      |
 | `filter`        | Filter to apply to results           | No       |
+
+*The `id_column` is required when using views, as views don't have a `ctid`
+system column. For regular tables, it's optional but recommended for stable
+document identification in hybrid search results.
 
 The `filter` field allows you to specify a filter that will be applied to all
 queries for this table. It can be specified in two formats:
@@ -269,5 +274,48 @@ The RAG server supports the following providers:
 
 Anthropic does not provide embedding models; use OpenAI or Voyage for
 embeddings with Anthropic for completions.
+
+### Search Configuration
+
+The `search` section controls how the RAG server performs document retrieval.
+By default, hybrid search (combining vector similarity and BM25 keyword
+matching) is enabled.
+
+```yaml
+pipelines:
+  - name: "my-docs"
+    # ... other config ...
+    search:
+      hybrid_enabled: true
+      vector_weight: 0.7
+```
+
+| Field            | Description                              | Default |
+|------------------|------------------------------------------|---------|
+| `hybrid_enabled` | Enable hybrid search (vector + BM25)     | `true`  |
+| `vector_weight`  | Weight for vector vs BM25 (0.0 to 1.0)   | `0.5`   |
+
+**Understanding vector_weight:**
+
+- `1.0` = Pure vector search (BM25 disabled)
+- `0.5` = Equal weight to vector and BM25 results
+- `0.0` = Pure BM25 search (not recommended)
+
+**Disabling hybrid search:**
+
+To use only vector search (no BM25), you can either:
+
+1. Set `hybrid_enabled: false`
+2. Set `vector_weight: 1.0`
+
+Both approaches skip the BM25 search phase entirely.
+
+**When to adjust these settings:**
+
+- Use higher `vector_weight` (0.7-0.9) when semantic similarity is more
+  important than keyword matching
+- Use lower `vector_weight` (0.3-0.5) when exact keyword matches are important
+- Disable hybrid search when using views without an `id_column` configured,
+  or when BM25 overhead is not acceptable
 
 

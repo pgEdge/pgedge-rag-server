@@ -72,6 +72,7 @@ type Pipeline struct {
 	TokenBudget  int            `yaml:"token_budget"`
 	TopN         int            `yaml:"top_n"`
 	SystemPrompt string         `yaml:"system_prompt"` // Custom system prompt for LLM
+	Search       SearchConfig   `yaml:"search"`        // Search behavior settings
 }
 
 // DatabaseConfig contains PostgreSQL connection settings.
@@ -94,7 +95,14 @@ type TableSource struct {
 	Table        string        `yaml:"table"`
 	TextColumn   string        `yaml:"text_column"`
 	VectorColumn string        `yaml:"vector_column"`
-	Filter       *ConfigFilter `yaml:"filter"` // Optional filter (raw SQL or structured)
+	IDColumn     string        `yaml:"id_column"` // Optional ID column (required for views)
+	Filter       *ConfigFilter `yaml:"filter"`    // Optional filter (raw SQL or structured)
+}
+
+// SearchConfig contains settings for search behavior.
+type SearchConfig struct {
+	HybridEnabled *bool    `yaml:"hybrid_enabled"` // Enable hybrid search (default: true)
+	VectorWeight  *float64 `yaml:"vector_weight"`  // Weight for vector vs BM25 (default: 0.5)
 }
 
 // FilterCondition represents a single filter condition.

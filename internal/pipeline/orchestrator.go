@@ -82,8 +82,12 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 		return nil, fmt.Errorf("failed to generate embedding: %w", err)
 	}
 
-	// Step 2: Perform hybrid search for each table
+	// Step 2: Perform search for each table
 	var allResults []database.SearchResult
+
+	// Determine if hybrid search should be used
+	useHybrid := o.cfg.Search.HybridEnabled != nil && *o.cfg.Search.HybridEnabled &&
+		(o.cfg.Search.VectorWeight == nil || *o.cfg.Search.VectorWeight < 1.0)
 
 	for _, table := range o.cfg.Tables {
 		// Skip if no database pool (shouldn't happen in production)
@@ -104,38 +108,46 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 			continue
 		}
 
-		// BM25 search - need to fetch documents first and index them
-		docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter)
-		if err != nil {
-			o.logger.Warn("failed to fetch documents for BM25",
-				"table", table.Table,
-				"error", err,
-			)
-			// Continue with just vector results
-			allResults = append(allResults, vectorResults...)
-			continue
-		}
-
-		// Index documents for BM25
-		o.bm25Index.Clear()
-		o.bm25Index.AddDocuments(docs)
-
-		// Search with BM25
-		bm25Results := o.bm25Index.Search(req.Query, topN*2)
-
-		// Convert BM25 results to SearchResult format
-		bm25SearchResults := make([]database.SearchResult, len(bm25Results))
-		for i, r := range bm25Results {
-			bm25SearchResults[i] = database.SearchResult{
-				ID:      r.ID,
-				Content: r.Content,
-				Score:   r.Score,
+		if useHybrid {
+			// BM25 search - need to fetch documents first and index them
+			docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter)
+			if err != nil {
+				o.logger.Warn("failed to fetch documents for BM25",
+					"table", table.Table,
+					"error", err,
+				)
+				// Continue with just vector results
+				allResults = append(allResults, vectorResults...)
+				continue
 			}
-		}
 
-		// Combine using RRF
-		hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN)
-		allResults = append(allResults, hybridResults...)
+			// Index documents for BM25
+			o.bm25Index.Clear()
+			o.bm25Index.AddDocuments(docs)
+
+			// Search with BM25
+			bm25Results := o.bm25Index.Search(req.Query, topN*2)
+
+			// Convert BM25 results to SearchResult format
+			bm25SearchResults := make([]database.SearchResult, len(bm25Results))
+			for i, r := range bm25Results {
+				bm25SearchResults[i] = database.SearchResult{
+					ID:      r.ID,
+					Content: r.Content,
+					Score:   r.Score,
+				}
+			}
+
+			// Combine using RRF
+			hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN)
+			allResults = append(allResults, hybridResults...)
+		} else {
+			// Vector-only mode
+			o.logger.Debug("using vector-only search",
+				"table", table.Table,
+			)
+			allResults = append(allResults, vectorResults...)
+		}
 	}
 
 	// Step 3: Deduplicate and limit results
@@ -208,8 +220,12 @@ func (o *Orchestrator) ExecuteStream(
 			return
 		}
 
-		// Step 2: Perform hybrid search
+		// Step 2: Perform search
 		var allResults []database.SearchResult
+
+		// Determine if hybrid search should be used
+		useHybrid := o.cfg.Search.HybridEnabled != nil && *o.cfg.Search.HybridEnabled &&
+			(o.cfg.Search.VectorWeight == nil || *o.cfg.Search.VectorWeight < 1.0)
 
 		for _, table := range o.cfg.Tables {
 			// Skip if no database pool (shouldn't happen in production)
@@ -226,27 +242,35 @@ func (o *Orchestrator) ExecuteStream(
 				continue
 			}
 
-			docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter)
-			if err != nil {
-				allResults = append(allResults, vectorResults...)
-				continue
-			}
-
-			o.bm25Index.Clear()
-			o.bm25Index.AddDocuments(docs)
-
-			bm25Results := o.bm25Index.Search(req.Query, topN*2)
-			bm25SearchResults := make([]database.SearchResult, len(bm25Results))
-			for i, r := range bm25Results {
-				bm25SearchResults[i] = database.SearchResult{
-					ID:      r.ID,
-					Content: r.Content,
-					Score:   r.Score,
+			if useHybrid {
+				docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter)
+				if err != nil {
+					allResults = append(allResults, vectorResults...)
+					continue
 				}
-			}
 
-			hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN)
-			allResults = append(allResults, hybridResults...)
+				o.bm25Index.Clear()
+				o.bm25Index.AddDocuments(docs)
+
+				bm25Results := o.bm25Index.Search(req.Query, topN*2)
+				bm25SearchResults := make([]database.SearchResult, len(bm25Results))
+				for i, r := range bm25Results {
+					bm25SearchResults[i] = database.SearchResult{
+						ID:      r.ID,
+						Content: r.Content,
+						Score:   r.Score,
+					}
+				}
+
+				hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN)
+				allResults = append(allResults, hybridResults...)
+			} else {
+				// Vector-only mode
+				o.logger.Debug("using vector-only search",
+					"table", table.Table,
+				)
+				allResults = append(allResults, vectorResults...)
+			}
 		}
 
 		results := o.deduplicateResults(allResults, topN)

@@ -212,6 +212,17 @@ func (c *Config) validatePipeline(index int, p Pipeline) ValidationErrors {
 		})
 	}
 
+	// Search config validation
+	if p.Search.VectorWeight != nil {
+		w := *p.Search.VectorWeight
+		if w < 0.0 || w > 1.0 {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".search.vector_weight",
+				Message: "must be between 0.0 and 1.0",
+			})
+		}
+	}
+
 	return errs
 }
 

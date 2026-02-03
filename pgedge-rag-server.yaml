@@ -25,33 +25,29 @@ pipelines:
           - table: "documents"
             text_column: "content"
             vector_column: "embedding"
-            # Optional: specify additional columns to include in context
-            # metadata_columns:
-            #   - "title"
-            #   - "source"
+            # Optional: specify ID column for views or explicit document IDs
+            # id_column: "id"
 
       # Embedding configuration
       embedding_llm:
           provider: "openai"
           model: "text-embedding-3-small"
-          # API key from environment variable
-          api_key: "${OPENAI_API_KEY}"
 
       # RAG LLM configuration
       rag_llm:
           provider: "anthropic"
           model: "claude-sonnet-4-20250514"
-          # API key from environment variable
-          api_key: "${ANTHROPIC_API_KEY}"
-          # Optional: configure token budget
-          # max_tokens: 4096
 
-      # Search configuration
+      # Token budget for context documents
+      token_budget: 4000
+
+      # Number of results to retrieve
+      top_n: 10
+
+      # Search configuration (optional)
       search:
-          # Number of results to retrieve
-          top_k: 10
-          # Enable hybrid search (vector + BM25)
-          hybrid: true
-          # Weight for vector search (0.0 to 1.0)
-          # Higher values favor vector similarity
+          # Enable hybrid search combining vector + BM25 (default: true)
+          hybrid_enabled: true
+          # Weight for vector search vs BM25 (0.0 to 1.0, default: 0.5)
+          # Set to 1.0 for vector-only search
           vector_weight: 0.7

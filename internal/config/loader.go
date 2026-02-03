@@ -174,5 +174,15 @@ func applyDefaults(cfg *Config) {
 		if p.Database.SSLMode == "" {
 			p.Database.SSLMode = "prefer"
 		}
+
+		// Apply search config defaults
+		if p.Search.HybridEnabled == nil {
+			defaultHybrid := true
+			p.Search.HybridEnabled = &defaultHybrid
+		}
+		if p.Search.VectorWeight == nil {
+			defaultWeight := 0.5
+			p.Search.VectorWeight = &defaultWeight
+		}
 	}
 }

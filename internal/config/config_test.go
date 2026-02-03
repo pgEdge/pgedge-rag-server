@@ -495,6 +495,111 @@ func TestLoad_SystemPrompt(t *testing.T) {
 	}
 }
 
+func TestApplyDefaults_SearchConfig(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Host:     "localhost",
+					Port:     5432,
+					Database: "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+				RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+				// No Search config set - should get defaults
+			},
+		},
+	}
+
+	applyDefaults(cfg)
+
+	p := cfg.Pipelines[0]
+	if p.Search.HybridEnabled == nil {
+		t.Fatal("expected HybridEnabled to be set")
+	}
+	if *p.Search.HybridEnabled != true {
+		t.Errorf("expected HybridEnabled to be true, got %v", *p.Search.HybridEnabled)
+	}
+	if p.Search.VectorWeight == nil {
+		t.Fatal("expected VectorWeight to be set")
+	}
+	if *p.Search.VectorWeight != 0.5 {
+		t.Errorf("expected VectorWeight to be 0.5, got %v", *p.Search.VectorWeight)
+	}
+}
+
+func TestValidation_InvalidVectorWeight(t *testing.T) {
+	invalidWeight := 1.5
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Host:     "localhost",
+					Port:     5432,
+					Database: "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+				RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+				Search: SearchConfig{
+					VectorWeight: &invalidWeight,
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for invalid vector_weight")
+	}
+
+	if !contains(err.Error(), "search.vector_weight") {
+		t.Errorf("expected error about search.vector_weight, got: %s", err.Error())
+	}
+}
+
+func TestValidation_ValidVectorWeight(t *testing.T) {
+	tests := []float64{0.0, 0.5, 1.0}
+	for _, w := range tests {
+		weight := w
+		cfg := &Config{
+			Server: ServerConfig{Port: 8080},
+			Pipelines: []Pipeline{
+				{
+					Name: "test",
+					Database: DatabaseConfig{
+						Host:     "localhost",
+						Port:     5432,
+						Database: "testdb",
+					},
+					Tables: []TableSource{
+						{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+					},
+					EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+					RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+					Search: SearchConfig{
+						VectorWeight: &weight,
+					},
+				},
+			},
+		}
+
+		err := cfg.Validate()
+		if err != nil {
+			t.Errorf("unexpected validation error for vector_weight=%v: %v", w, err)
+		}
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchSubstring(s, substr)
 }

@@ -126,16 +126,32 @@ func (p *Pool) FetchDocuments(
 		filterClause = filterClause + " AND " + baseCondition
 	}
 
-	// Try to use ctid as a unique identifier if no ID column exists
-	query := fmt.Sprintf(`
+	// Determine ID expression: use configured id_column, or ROW_NUMBER() fallback
+	var query string
+	if table.IDColumn != "" {
+		// Use configured ID column
+		query = fmt.Sprintf(`
 		SELECT
-			ctid::text AS id,
+			%s::text AS id,
 			%s AS content
 		FROM %s%s`,
-		pgx.Identifier{table.TextColumn}.Sanitize(),
-		parseTableIdentifier(table.Table).Sanitize(),
-		filterClause,
-	)
+			pgx.Identifier{table.IDColumn}.Sanitize(),
+			pgx.Identifier{table.TextColumn}.Sanitize(),
+			parseTableIdentifier(table.Table).Sanitize(),
+			filterClause,
+		)
+	} else {
+		// Fallback to ROW_NUMBER() for views or tables without explicit ID
+		query = fmt.Sprintf(`
+		SELECT
+			ROW_NUMBER() OVER()::text AS id,
+			%s AS content
+		FROM %s%s`,
+			pgx.Identifier{table.TextColumn}.Sanitize(),
+			parseTableIdentifier(table.Table).Sanitize(),
+			filterClause,
+		)
+	}
 
 	rows, err := p.pool.Query(ctx, query, filterArgs...)
 	if err != nil {
@@ -159,7 +175,10 @@ func (p *Pool) FetchDocuments(
 	return docs, nil
 }
 
-// FetchDocumentsByIDs fetches documents by their IDs (ctids).
+// FetchDocumentsByIDs fetches documents by their IDs.
+// When IDColumn is configured, it uses that column for filtering.
+// When using ROW_NUMBER() fallback (no IDColumn), this function cannot
+// reliably fetch by ID and returns an empty result.
 func (p *Pool) FetchDocumentsByIDs(
 	ctx context.Context,
 	table config.TableSource,
@@ -169,14 +188,22 @@ func (p *Pool) FetchDocumentsByIDs(
 		return make(map[string]string), nil
 	}
 
+	// If no ID column is configured, we can't reliably fetch by ID
+	// (ROW_NUMBER is not stable across queries)
+	if table.IDColumn == "" {
+		return make(map[string]string), nil
+	}
+
 	query := fmt.Sprintf(`
 		SELECT
-			ctid::text AS id,
+			%s::text AS id,
 			%s AS content
 		FROM %s
-		WHERE ctid = ANY($1::tid[])`,
+		WHERE %s::text = ANY($1::text[])`,
+		pgx.Identifier{table.IDColumn}.Sanitize(),
 		pgx.Identifier{table.TextColumn}.Sanitize(),
 		parseTableIdentifier(table.Table).Sanitize(),
+		pgx.Identifier{table.IDColumn}.Sanitize(),
 	)
 
 	rows, err := p.pool.Query(ctx, query, ids)
