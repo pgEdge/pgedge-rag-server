@@ -9,6 +9,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Improved
+
+- OpenAPI specification: added `enum` constraints for `Filter.logic`
+  (`AND`, `OR`) and `FilterCondition.operator` (all 12 valid
+  operators), and `maxItems: 50` on `Filter.conditions` to limit
+  payload size and improve client-side validation and code generation.
+
 ## [1.0.0-beta3] - 2026-01-26
 
 ### Added
