@@ -167,6 +167,65 @@
           "error"
         ]
       },
+      "Filter": {
+        "type": "object",
+        "properties": {
+          "conditions": {
+            "type": "array",
+            "description": "Filter conditions to apply",
+            "items": {
+              "$ref": "#/components/schemas/FilterCondition"
+            },
+            "maxItems": 50
+          },
+          "logic": {
+            "type": "string",
+            "description": "Logical operator to combine conditions: AND or OR (default: AND)",
+            "default": "AND",
+            "enum": [
+              "AND",
+              "OR"
+            ]
+          }
+        },
+        "required": [
+          "conditions"
+        ]
+      },
+      "FilterCondition": {
+        "type": "object",
+        "properties": {
+          "column": {
+            "type": "string",
+            "description": "Column name to filter on"
+          },
+          "operator": {
+            "type": "string",
+            "description": "Comparison operator",
+            "enum": [
+              "=",
+              "!=",
+              "\u003c",
+              "\u003e",
+              "\u003c=",
+              "\u003e=",
+              "LIKE",
+              "ILIKE",
+              "IN",
+              "NOT IN",
+              "IS NULL",
+              "IS NOT NULL"
+            ]
+          },
+          "value": {
+            "description": "Value to compare against (not required for IS NULL / IS NOT NULL)"
+          }
+        },
+        "required": [
+          "column",
+          "operator"
+        ]
+      },
       "HealthResponse": {
         "type": "object",
         "properties": {
@@ -230,6 +289,10 @@
       "QueryRequest": {
         "type": "object",
         "properties": {
+          "filter": {
+            "description": "Structured filter to apply to search results",
+            "$ref": "#/components/schemas/Filter"
+          },
           "include_sources": {
             "type": "boolean",
             "description": "Include source documents in response",

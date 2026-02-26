@@ -116,6 +116,29 @@ This is a paragraph.
 - Exception: Keep logs that may need review
 - Ensure cleanup happens even if tests fail
 
+## OpenAPI Specification
+
+### Keeping the Spec in Sync
+
+The OpenAPI specification is defined in Go code at
+`internal/server/openapi.go` and served dynamically by the API.
+A static copy is generated at `docs/openapi.json` for
+documentation purposes.
+
+**When to update:**
+
+- Any change to API request/response schemas, endpoints, or
+  parameters **must** be reflected in `openapi.go`
+- After modifying `openapi.go`, **always** regenerate the static
+  file by running `make openapi`
+- Never edit `docs/openapi.json` by hand; it is a generated file
+
+**Workflow:**
+
+1. Edit `internal/server/openapi.go` with schema/endpoint changes
+2. Run `make openapi` to regenerate `docs/openapi.json`
+3. Commit both files together
+
 ## Security Requirements
 
 ### Input Validation
@@ -138,6 +161,7 @@ When making changes, verify:
 - [ ] Documentation updated in `/docs`
 - [ ] Markdown files properly formatted (79 chars, blank lines before
       lists)
+- [ ] OpenAPI spec updated if API changed (`make openapi`)
 - [ ] Security considerations addressed
 - [ ] No temporary files left behind
 

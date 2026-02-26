@@ -81,6 +81,9 @@ type OpenAPIMediaType struct {
 	Schema OpenAPISchema `json:"schema"`
 }
 
+// intPtr returns a pointer to an int value.
+func intPtr(i int) *int { return &i }
+
 // OpenAPISchema describes a schema.
 type OpenAPISchema struct {
 	Type        string                   `json:"type,omitempty"`
@@ -90,6 +93,8 @@ type OpenAPISchema struct {
 	Items       *OpenAPISchema           `json:"items,omitempty"`
 	Required    []string                 `json:"required,omitempty"`
 	Default     any                      `json:"default,omitempty"`
+	Enum        []string                 `json:"enum,omitempty"`
+	MaxItems    *int                     `json:"maxItems,omitempty"`
 	Ref         string                   `json:"$ref,omitempty"`
 }
 
@@ -374,6 +379,7 @@ func BuildOpenAPISpec() OpenAPISpec {
 						"conditions": {
 							Type:        "array",
 							Description: "Filter conditions to apply",
+							MaxItems:    intPtr(50),
 							Items: &OpenAPISchema{
 								Ref: "#/components/schemas/FilterCondition",
 							},
@@ -382,6 +388,7 @@ func BuildOpenAPISpec() OpenAPISpec {
 							Type:        "string",
 							Default:     "AND",
 							Description: "Logical operator to combine conditions: AND or OR (default: AND)",
+							Enum:        []string{"AND", "OR"},
 						},
 					},
 					Required: []string{"conditions"},
@@ -395,7 +402,8 @@ func BuildOpenAPISpec() OpenAPISpec {
 						},
 						"operator": {
 							Type:        "string",
-							Description: "Comparison operator: =, !=, <, >, <=, >=, LIKE, ILIKE, IN, NOT IN, IS NULL, IS NOT NULL",
+							Description: "Comparison operator",
+							Enum:        []string{"=", "!=", "<", ">", "<=", ">=", "LIKE", "ILIKE", "IN", "NOT IN", "IS NULL", "IS NOT NULL"},
 						},
 						"value": {
 							Description: "Value to compare against (not required for IS NULL / IS NOT NULL)",
