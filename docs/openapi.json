@@ -175,12 +175,17 @@
             "description": "Filter conditions to apply",
             "items": {
               "$ref": "#/components/schemas/FilterCondition"
-            }
+            },
+            "maxItems": 50
           },
           "logic": {
             "type": "string",
             "description": "Logical operator to combine conditions: AND or OR (default: AND)",
-            "default": "AND"
+            "default": "AND",
+            "enum": [
+              "AND",
+              "OR"
+            ]
           }
         },
         "required": [
@@ -196,7 +201,21 @@
           },
           "operator": {
             "type": "string",
-            "description": "Comparison operator: =, !=, \u003c, \u003e, \u003c=, \u003e=, LIKE, ILIKE, IN, NOT IN, IS NULL, IS NOT NULL"
+            "description": "Comparison operator",
+            "enum": [
+              "=",
+              "!=",
+              "\u003c",
+              "\u003e",
+              "\u003c=",
+              "\u003e=",
+              "LIKE",
+              "ILIKE",
+              "IN",
+              "NOT IN",
+              "IS NULL",
+              "IS NOT NULL"
+            ]
           },
           "value": {
             "description": "Value to compare against (not required for IS NULL / IS NOT NULL)"
