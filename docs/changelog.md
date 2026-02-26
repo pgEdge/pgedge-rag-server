@@ -9,6 +9,15 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Configurable `base_url` for LLM providers (Anthropic, OpenAI,
+  Voyage AI). This allows routing requests through API gateways
+  such as [Portkey](https://portkey.ai) or custom proxies. The
+  `base_url` can be set per-pipeline or in defaults and follows
+  the same inheritance rules as `provider` and `model`
+  ([#7](https://github.com/pgEdge/pgedge-rag-server/issues/7)).
+
 ### Improved
 
 - OpenAPI specification: added `enum` constraints for `Filter.logic`

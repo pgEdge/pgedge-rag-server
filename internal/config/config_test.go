@@ -275,6 +275,10 @@ func TestLoad_LLMDefaults(t *testing.T) {
 		t.Errorf("pipeline '%s': expected embedding model 'text-embedding-3-small', got '%s'",
 			p1.Name, p1.EmbeddingLLM.Model)
 	}
+	if p1.EmbeddingLLM.BaseURL != "https://gateway.example.com/v1" {
+		t.Errorf("pipeline '%s': expected embedding base_url 'https://gateway.example.com/v1', got '%s'",
+			p1.Name, p1.EmbeddingLLM.BaseURL)
+	}
 	if p1.RAGLLM.Provider != "anthropic" {
 		t.Errorf("pipeline '%s': expected rag provider 'anthropic', got '%s'",
 			p1.Name, p1.RAGLLM.Provider)
@@ -492,6 +496,79 @@ func TestLoad_SystemPrompt(t *testing.T) {
 		if !contains(p.SystemPrompt, phrase) {
 			t.Errorf("SystemPrompt should contain '%s', got: %s", phrase, p.SystemPrompt)
 		}
+	}
+}
+
+func TestApplyDefaults_BaseURLCascade(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Defaults: Defaults{
+			TokenBudget: 1000,
+			TopN:        10,
+			EmbeddingLLM: LLMConfig{
+				Provider: "openai",
+				Model:    "text-embedding-3-small",
+				BaseURL:  "https://gateway.example.com/v1",
+			},
+			RAGLLM: LLMConfig{
+				Provider: "anthropic",
+				Model:    "claude-sonnet-4-20250514",
+				BaseURL:  "https://gateway.example.com/anthropic",
+			},
+		},
+		Pipelines: []Pipeline{
+			{
+				Name: "inherits-base-url",
+				Database: DatabaseConfig{
+					Host:     "localhost",
+					Database: "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				// No base_url set - should inherit from defaults
+			},
+			{
+				Name: "overrides-base-url",
+				Database: DatabaseConfig{
+					Host:     "localhost",
+					Database: "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{
+					BaseURL: "https://custom-gateway.example.com/v1",
+				},
+				RAGLLM: LLMConfig{
+					BaseURL: "https://custom-gateway.example.com/anthropic",
+				},
+			},
+		},
+	}
+
+	applyDefaults(cfg)
+
+	// Pipeline 1: Should inherit base_url from defaults
+	p1 := cfg.Pipelines[0]
+	if p1.EmbeddingLLM.BaseURL != "https://gateway.example.com/v1" {
+		t.Errorf("pipeline1 embedding base_url: expected 'https://gateway.example.com/v1', got '%s'",
+			p1.EmbeddingLLM.BaseURL)
+	}
+	if p1.RAGLLM.BaseURL != "https://gateway.example.com/anthropic" {
+		t.Errorf("pipeline1 rag base_url: expected 'https://gateway.example.com/anthropic', got '%s'",
+			p1.RAGLLM.BaseURL)
+	}
+
+	// Pipeline 2: Should use pipeline-specific base_url
+	p2 := cfg.Pipelines[1]
+	if p2.EmbeddingLLM.BaseURL != "https://custom-gateway.example.com/v1" {
+		t.Errorf("pipeline2 embedding base_url: expected 'https://custom-gateway.example.com/v1', got '%s'",
+			p2.EmbeddingLLM.BaseURL)
+	}
+	if p2.RAGLLM.BaseURL != "https://custom-gateway.example.com/anthropic" {
+		t.Errorf("pipeline2 rag base_url: expected 'https://custom-gateway.example.com/anthropic', got '%s'",
+			p2.RAGLLM.BaseURL)
 	}
 }
 

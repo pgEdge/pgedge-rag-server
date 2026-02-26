@@ -67,9 +67,18 @@ If neither configuration paths nor environment variables are set, the server loo
 
 ## Ollama Configuration
 
-Ollama runs locally and does not require API keys. By default, it connects to
-`http://localhost:11434`. To use a different URL, set the `OLLAMA_HOST`
-environment variable:
+Ollama runs locally and does not require API keys. By default,
+it connects to `http://localhost:11434`. To use a different URL,
+set the `base_url` in the LLM configuration:
+
+```yaml
+embedding_llm:
+  provider: "ollama"
+  model: "nomic-embed-text"
+  base_url: "http://my-ollama-server:11434"
+```
+
+Alternatively, set the `OLLAMA_HOST` environment variable:
 
 ```bash
 export OLLAMA_HOST="http://my-ollama-server:11434"

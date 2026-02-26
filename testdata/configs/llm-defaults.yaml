@@ -5,6 +5,7 @@ defaults:
   embedding_llm:
     provider: "openai"
     model: "text-embedding-3-small"
+    base_url: "https://gateway.example.com/v1"
   rag_llm:
     provider: "anthropic"
     model: "claude-sonnet-4-20250514"

@@ -34,6 +34,7 @@ const (
 func NewEmbeddingProvider(
 	providerType string,
 	model string,
+	baseURL string,
 	apiKeys *config.LoadedKeys,
 ) (llm.EmbeddingProvider, error) {
 	provider := strings.ToLower(providerType)
@@ -47,6 +48,9 @@ func NewEmbeddingProvider(
 		if model != "" {
 			opts = append(opts, openai.WithEmbeddingModel(model))
 		}
+		if baseURL != "" {
+			opts = append(opts, openai.WithEmbeddingBaseURL(baseURL))
+		}
 		return openai.NewEmbeddingProvider(apiKeys.OpenAI, opts...), nil
 
 	case ProviderVoyage:
@@ -57,12 +61,18 @@ func NewEmbeddingProvider(
 		if model != "" {
 			opts = append(opts, voyage.WithModel(model))
 		}
+		if baseURL != "" {
+			opts = append(opts, voyage.WithBaseURL(baseURL))
+		}
 		return voyage.NewEmbeddingProvider(apiKeys.Voyage, opts...), nil
 
 	case ProviderOllama:
 		opts := []ollama.EmbeddingOption{}
 		if model != "" {
 			opts = append(opts, ollama.WithEmbeddingModel(model))
+		}
+		if baseURL != "" {
+			opts = append(opts, ollama.WithEmbeddingBaseURL(baseURL))
 		}
 		return ollama.NewEmbeddingProvider(opts...), nil
 
@@ -78,6 +88,7 @@ func NewEmbeddingProvider(
 func NewCompletionProvider(
 	providerType string,
 	model string,
+	baseURL string,
 	apiKeys *config.LoadedKeys,
 ) (llm.CompletionProvider, error) {
 	provider := strings.ToLower(providerType)
@@ -91,6 +102,9 @@ func NewCompletionProvider(
 		if model != "" {
 			opts = append(opts, openai.WithCompletionModel(model))
 		}
+		if baseURL != "" {
+			opts = append(opts, openai.WithCompletionBaseURL(baseURL))
+		}
 		return openai.NewCompletionProvider(apiKeys.OpenAI, opts...), nil
 
 	case ProviderAnthropic:
@@ -101,12 +115,18 @@ func NewCompletionProvider(
 		if model != "" {
 			opts = append(opts, anthropic.WithCompletionModel(model))
 		}
+		if baseURL != "" {
+			opts = append(opts, anthropic.WithCompletionBaseURL(baseURL))
+		}
 		return anthropic.NewCompletionProvider(apiKeys.Anthropic, opts...), nil
 
 	case ProviderOllama:
 		opts := []ollama.CompletionOption{}
 		if model != "" {
 			opts = append(opts, ollama.WithCompletionModel(model))
+		}
+		if baseURL != "" {
+			opts = append(opts, ollama.WithCompletionBaseURL(baseURL))
 		}
 		return ollama.NewCompletionProvider(opts...), nil
 

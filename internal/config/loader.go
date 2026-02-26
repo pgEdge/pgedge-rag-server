@@ -133,6 +133,9 @@ func applyDefaults(cfg *Config) {
 		if p.EmbeddingLLM.Model == "" {
 			p.EmbeddingLLM.Model = cfg.Defaults.EmbeddingLLM.Model
 		}
+		if p.EmbeddingLLM.BaseURL == "" {
+			p.EmbeddingLLM.BaseURL = cfg.Defaults.EmbeddingLLM.BaseURL
+		}
 
 		// Apply RAG LLM defaults
 		if p.RAGLLM.Provider == "" {
@@ -140,6 +143,9 @@ func applyDefaults(cfg *Config) {
 		}
 		if p.RAGLLM.Model == "" {
 			p.RAGLLM.Model = cfg.Defaults.RAGLLM.Model
+		}
+		if p.RAGLLM.BaseURL == "" {
+			p.RAGLLM.BaseURL = cfg.Defaults.RAGLLM.BaseURL
 		}
 
 		// Apply API key defaults (cascade: pipeline -> defaults -> global)

@@ -32,11 +32,15 @@ pipelines:
       embedding_llm:
           provider: "openai"
           model: "text-embedding-3-small"
+          # Optional: route through an API gateway
+          # base_url: "https://gateway.example.com/v1"
 
       # RAG LLM configuration
       rag_llm:
           provider: "anthropic"
           model: "claude-sonnet-4-20250514"
+          # Optional: route through an API gateway
+          # base_url: "https://gateway.example.com/anthropic"
 
       # Token budget for context documents
       token_budget: 4000

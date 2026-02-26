@@ -93,6 +93,7 @@ defaults:
   embedding_llm:
     provider: "openai"
     model: "text-embedding-3-small"
+    base_url: "https://gateway.example.com/v1"
   rag_llm:
     provider: "anthropic"
     model: "claude-sonnet-4-20250514"
@@ -256,12 +257,42 @@ Filters can also be specified per-request via the API's `filter` parameter. API 
 
 ### LLM Provider Properties
 
-The `embedding_llm` and `rag_llm` properties use the same configuration structure:
+The `embedding_llm` and `rag_llm` properties use the same
+configuration structure:
 
 | Field      | Description                  | Required |
 |------------|------------------------------|----------|
 | `provider` | LLM provider name            | Yes      |
 | `model`    | Model name                   | Yes      |
+| `base_url` | Custom API base URL          | No       |
+
+The optional `base_url` field allows you to route requests
+through an API gateway (such as [Portkey](https://portkey.ai))
+or a custom proxy. When not specified, each provider uses its
+default URL:
+
+| Provider    | Default Base URL                    |
+|-------------|-------------------------------------|
+| `openai`    | `https://api.openai.com/v1`         |
+| `anthropic` | `https://api.anthropic.com/v1`      |
+| `voyage`    | `https://api.voyageai.com/v1`       |
+| `ollama`    | `http://localhost:11434`            |
+
+Example with a custom base URL:
+
+```yaml
+embedding_llm:
+  provider: "openai"
+  model: "text-embedding-3-small"
+  base_url: "https://gateway.example.com/v1"
+rag_llm:
+  provider: "anthropic"
+  model: "claude-sonnet-4-20250514"
+  base_url: "https://gateway.example.com/anthropic"
+```
+
+The `base_url` can also be set in the `defaults` section and
+will be inherited by pipelines that don't specify their own.
 
 The RAG server supports the following providers:
 

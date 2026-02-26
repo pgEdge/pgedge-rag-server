@@ -56,6 +56,13 @@ func WithDimensions(dims int) EmbeddingOption {
 	}
 }
 
+// WithEmbeddingBaseURL sets a custom base URL for the embedding provider.
+func WithEmbeddingBaseURL(url string) EmbeddingOption {
+	return func(p *EmbeddingProvider) {
+		p.client.baseURL = url
+	}
+}
+
 // WithEmbeddingClient sets a custom client.
 func WithEmbeddingClient(client *Client) EmbeddingOption {
 	return func(p *EmbeddingProvider) {

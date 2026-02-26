@@ -125,6 +125,7 @@ func (m *Manager) createPipeline(
 	embeddingProv, err := factory.NewEmbeddingProvider(
 		pCfg.EmbeddingLLM.Provider,
 		pCfg.EmbeddingLLM.Model,
+		pCfg.EmbeddingLLM.BaseURL,
 		apiKeys,
 	)
 	if err != nil {
@@ -136,6 +137,7 @@ func (m *Manager) createPipeline(
 	completionProv, err := factory.NewCompletionProvider(
 		pCfg.RAGLLM.Provider,
 		pCfg.RAGLLM.Model,
+		pCfg.RAGLLM.BaseURL,
 		apiKeys,
 	)
 	if err != nil {

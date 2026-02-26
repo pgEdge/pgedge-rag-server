@@ -150,6 +150,7 @@ func (cf *ConfigFilter) UnmarshalYAML(unmarshal func(interface{}) error) error {
 type LLMConfig struct {
 	Provider string `yaml:"provider"`
 	Model    string `yaml:"model"`
+	BaseURL  string `yaml:"base_url"` // Optional custom base URL (e.g. for API gateways)
 }
 
 // DefaultConfig returns a Config with sensible default values.

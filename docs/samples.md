@@ -140,6 +140,36 @@ pipelines:
       model: "voyage-3"
 ```
 
+## Using an API Gateway
+
+This configuration routes LLM requests through an API gateway
+(e.g. [Portkey](https://portkey.ai)) using custom `base_url`
+values. The `base_url` can be set in defaults to apply to all
+pipelines, or per-pipeline to override the default:
+
+```yaml
+defaults:
+  embedding_llm:
+    provider: "openai"
+    model: "text-embedding-3-small"
+    base_url: "https://gateway.example.com/v1"
+  rag_llm:
+    provider: "anthropic"
+    model: "claude-sonnet-4-20250514"
+    base_url: "https://gateway.example.com/anthropic"
+
+pipelines:
+  - name: "via-gateway"
+    description: "Pipeline routed through API gateway"
+    database:
+      host: "localhost"
+      database: "mydb"
+    tables:
+      - table: "documents"
+        text_column: "content"
+        vector_column: "embedding"
+```
+
 ## Voyage Embeddings with Anthropic Completion
 
 This configuration uses Voyage for high-quality embeddings and Anthropic

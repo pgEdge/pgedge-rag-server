@@ -57,6 +57,13 @@ func WithTemperature(temp float64) CompletionOption {
 	}
 }
 
+// WithCompletionBaseURL sets a custom base URL for the completion provider.
+func WithCompletionBaseURL(url string) CompletionOption {
+	return func(p *CompletionProvider) {
+		p.client.baseURL = url
+	}
+}
+
 // WithCompletionClient sets a custom client.
 func WithCompletionClient(client *Client) CompletionOption {
 	return func(p *CompletionProvider) {
