@@ -35,3 +35,25 @@ hide:
 </style>
 
 <redoc src="../openapi.json"/>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    var iframe =
+        document.querySelector(".redoc-iframe");
+    if (!iframe) return;
+    iframe.addEventListener("load", function() {
+        try {
+            var doc = iframe.contentDocument;
+            if (!doc) return;
+            var style = doc.createElement("style");
+            style.textContent =
+                "[data-role='redoc-description']" +
+                " span," +
+                ".redoc-wrap span[class^='sc-'] {" +
+                "  color: inherit !important;" +
+                "}";
+            doc.head.appendChild(style);
+        } catch (e) {}
+    });
+});
+</script>
