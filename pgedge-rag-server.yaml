@@ -22,7 +22,14 @@ pipelines:
           # For production, use environment variables or secrets:
           # password: "${POSTGRES_PASSWORD}"
       tables:
-          - table: "documents"
+          # When using the pgEdge vectorizer, the vectorizer creates a
+          # separate chunks table named <source_table>_<text_column>_chunks.
+          # For example, if your source table is "documents" and your
+          # text column is "content", the vectorizer creates
+          # "documents_content_chunks" with the chunked text and
+          # embedding columns. Point the RAG server at this chunks
+          # table, not the original source table.
+          - table: "documents_content_chunks"
             text_column: "content"
             vector_column: "embedding"
             # Optional: specify ID column for views or explicit document IDs

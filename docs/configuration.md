@@ -199,7 +199,8 @@ pipelines:
 
 ### Table Properties
 
-Each table entry specifies a table with text content and its corresponding vector embeddings.  Each table used in a pipeline must have:
+Each table entry specifies a table with text content and its corresponding
+vector embeddings. Each table used in a pipeline must have:
 
 - A text column containing the document content
 - A vector column containing the embedding (using pgvector)
@@ -217,6 +218,34 @@ Each table entry specifies a table with text content and its corresponding vecto
 system column. For regular tables, it's optional but recommended for stable
 document identification in hybrid search results.
 
+**Using the pgEdge vectorizer:**
+
+When you enable vectorization on a source table, the pgEdge vectorizer
+automatically creates a separate chunks table named
+`<source_table>_<source_column>_chunks`. This chunks table holds the
+chunked text and the `embedding` vector column — the source table does
+not get an `embedding` column.
+
+For example, if your source table is `documents` and the vectorized
+column is `content`, the vectorizer creates `documents_content_chunks`.
+Point the RAG server at the chunks table:
+
+```yaml
+tables:
+  - table: "documents_content_chunks"
+    text_column: "content"
+    vector_column: "embedding"
+```
+
+If your source column has a different name (e.g., `body`), the chunks
+table would be `documents_body_chunks`. For full details on setting up
+vectorization, see the
+[pgEdge vectorizer documentation](https://github.com/pgEdge/pgedge-vectorizer).
+
+If you manage your own table schema (without the pgEdge vectorizer), you
+can point directly at your table using whatever column names you have
+defined.
+
 The `filter` field allows you to specify a filter that will be applied to all
 queries for this table. It can be specified in two formats:
 
@@ -224,17 +253,17 @@ queries for this table. It can be specified in two formats:
 
 ```yaml
 tables:
-  - table: "documents"
+  - table: "documents_content_chunks"
     text_column: "content"
     vector_column: "embedding"
-    filter: "source_id IN (SELECT id FROM sources WHERE product='pgEdge')"
+    filter: "source_id IN (SELECT id FROM documents WHERE product='pgEdge')"
 ```
 
 **Structured filter (using conditions):**
 
 ```yaml
 tables:
-  - table: "documents"
+  - table: "documents_content_chunks"
     text_column: "content"
     vector_column: "embedding"
     filter:
