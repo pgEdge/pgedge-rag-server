@@ -14,6 +14,9 @@ import (
 	"testing"
 )
 
+// TestReciprocalRankFusion_EqualWeight verifies that equal vector and BM25
+// weights (0.5) produce symmetric contributions and rank documents appearing
+// in both result sets highest.
 func TestReciprocalRankFusion_EqualWeight(t *testing.T) {
 	vec := []SearchResult{
 		{ID: "a", Content: "doc-a", Score: 0.9},
@@ -44,6 +47,9 @@ func TestReciprocalRankFusion_EqualWeight(t *testing.T) {
 	}
 }
 
+// TestReciprocalRankFusion_VectorHeavy verifies that a high vector weight
+// (0.8) causes the document ranked first by vector search to outscore the
+// document ranked first by BM25.
 func TestReciprocalRankFusion_VectorHeavy(t *testing.T) {
 	vec := []SearchResult{
 		{ID: "a", Content: "doc-a", Score: 0.9},
@@ -68,6 +74,9 @@ func TestReciprocalRankFusion_VectorHeavy(t *testing.T) {
 	}
 }
 
+// TestReciprocalRankFusion_BM25Heavy verifies that a low vector weight (0.2)
+// causes the document ranked first by BM25 to outscore the document ranked
+// first by vector search.
 func TestReciprocalRankFusion_BM25Heavy(t *testing.T) {
 	vec := []SearchResult{
 		{ID: "a", Content: "doc-a", Score: 0.9},
@@ -89,6 +98,9 @@ func TestReciprocalRankFusion_BM25Heavy(t *testing.T) {
 	}
 }
 
+// TestHybridSearch_PassesWeight verifies that HybridSearch passes the
+// vectorWeight parameter through to ReciprocalRankFusion, confirming that
+// different weights produce different ranking orders.
 func TestHybridSearch_PassesWeight(t *testing.T) {
 	vec := []SearchResult{
 		{ID: "a", Content: "doc-a", Score: 0.9},
@@ -117,6 +129,8 @@ func TestHybridSearch_PassesWeight(t *testing.T) {
 	}
 }
 
+// TestReciprocalRankFusion_DefaultWeight verifies that an out-of-range
+// vectorWeight (negative) is clamped to the default of 0.5.
 func TestReciprocalRankFusion_DefaultWeight(t *testing.T) {
 	// Negative weight should be clamped to 0.5
 	vec := []SearchResult{
