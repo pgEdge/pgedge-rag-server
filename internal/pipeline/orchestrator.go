@@ -139,7 +139,7 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 			}
 
 			// Combine using RRF
-			hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN)
+			hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN, *o.cfg.Search.VectorWeight)
 			allResults = append(allResults, hybridResults...)
 		} else {
 			// Vector-only mode
@@ -262,7 +262,7 @@ func (o *Orchestrator) ExecuteStream(
 					}
 				}
 
-				hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN)
+				hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN, *o.cfg.Search.VectorWeight)
 				allResults = append(allResults, hybridResults...)
 			} else {
 				// Vector-only mode
