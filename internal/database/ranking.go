@@ -37,10 +37,15 @@ func ReciprocalRankFusion(
 	vectorResults []SearchResult,
 	bm25Results []SearchResult,
 	k float64,
+	vectorWeight float64,
 ) []RRFResult {
 	if k <= 0 {
 		k = DefaultRRFConstant
 	}
+	if vectorWeight < 0 || vectorWeight > 1 {
+		vectorWeight = 0.5
+	}
+	bm25Weight := 1.0 - vectorWeight
 
 	// Map to accumulate scores and track ranks
 	resultMap := make(map[string]*RRFResult)
@@ -54,13 +59,13 @@ func ReciprocalRankFusion(
 		}
 
 		if existing, ok := resultMap[key]; ok {
-			existing.Score += 1.0 / (k + float64(rank))
+			existing.Score += vectorWeight / (k + float64(rank))
 			existing.VecRank = rank
 		} else {
 			resultMap[key] = &RRFResult{
 				ID:      r.ID,
 				Content: r.Content,
-				Score:   1.0 / (k + float64(rank)),
+				Score:   vectorWeight / (k + float64(rank)),
 				VecRank: rank,
 			}
 		}
@@ -75,13 +80,13 @@ func ReciprocalRankFusion(
 		}
 
 		if existing, ok := resultMap[key]; ok {
-			existing.Score += 1.0 / (k + float64(rank))
+			existing.Score += bm25Weight / (k + float64(rank))
 			existing.BM25Rank = rank
 		} else {
 			resultMap[key] = &RRFResult{
 				ID:       r.ID,
 				Content:  r.Content,
-				Score:    1.0 / (k + float64(rank)),
+				Score:    bm25Weight / (k + float64(rank)),
 				BM25Rank: rank,
 			}
 		}
@@ -108,8 +113,9 @@ func HybridSearch(
 	vectorResults []SearchResult,
 	bm25Results []SearchResult,
 	topN int,
+	vectorWeight float64,
 ) []SearchResult {
-	rrfResults := ReciprocalRankFusion(vectorResults, bm25Results, DefaultRRFConstant)
+	rrfResults := ReciprocalRankFusion(vectorResults, bm25Results, DefaultRRFConstant, vectorWeight)
 
 	// Convert back to SearchResult and limit to topN
 	results := make([]SearchResult, 0, min(topN, len(rrfResults)))
