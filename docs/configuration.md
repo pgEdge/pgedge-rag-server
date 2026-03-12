@@ -220,6 +220,11 @@ document identification in hybrid search results.
 
 **Using the pgEdge vectorizer:**
 
+The generic pipeline example above assumes you manage your own schema
+and the configured table already contains an `embedding` column. If
+you're using the pgEdge vectorizer, use the generated chunks table
+instead:
+
 When you enable vectorization on a source table, the pgEdge vectorizer
 automatically creates a separate chunks table named
 `<source_table>_<source_column>_chunks`. This chunks table holds the
@@ -240,7 +245,7 @@ tables:
 If your source column has a different name (e.g., `body`), the chunks
 table would be `documents_body_chunks`. For full details on setting up
 vectorization, see the
-[pgEdge vectorizer documentation](https://github.com/pgEdge/pgedge-vectorizer).
+[pgEdge vectorizer documentation](https://docs.pgedge.com/pgedge-vectorizer/).
 
 If you manage your own table schema (without the pgEdge vectorizer), you
 can point directly at your table using whatever column names you have
