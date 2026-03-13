@@ -19,6 +19,13 @@ pipelines:
           database: "ragdb"
           username: "postgres"
           password: "postgres"
+          # Multi-host configuration (replaces host/port above):
+          # hosts:
+          #     - host: "postgres-n1"
+          #       port: 5432
+          #     - host: "postgres-n2"
+          #       port: 5432
+          # target_session_attrs: "prefer-standby"
           # For production, use environment variables or secrets:
           # password: "${POSTGRES_PASSWORD}"
       tables:

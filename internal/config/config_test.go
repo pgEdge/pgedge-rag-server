@@ -677,6 +677,406 @@ func TestValidation_ValidVectorWeight(t *testing.T) {
 	}
 }
 
+func TestLoad_MultiHostConfig(t *testing.T) {
+	cfg, err := Load("../../testdata/configs/multi-host.yaml")
+	if err != nil {
+		t.Fatalf("failed to load multi-host config: %v", err)
+	}
+
+	p := cfg.Pipelines[0]
+	if p.Name != "multi-host-pipeline" {
+		t.Errorf("expected pipeline name 'multi-host-pipeline', got '%s'", p.Name)
+	}
+	if len(p.Database.Hosts) != 3 {
+		t.Fatalf("expected 3 hosts, got %d", len(p.Database.Hosts))
+	}
+	if p.Database.Hosts[0].Host != "postgres-n1" {
+		t.Errorf("expected first host 'postgres-n1', got '%s'", p.Database.Hosts[0].Host)
+	}
+	if p.Database.Hosts[2].Port != 5433 {
+		t.Errorf("expected third host port 5433, got %d", p.Database.Hosts[2].Port)
+	}
+	if p.Database.TargetSessionAttrs != "prefer-standby" {
+		t.Errorf("expected target_session_attrs 'prefer-standby', got '%s'",
+			p.Database.TargetSessionAttrs)
+	}
+	// host/port should be empty when using hosts array
+	if p.Database.Host != "" {
+		t.Errorf("expected empty Host when using hosts array, got '%s'", p.Database.Host)
+	}
+	if p.Database.Port != 0 {
+		t.Errorf("expected Port 0 when using hosts array, got %d", p.Database.Port)
+	}
+}
+
+func TestValidation_HostsAndHostBothProvided(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Host: "localhost",
+					Port: 5432,
+					Hosts: []HostEntry{
+						{Host: "host1", Port: 5432},
+					},
+					Database: "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+				RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error when both hosts and host are set")
+	}
+	if !contains(err.Error(), "cannot specify both") {
+		t.Errorf("expected 'cannot specify both' error, got: %s", err.Error())
+	}
+}
+
+func TestValidation_MultiHostMissingHostInEntry(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Hosts: []HostEntry{
+						{Host: "host1", Port: 5432},
+						{Host: "", Port: 5432}, // Missing host
+					},
+					Database: "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+				RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+			},
+		},
+	}
+
+	applyDefaults(cfg)
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for empty host in hosts entry")
+	}
+	if !contains(err.Error(), "hosts[1].host") {
+		t.Errorf("expected error about hosts[1].host, got: %s", err.Error())
+	}
+}
+
+func TestValidation_InvalidTargetSessionAttrs(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Hosts: []HostEntry{
+						{Host: "host1", Port: 5432},
+					},
+					TargetSessionAttrs: "invalid-value",
+					Database:           "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+				RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for invalid target_session_attrs")
+	}
+	if !contains(err.Error(), "target_session_attrs") {
+		t.Errorf("expected error about target_session_attrs, got: %s", err.Error())
+	}
+}
+
+func TestValidation_ValidTargetSessionAttrs(t *testing.T) {
+	validValues := []string{"any", "read-write", "read-only", "primary", "standby", "prefer-standby"}
+	for _, tsa := range validValues {
+		cfg := &Config{
+			Server: ServerConfig{Port: 8080},
+			Pipelines: []Pipeline{
+				{
+					Name: "test",
+					Database: DatabaseConfig{
+						Hosts: []HostEntry{
+							{Host: "host1", Port: 5432},
+						},
+						TargetSessionAttrs: tsa,
+						Database:           "testdb",
+					},
+					Tables: []TableSource{
+						{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+					},
+					EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+					RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+				},
+			},
+		}
+
+		err := cfg.Validate()
+		if err != nil {
+			t.Errorf("unexpected validation error for target_session_attrs=%q: %v", tsa, err)
+		}
+	}
+}
+
+func TestApplyDefaults_MultiHostPortDefault(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Hosts: []HostEntry{
+						{Host: "host1", Port: 0},    // Should default to 5432
+						{Host: "host2", Port: 5433}, // Should stay 5433
+					},
+					Database: "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+				RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+			},
+		},
+	}
+
+	applyDefaults(cfg)
+
+	if cfg.Pipelines[0].Database.Hosts[0].Port != 5432 {
+		t.Errorf("expected default port 5432 for host1, got %d",
+			cfg.Pipelines[0].Database.Hosts[0].Port)
+	}
+	if cfg.Pipelines[0].Database.Hosts[1].Port != 5433 {
+		t.Errorf("expected port 5433 for host2, got %d",
+			cfg.Pipelines[0].Database.Hosts[1].Port)
+	}
+}
+
+func TestApplyDefaults_MultiHostTSADefault(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Hosts: []HostEntry{
+						{Host: "host1", Port: 5432},
+					},
+					Database: "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+				RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+			},
+		},
+	}
+
+	applyDefaults(cfg)
+
+	if cfg.Pipelines[0].Database.TargetSessionAttrs != "prefer-standby" {
+		t.Errorf("expected default TSA 'prefer-standby', got '%s'",
+			cfg.Pipelines[0].Database.TargetSessionAttrs)
+	}
+}
+
+func TestApplyDefaults_SingleHostNoTSADefault(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Host:     "localhost",
+					Database: "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+				RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+			},
+		},
+	}
+
+	applyDefaults(cfg)
+
+	if cfg.Pipelines[0].Database.TargetSessionAttrs != "" {
+		t.Errorf("expected no TSA default for single-host, got '%s'",
+			cfg.Pipelines[0].Database.TargetSessionAttrs)
+	}
+}
+
+func TestValidation_EmptyHostsArray(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Hosts:    []HostEntry{},
+					Database: "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+				RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+			},
+		},
+	}
+
+	applyDefaults(cfg)
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for empty hosts array with no host")
+	}
+	if !contains(err.Error(), "host") {
+		t.Errorf("expected error about host, got: %s", err.Error())
+	}
+}
+
+func TestValidation_TSAOnSingleHost(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Host:               "localhost",
+					Port:               5432,
+					Database:           "testdb",
+					TargetSessionAttrs: "prefer-standby",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+				RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for target_session_attrs on single-host config")
+	}
+	if !contains(err.Error(), "target_session_attrs") {
+		t.Errorf("expected error about target_session_attrs, got: %s", err.Error())
+	}
+}
+
+func TestValidation_IPv6Hosts(t *testing.T) {
+	// Valid IPv6 addresses should be accepted
+	validHosts := []string{"::1", "2001:db8::1", "[::1]", "[2001:db8::1]"}
+	for _, h := range validHosts {
+		cfg := &Config{
+			Server: ServerConfig{Port: 8080},
+			Pipelines: []Pipeline{
+				{
+					Name: "test",
+					Database: DatabaseConfig{
+						Hosts: []HostEntry{
+							{Host: h, Port: 5432},
+						},
+						Database: "testdb",
+					},
+					Tables: []TableSource{
+						{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+					},
+					EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+					RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+				},
+			},
+		}
+
+		applyDefaults(cfg)
+		err := cfg.Validate()
+		if err != nil {
+			t.Errorf("unexpected validation error for IPv6 host %q: %v", h, err)
+		}
+	}
+}
+
+func TestValidation_InvalidIPv6Host(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Hosts: []HostEntry{
+						{Host: "not:a:valid:ipv6:zzzz", Port: 5432},
+					},
+					Database: "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+				RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+			},
+		},
+	}
+
+	applyDefaults(cfg)
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for invalid IPv6 address")
+	}
+	if !contains(err.Error(), "invalid IPv6") {
+		t.Errorf("expected 'invalid IPv6' error, got: %s", err.Error())
+	}
+}
+
+func TestValidation_MixedIPv4IPv6Hosts(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Hosts: []HostEntry{
+						{Host: "10.0.0.1", Port: 5432},
+						{Host: "::1", Port: 5432},
+						{Host: "pg-standby.example.com", Port: 5433},
+					},
+					Database: "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+				RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+			},
+		},
+	}
+
+	applyDefaults(cfg)
+	err := cfg.Validate()
+	if err != nil {
+		t.Errorf("unexpected validation error for mixed IPv4/IPv6/hostname: %v", err)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchSubstring(s, substr)
 }

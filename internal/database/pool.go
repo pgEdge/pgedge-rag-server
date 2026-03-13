@@ -57,8 +57,22 @@ func NewPool(ctx context.Context, cfg config.DatabaseConfig) (*Pool, error) {
 func buildConnectionString(cfg config.DatabaseConfig) string {
 	var parts []string
 
-	parts = append(parts, fmt.Sprintf("host=%s", cfg.Host))
-	parts = append(parts, fmt.Sprintf("port=%d", cfg.Port))
+	if len(cfg.Hosts) > 0 {
+		// Multi-host DSN: host=h1,h2,h3 port=p1,p2,p3
+		hosts := make([]string, len(cfg.Hosts))
+		ports := make([]string, len(cfg.Hosts))
+		for i, h := range cfg.Hosts {
+			hosts[i] = bracketIPv6(h.Host)
+			ports[i] = fmt.Sprintf("%d", h.Port)
+		}
+		parts = append(parts, fmt.Sprintf("host=%s", strings.Join(hosts, ",")))
+		parts = append(parts, fmt.Sprintf("port=%s", strings.Join(ports, ",")))
+	} else {
+		// Legacy single-host DSN
+		parts = append(parts, fmt.Sprintf("host=%s", bracketIPv6(cfg.Host)))
+		parts = append(parts, fmt.Sprintf("port=%d", cfg.Port))
+	}
+
 	parts = append(parts, fmt.Sprintf("dbname=%s", cfg.Database))
 
 	// Username: config > PGUSER > USER
@@ -92,7 +106,24 @@ func buildConnectionString(cfg config.DatabaseConfig) string {
 		parts = append(parts, fmt.Sprintf("sslrootcert=%s", cfg.SSLRootCA))
 	}
 
+	// Multi-host routing
+	if cfg.TargetSessionAttrs != "" {
+		parts = append(parts, fmt.Sprintf("target_session_attrs=%s", cfg.TargetSessionAttrs))
+	}
+
 	return strings.Join(parts, " ")
+}
+
+// bracketIPv6 wraps an IPv6 address in square brackets for libpq.
+// Hostnames and IPv4 addresses are returned unchanged.
+func bracketIPv6(host string) string {
+	if strings.HasPrefix(host, "[") {
+		return host // already bracketed
+	}
+	if strings.Contains(host, ":") {
+		return "[" + host + "]"
+	}
+	return host
 }
 
 // Ping verifies the database connection.
