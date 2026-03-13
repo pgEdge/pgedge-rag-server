@@ -704,6 +704,9 @@ func TestLoad_MultiHostConfig(t *testing.T) {
 	if p.Database.Host != "" {
 		t.Errorf("expected empty Host when using hosts array, got '%s'", p.Database.Host)
 	}
+	if p.Database.Port != 0 {
+		t.Errorf("expected Port 0 when using hosts array, got %d", p.Database.Port)
+	}
 }
 
 func TestValidation_HostsAndHostBothProvided(t *testing.T) {
