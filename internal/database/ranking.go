@@ -29,8 +29,9 @@ type RRFResult struct {
 // ReciprocalRankFusion combines results from vector and BM25 searches
 // using Reciprocal Rank Fusion (RRF).
 //
-// RRF formula: score = sum(1 / (k + rank)) for each ranking
-// where k is a constant (default 60) and rank is 1-indexed.
+// RRF formula: score = sum(weight / (k + rank)) for each ranking
+// where k is a constant (default 60), rank is 1-indexed, and weight is
+// vectorWeight for vector results or (1 - vectorWeight) for BM25 results.
 //
 // The function returns results sorted by combined RRF score (highest first).
 func ReciprocalRankFusion(
@@ -51,43 +52,47 @@ func ReciprocalRankFusion(
 	resultMap := make(map[string]*RRFResult)
 
 	// Process vector results
-	for i, r := range vectorResults {
-		rank := i + 1 // 1-indexed
-		key := r.Content
-		if r.ID != "" {
-			key = r.ID
-		}
+	if vectorWeight > 0 {
+		for i, r := range vectorResults {
+			rank := i + 1 // 1-indexed
+			key := r.Content
+			if r.ID != "" {
+				key = r.ID
+			}
 
-		if existing, ok := resultMap[key]; ok {
-			existing.Score += vectorWeight / (k + float64(rank))
-			existing.VecRank = rank
-		} else {
-			resultMap[key] = &RRFResult{
-				ID:      r.ID,
-				Content: r.Content,
-				Score:   vectorWeight / (k + float64(rank)),
-				VecRank: rank,
+			if existing, ok := resultMap[key]; ok {
+				existing.Score += vectorWeight / (k + float64(rank))
+				existing.VecRank = rank
+			} else {
+				resultMap[key] = &RRFResult{
+					ID:      r.ID,
+					Content: r.Content,
+					Score:   vectorWeight / (k + float64(rank)),
+					VecRank: rank,
+				}
 			}
 		}
 	}
 
 	// Process BM25 results
-	for i, r := range bm25Results {
-		rank := i + 1 // 1-indexed
-		key := r.Content
-		if r.ID != "" {
-			key = r.ID
-		}
+	if bm25Weight > 0 {
+		for i, r := range bm25Results {
+			rank := i + 1 // 1-indexed
+			key := r.Content
+			if r.ID != "" {
+				key = r.ID
+			}
 
-		if existing, ok := resultMap[key]; ok {
-			existing.Score += bm25Weight / (k + float64(rank))
-			existing.BM25Rank = rank
-		} else {
-			resultMap[key] = &RRFResult{
-				ID:       r.ID,
-				Content:  r.Content,
-				Score:    bm25Weight / (k + float64(rank)),
-				BM25Rank: rank,
+			if existing, ok := resultMap[key]; ok {
+				existing.Score += bm25Weight / (k + float64(rank))
+				existing.BM25Rank = rank
+			} else {
+				resultMap[key] = &RRFResult{
+					ID:       r.ID,
+					Content:  r.Content,
+					Score:    bm25Weight / (k + float64(rank)),
+					BM25Rank: rank,
+				}
 			}
 		}
 	}
