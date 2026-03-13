@@ -85,9 +85,18 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 	// Step 2: Perform search for each table
 	var allResults []database.SearchResult
 
+	// Normalize vector weight before the hybrid gate decision
+	vectorWeight := 0.5
+	if o.cfg.Search.VectorWeight != nil {
+		vectorWeight = *o.cfg.Search.VectorWeight
+	}
+	if vectorWeight < 0 || vectorWeight > 1 {
+		vectorWeight = 0.5
+	}
+
 	// Determine if hybrid search should be used
 	useHybrid := o.cfg.Search.HybridEnabled != nil && *o.cfg.Search.HybridEnabled &&
-		(o.cfg.Search.VectorWeight == nil || *o.cfg.Search.VectorWeight < 1.0)
+		vectorWeight < 1.0
 
 	for _, table := range o.cfg.Tables {
 		// Skip if no database pool (shouldn't happen in production)
@@ -139,7 +148,7 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 			}
 
 			// Combine using RRF
-			hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN)
+			hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN, vectorWeight)
 			allResults = append(allResults, hybridResults...)
 		} else {
 			// Vector-only mode
@@ -223,9 +232,18 @@ func (o *Orchestrator) ExecuteStream(
 		// Step 2: Perform search
 		var allResults []database.SearchResult
 
+		// Normalize vector weight before the hybrid gate decision
+		vectorWeight := 0.5
+		if o.cfg.Search.VectorWeight != nil {
+			vectorWeight = *o.cfg.Search.VectorWeight
+		}
+		if vectorWeight < 0 || vectorWeight > 1 {
+			vectorWeight = 0.5
+		}
+
 		// Determine if hybrid search should be used
 		useHybrid := o.cfg.Search.HybridEnabled != nil && *o.cfg.Search.HybridEnabled &&
-			(o.cfg.Search.VectorWeight == nil || *o.cfg.Search.VectorWeight < 1.0)
+			vectorWeight < 1.0
 
 		for _, table := range o.cfg.Tables {
 			// Skip if no database pool (shouldn't happen in production)
@@ -262,7 +280,7 @@ func (o *Orchestrator) ExecuteStream(
 					}
 				}
 
-				hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN)
+				hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN, vectorWeight)
 				allResults = append(allResults, hybridResults...)
 			} else {
 				// Vector-only mode
