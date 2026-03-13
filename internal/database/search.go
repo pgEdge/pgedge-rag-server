@@ -46,18 +46,41 @@ type SearchResult struct {
 // VectorSearch performs a vector similarity search using pgvector.
 // Returns results ordered by similarity (highest first).
 // The filter parameter allows additional WHERE conditions from the API request.
+// If minSimilarity is non-nil, results below that cosine similarity are excluded.
 func (p *Pool) VectorSearch(
 	ctx context.Context,
 	embedding []float32,
 	table config.TableSource,
 	topN int,
 	filter *config.Filter,
+	minSimilarity *float64,
 ) ([]SearchResult, error) {
+	// Determine starting param index:
+	// $1=vector, $2=limit, optionally $3=min_similarity
+	nextParam := 3
+	var extraArgs []interface{}
+	if minSimilarity != nil {
+		nextParam = 4
+		extraArgs = append(extraArgs, *minSimilarity)
+	}
+
 	// Build filter clause combining config and request filters
-	// Start at param index 3 because $1=vector, $2=limit
-	filterClause, filterArgs, err := buildFilterClause(table.Filter, filter, 3)
+	filterClause, filterArgs, err := buildFilterClause(table.Filter, filter, nextParam)
 	if err != nil {
 		return nil, fmt.Errorf("invalid filter: %w", err)
+	}
+
+	// Add min_similarity condition to the filter clause
+	if minSimilarity != nil {
+		simCondition := fmt.Sprintf(
+			"1 - (%s <=> $1::vector) >= $3",
+			pgx.Identifier{table.VectorColumn}.Sanitize(),
+		)
+		if filterClause == "" {
+			filterClause = " WHERE " + simCondition
+		} else {
+			filterClause = filterClause + " AND " + simCondition
+		}
 	}
 
 	// Build the query using cosine distance operator from pgvector
@@ -76,8 +99,9 @@ func (p *Pool) VectorSearch(
 		pgx.Identifier{table.VectorColumn}.Sanitize(),
 	)
 
-	// Combine vector embedding and topN with filter args
-	args := append([]interface{}{formatVector(embedding), topN}, filterArgs...)
+	// Combine vector embedding, topN, optional min_similarity, and filter args
+	args := append([]interface{}{formatVector(embedding), topN}, extraArgs...)
+	args = append(args, filterArgs...)
 	rows, err := p.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("vector search failed: %w", err)

@@ -565,6 +565,39 @@ func TestMockProvidersWithCustomFunctions(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPrompt_DefaultContainsAntiHallucination(t *testing.T) {
+	orch := &Orchestrator{
+		bm25Index: bm25.NewIndex(),
+	}
+
+	prompt := orch.buildSystemPrompt()
+
+	antiHallucinationPhrases := []string{
+		"ONLY",
+		"Do NOT use your general knowledge",
+	}
+
+	for _, phrase := range antiHallucinationPhrases {
+		if !containsPhrase(prompt, phrase) {
+			t.Errorf("default system prompt should contain '%s'", phrase)
+		}
+	}
+}
+
+func TestMinSimilarityConfigInSearchConfig(t *testing.T) {
+	ms := 0.5
+	cfg := config.SearchConfig{
+		MinSimilarity: &ms,
+	}
+
+	if cfg.MinSimilarity == nil {
+		t.Fatal("MinSimilarity should not be nil")
+	}
+	if *cfg.MinSimilarity != 0.5 {
+		t.Errorf("expected MinSimilarity 0.5, got %v", *cfg.MinSimilarity)
+	}
+}
+
 // Verify mock providers implement the interfaces
 var (
 	_ llm.EmbeddingProvider  = (*MockEmbeddingProvider)(nil)

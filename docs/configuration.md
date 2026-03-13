@@ -319,12 +319,14 @@ pipelines:
     search:
       hybrid_enabled: true
       vector_weight: 0.7
+      min_similarity: 0.5
 ```
 
-| Field            | Description                              | Default |
-|------------------|------------------------------------------|---------|
-| `hybrid_enabled` | Enable hybrid search (vector + BM25)     | `true`  |
-| `vector_weight`  | Weight for vector vs BM25 (0.0 to 1.0)   | `0.5`   |
+| Field            | Description                              | Default    |
+|------------------|------------------------------------------|------------|
+| `hybrid_enabled` | Enable hybrid search (vector + BM25)     | `true`     |
+| `vector_weight`  | Weight for vector vs BM25 (0.0 to 1.0)   | `0.5`      |
+| `min_similarity` | Minimum cosine similarity threshold       | (disabled) |
 
 **Understanding vector_weight:**
 
@@ -343,10 +345,44 @@ Both approaches skip the BM25 search phase entirely.
 
 **When to adjust these settings:**
 
-- Use higher `vector_weight` (0.7-0.9) when semantic similarity is more
-  important than keyword matching
-- Use lower `vector_weight` (0.3-0.5) when exact keyword matches are important
-- Disable hybrid search when using views without an `id_column` configured,
-  or when BM25 overhead is not acceptable
+- Use higher `vector_weight` (0.7-0.9) when semantic similarity is
+  more important than keyword matching
+- Use lower `vector_weight` (0.3-0.5) when exact keyword matches
+  are important
+- Disable hybrid search when using views without an `id_column`
+  configured, or when BM25 overhead is not acceptable
+
+### Minimum Similarity Threshold
+
+The `min_similarity` setting filters out search results whose
+cosine similarity score falls below the specified threshold. This
+prevents irrelevant documents from being passed to the LLM, which
+can cause hallucinated answers — especially with smaller models.
+
+When `min_similarity` is set and no results meet the threshold,
+the server returns a response indicating that no relevant
+information was found, instead of generating an answer from
+irrelevant context.
+
+```yaml
+search:
+    min_similarity: 0.5
+```
+
+The value must be between `0.0` and `1.0`. Higher values are more
+selective:
+
+- `0.3` — lenient; filters only very poor matches
+- `0.5` — moderate; good starting point for most use cases
+- `0.7` — strict; only highly relevant results are used
+
+The threshold applies to the vector similarity score (cosine
+similarity) and is evaluated at the database level before results
+enter the hybrid ranking pipeline. This means it works
+consistently whether hybrid search is enabled or not.
+
+By default, `min_similarity` is not set (disabled), so all
+results returned by the vector search are used. This preserves
+backward compatibility with existing configurations.
 
 

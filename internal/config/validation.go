@@ -223,6 +223,16 @@ func (c *Config) validatePipeline(index int, p Pipeline) ValidationErrors {
 		}
 	}
 
+	if p.Search.MinSimilarity != nil {
+		ms := *p.Search.MinSimilarity
+		if ms < 0.0 || ms > 1.0 {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".search.min_similarity",
+				Message: "must be between 0.0 and 1.0",
+			})
+		}
+	}
+
 	return errs
 }
 
