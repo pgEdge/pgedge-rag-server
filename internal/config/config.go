@@ -115,6 +115,7 @@ type TableSource struct {
 type SearchConfig struct {
 	HybridEnabled *bool    `yaml:"hybrid_enabled"` // Enable hybrid search (default: true)
 	VectorWeight  *float64 `yaml:"vector_weight"`  // Weight for vector vs BM25 (default: 0.5)
+	MinSimilarity *float64 `yaml:"min_similarity"` // Minimum cosine similarity threshold (0.0-1.0)
 }
 
 // FilterCondition represents a single filter condition.

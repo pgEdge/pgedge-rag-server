@@ -1193,6 +1193,102 @@ func TestValidation_HostUnsafeCharactersMultiHost(t *testing.T) {
 	}
 }
 
+func TestValidation_InvalidMinSimilarity(t *testing.T) {
+	invalidValues := []float64{-0.1, 1.1, 2.0}
+	for _, v := range invalidValues {
+		ms := v
+		cfg := &Config{
+			Server: ServerConfig{Port: 8080},
+			Pipelines: []Pipeline{
+				{
+					Name: "test",
+					Database: DatabaseConfig{
+						Host:     "localhost",
+						Port:     5432,
+						Database: "testdb",
+					},
+					Tables: []TableSource{
+						{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+					},
+					EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+					RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+					Search: SearchConfig{
+						MinSimilarity: &ms,
+					},
+				},
+			},
+		}
+
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("expected validation error for min_similarity=%v", v)
+		}
+		if !contains(err.Error(), "search.min_similarity") {
+			t.Errorf("expected error about search.min_similarity, got: %s", err.Error())
+		}
+	}
+}
+
+func TestValidation_ValidMinSimilarity(t *testing.T) {
+	validValues := []float64{0.0, 0.3, 0.5, 0.7, 1.0}
+	for _, v := range validValues {
+		ms := v
+		cfg := &Config{
+			Server: ServerConfig{Port: 8080},
+			Pipelines: []Pipeline{
+				{
+					Name: "test",
+					Database: DatabaseConfig{
+						Host:     "localhost",
+						Port:     5432,
+						Database: "testdb",
+					},
+					Tables: []TableSource{
+						{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+					},
+					EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+					RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+					Search: SearchConfig{
+						MinSimilarity: &ms,
+					},
+				},
+			},
+		}
+
+		err := cfg.Validate()
+		if err != nil {
+			t.Errorf("unexpected validation error for min_similarity=%v: %v", v, err)
+		}
+	}
+}
+
+func TestValidation_NilMinSimilarity(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{
+			{
+				Name: "test",
+				Database: DatabaseConfig{
+					Host:     "localhost",
+					Port:     5432,
+					Database: "testdb",
+				},
+				Tables: []TableSource{
+					{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+				},
+				EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+				RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+				// No MinSimilarity set
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err != nil {
+		t.Errorf("unexpected validation error with nil min_similarity: %v", err)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchSubstring(s, substr)
 }
