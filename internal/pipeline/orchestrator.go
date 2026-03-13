@@ -108,7 +108,10 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 		}
 
 		// Vector search (with optional filter from request)
-		vectorResults, err := o.dbPool.VectorSearch(ctx, embedding, table, topN*2, req.Filter)
+		vectorResults, err := o.dbPool.VectorSearch(
+			ctx, embedding, table, topN*2, req.Filter,
+			o.cfg.Search.MinSimilarity,
+		)
 		if err != nil {
 			o.logger.Warn("vector search failed",
 				"table", table.Table,
@@ -162,9 +165,12 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 	// Step 3: Deduplicate and limit results
 	results := o.deduplicateResults(allResults, topN)
 
-	// Check if we have any results - if not, return an error
+	// Check if we have any results
 	if len(results) == 0 {
-		return nil, fmt.Errorf("no documents found for query")
+		return &QueryResponse{
+			Answer:     "No relevant information found in the available documents.",
+			TokensUsed: 0,
+		}, nil
 	}
 
 	// Step 4: Build context with token budget
@@ -254,7 +260,10 @@ func (o *Orchestrator) ExecuteStream(
 				continue
 			}
 
-			vectorResults, err := o.dbPool.VectorSearch(ctx, embedding, table, topN*2, req.Filter)
+			vectorResults, err := o.dbPool.VectorSearch(
+				ctx, embedding, table, topN*2, req.Filter,
+				o.cfg.Search.MinSimilarity,
+			)
 			if err != nil {
 				o.logger.Warn("vector search failed", "error", err)
 				continue
@@ -293,9 +302,12 @@ func (o *Orchestrator) ExecuteStream(
 
 		results := o.deduplicateResults(allResults, topN)
 
-		// Check if we have any results - if not, return an error
+		// Check if we have any results
 		if len(results) == 0 {
-			errChan <- fmt.Errorf("no documents found for query")
+			chunkChan <- StreamChunk{
+				Content:      "No relevant information found in the available documents.",
+				FinishReason: "stop",
+			}
 			return
 		}
 
@@ -402,8 +414,9 @@ func (o *Orchestrator) buildContext(results []database.SearchResult) []llm.Conte
 
 // DefaultSystemPrompt is the default system prompt used when none is configured.
 const DefaultSystemPrompt = `You are a helpful assistant that answers questions based on the provided context.
-Answer the question using only the information from the context.
-If the context doesn't contain enough information to answer, say so.
+Answer the question using ONLY the information from the context.
+If the context does not contain relevant information to answer the question, you MUST respond with: "I don't have enough information in the available documents to answer that question."
+Do NOT use your general knowledge to answer. Only use facts from the provided context.
 Be concise and accurate in your responses.`
 
 // buildSystemPrompt returns the system prompt for RAG.

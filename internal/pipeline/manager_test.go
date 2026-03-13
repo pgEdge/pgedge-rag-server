@@ -233,17 +233,23 @@ func TestPipeline_Execute_NoDocuments(t *testing.T) {
 	// Create a test pipeline with no documents configured
 	p := newTestPipeline("test-pipeline", "Test pipeline")
 
-	// Execute should return an error when no documents are found
-	_, err := p.ExecuteWithOptions(context.Background(), QueryRequest{
+	// Execute should return a "no relevant information" response
+	resp, err := p.ExecuteWithOptions(context.Background(), QueryRequest{
 		Query: "test query",
 	})
-	if err == nil {
-		t.Fatal("expected error when no documents found")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
 	}
 
-	expectedErr := "no documents found for query"
-	if err.Error() != expectedErr {
-		t.Errorf("expected error '%s', got '%s'", expectedErr, err.Error())
+	expectedAnswer := "No relevant information found in the available documents."
+	if resp.Answer != expectedAnswer {
+		t.Errorf("expected answer %q, got %q", expectedAnswer, resp.Answer)
+	}
+	if resp.TokensUsed != 0 {
+		t.Errorf("expected 0 tokens used, got %d", resp.TokensUsed)
 	}
 }
 
@@ -277,24 +283,27 @@ func TestPipeline_ExecuteStream_NoDocuments(t *testing.T) {
 		orchestrator:   orchestrator,
 	}
 
-	// Execute streaming query - should return error when no documents
+	// Execute streaming query - should return a "no relevant info" chunk
 	chunkChan, errChan := p.ExecuteStreamWithOptions(context.Background(), QueryRequest{
 		Query:  "test query",
 		Stream: true,
 	})
 
-	// Drain the chunk channel
-	for range chunkChan {
+	// Collect chunks
+	var content string
+	for chunk := range chunkChan {
+		content += chunk.Content
 	}
 
+	// Should not have an error
 	err := <-errChan
-	if err == nil {
-		t.Fatal("expected error when no documents found")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expectedErr := "no documents found for query"
-	if err.Error() != expectedErr {
-		t.Errorf("expected error '%s', got '%s'", expectedErr, err.Error())
+	expectedContent := "No relevant information found in the available documents."
+	if content != expectedContent {
+		t.Errorf("expected content %q, got %q", expectedContent, content)
 	}
 }
 
