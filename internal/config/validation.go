@@ -11,6 +11,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -230,11 +231,51 @@ func (c *Config) validatePipeline(index int, p Pipeline) ValidationErrors {
 func (c *Config) validateDatabase(prefix string, db DatabaseConfig) ValidationErrors {
 	var errs ValidationErrors
 
-	if db.Host == "" {
+	// Mutual exclusion: hosts and host cannot both be set
+	if len(db.Hosts) > 0 && db.Host != "" {
 		errs = append(errs, ValidationError{
-			Field:   prefix + ".host",
-			Message: "required",
+			Field:   prefix,
+			Message: "cannot specify both 'hosts' and 'host'; use one or the other",
 		})
+		return errs
+	}
+
+	if len(db.Hosts) > 0 {
+		// Multi-host validation
+		for i, h := range db.Hosts {
+			entryPrefix := fmt.Sprintf("%s.hosts[%d]", prefix, i)
+			if h.Host == "" {
+				errs = append(errs, ValidationError{
+					Field:   entryPrefix + ".host",
+					Message: "required",
+				})
+			} else {
+				errs = append(errs, validateHostValue(entryPrefix+".host", h.Host)...)
+			}
+			if h.Port < 1 || h.Port > 65535 {
+				errs = append(errs, ValidationError{
+					Field:   entryPrefix + ".port",
+					Message: "must be between 1 and 65535",
+				})
+			}
+		}
+	} else {
+		// Legacy single-host validation
+		if db.Host == "" {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".host",
+				Message: "required",
+			})
+		} else {
+			errs = append(errs, validateHostValue(prefix+".host", db.Host)...)
+		}
+
+		if db.Port < 1 || db.Port > 65535 {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".port",
+				Message: "must be between 1 and 65535",
+			})
+		}
 	}
 
 	if db.Database == "" {
@@ -244,11 +285,29 @@ func (c *Config) validateDatabase(prefix string, db DatabaseConfig) ValidationEr
 		})
 	}
 
-	if db.Port < 1 || db.Port > 65535 {
-		errs = append(errs, ValidationError{
-			Field:   prefix + ".port",
-			Message: "must be between 1 and 65535",
-		})
+	// Validate target_session_attrs
+	if db.TargetSessionAttrs != "" {
+		if len(db.Hosts) == 0 {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".target_session_attrs",
+				Message: "only supported with multi-host 'hosts' configuration",
+			})
+		} else {
+			validTSA := map[string]bool{
+				"any":            true,
+				"read-write":     true,
+				"read-only":      true,
+				"primary":        true,
+				"standby":        true,
+				"prefer-standby": true,
+			}
+			if !validTSA[db.TargetSessionAttrs] {
+				errs = append(errs, ValidationError{
+					Field:   prefix + ".target_session_attrs",
+					Message: "must be one of: any, read-write, read-only, primary, standby, prefer-standby",
+				})
+			}
+		}
 	}
 
 	// Validate SSL mode
@@ -364,6 +423,39 @@ func (c *Config) validateLLMOptional(prefix string, llm LLMConfig, validProvider
 				Message: "required when provider is set",
 			})
 		}
+	}
+
+	return errs
+}
+
+// validateHostValue validates a single host string, accepting hostnames,
+// IPv4 addresses, and IPv6 addresses (optionally bracketed).
+func validateHostValue(field string, host string) ValidationErrors {
+	var errs ValidationErrors
+
+	// Strip brackets for IPv6 validation: [::1] → ::1
+	bare := host
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		bare = host[1 : len(host)-1]
+	}
+
+	// If it contains a colon it must be a valid IPv6 address
+	if strings.Contains(bare, ":") {
+		if net.ParseIP(bare) == nil {
+			errs = append(errs, ValidationError{
+				Field:   field,
+				Message: "invalid IPv6 address",
+			})
+		}
+		return errs
+	}
+
+	// Hostname / IPv4: reject unsafe characters
+	if strings.ContainsAny(bare, ", \t\n\r@/?") {
+		errs = append(errs, ValidationError{
+			Field:   field,
+			Message: "must not contain commas, whitespace, @, /, or ?",
+		})
 	}
 
 	return errs

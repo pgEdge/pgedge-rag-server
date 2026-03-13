@@ -75,10 +75,22 @@ type Pipeline struct {
 	Search       SearchConfig   `yaml:"search"`        // Search behavior settings
 }
 
+// HostEntry represents a single host in a multi-host database configuration.
+type HostEntry struct {
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
+}
+
 // DatabaseConfig contains PostgreSQL connection settings.
 type DatabaseConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
+	// Single-host connection fields
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
+
+	// Multi-host connection fields (for HA deployments)
+	Hosts              []HostEntry `yaml:"hosts"`
+	TargetSessionAttrs string      `yaml:"target_session_attrs"`
+
 	Database string `yaml:"database"`
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
