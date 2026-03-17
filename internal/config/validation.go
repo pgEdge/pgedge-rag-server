@@ -437,6 +437,14 @@ func validateHostValue(field string, host string) ValidationErrors {
 	bare := host
 	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
 		bare = host[1 : len(host)-1]
+		// Bracketed values must be valid IPv6 addresses
+		if bare == "" || net.ParseIP(bare) == nil {
+			errs = append(errs, ValidationError{
+				Field:   field,
+				Message: "invalid IPv6 address",
+			})
+		}
+		return errs
 	}
 
 	// If it contains a colon it must be a valid IPv6 address

@@ -1047,6 +1047,39 @@ func TestValidation_InvalidIPv6Host(t *testing.T) {
 	}
 }
 
+func TestValidation_BracketedNonIPv6Host(t *testing.T) {
+	invalidHosts := []string{"[localhost]", "[]"}
+	for _, h := range invalidHosts {
+		cfg := &Config{
+			Server: ServerConfig{Port: 8080},
+			Pipelines: []Pipeline{
+				{
+					Name: "test",
+					Database: DatabaseConfig{
+						Host:     h,
+						Port:     5432,
+						Database: "testdb",
+					},
+					Tables: []TableSource{
+						{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+					},
+					EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+					RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+				},
+			},
+		}
+
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("expected validation error for bracketed non-IPv6 host=%q", h)
+			continue
+		}
+		if !contains(err.Error(), "invalid IPv6") {
+			t.Errorf("expected 'invalid IPv6' error for host=%q, got: %s", h, err.Error())
+		}
+	}
+}
+
 func TestValidation_MixedIPv4IPv6Hosts(t *testing.T) {
 	cfg := &Config{
 		Server: ServerConfig{Port: 8080},
@@ -1112,6 +1145,7 @@ func TestValidation_HostUnsafeCharacters(t *testing.T) {
 		err := cfg.Validate()
 		if err == nil {
 			t.Errorf("expected validation error for host=%q", h)
+			continue
 		}
 		if !contains(err.Error(), "must not contain") {
 			t.Errorf("expected 'must not contain' error for host=%q, got: %s", h, err.Error())
@@ -1151,6 +1185,7 @@ func TestValidation_HostUnsafeCharactersMultiHost(t *testing.T) {
 		err := cfg.Validate()
 		if err == nil {
 			t.Errorf("expected validation error for multi-host with host=%q", h)
+			continue
 		}
 		if !contains(err.Error(), "must not contain") {
 			t.Errorf("expected 'must not contain' error for host=%q, got: %s", h, err.Error())
