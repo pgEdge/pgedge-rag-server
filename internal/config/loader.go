@@ -172,13 +172,25 @@ func applyDefaults(cfg *Config) {
 		}
 
 		// Apply database port default
-		if p.Database.Port == 0 {
+		if len(p.Database.Hosts) == 0 && p.Database.Port == 0 {
 			p.Database.Port = 5432
 		}
 
 		// Apply database ssl_mode default
 		if p.Database.SSLMode == "" {
 			p.Database.SSLMode = "prefer"
+		}
+
+		// Apply per-host port defaults
+		for j := range p.Database.Hosts {
+			if p.Database.Hosts[j].Port == 0 {
+				p.Database.Hosts[j].Port = 5432
+			}
+		}
+
+		// Default target_session_attrs for multi-host configs only
+		if len(p.Database.Hosts) > 0 && p.Database.TargetSessionAttrs == "" {
+			p.Database.TargetSessionAttrs = "prefer-standby"
 		}
 
 		// Apply search config defaults

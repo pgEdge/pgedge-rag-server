@@ -384,3 +384,70 @@ Both approaches skip the BM25 search phase entirely.
   or when BM25 overhead is not acceptable
 
 
+## Multi-Host Connections
+
+For high-availability deployments with multiple PostgreSQL
+nodes, the RAG server supports multi-host connection strings
+using the `hosts` array:
+
+```yaml
+database:
+    hosts:
+        - host: "postgres-n1"
+          port: 5432
+        - host: "postgres-n2"
+          port: 5432
+        - host: "postgres-n3"
+          port: 5432
+    target_session_attrs: "prefer-standby"
+    database: "ragdb"
+    username: "rag_user"
+    password: "secret"
+```
+
+### How It Works
+
+The `hosts` array replaces the single `host` and `port` fields.
+You cannot specify both `hosts` and `host` — the server will
+reject the configuration at startup.
+
+The underlying pgx driver tries each host in order until a
+connection succeeds. When `target_session_attrs` is set, pgx
+also verifies the server role matches (e.g., standby vs
+primary) before using the connection.
+
+pgxpool re-evaluates the host list for every new connection, so
+after a Patroni failover, new connections automatically land on
+the correct instance with no application restart required.
+
+### target_session_attrs
+
+Controls which server role is acceptable for connections:
+
+| Value             | Description                              |
+|-------------------|------------------------------------------|
+| `any`             | Accept any server                        |
+| `read-write`      | Only accept read-write servers (primary) |
+| `read-only`       | Only accept read-only servers            |
+| `primary`         | Only accept the primary server           |
+| `standby`         | Only accept standby servers              |
+| `prefer-standby`  | Prefer standby, fall back to primary     |
+
+The default is `prefer-standby` when `hosts` is configured,
+since the RAG server is a read-only service. This can be
+overridden explicitly in the configuration.
+
+### Backward Compatibility
+
+Existing single-host configurations continue to work unchanged:
+
+```yaml
+database:
+    host: "postgres"
+    port: 5432
+    database: "ragdb"
+```
+
+The `port` in each host entry defaults to `5432` if omitted.
+
+
