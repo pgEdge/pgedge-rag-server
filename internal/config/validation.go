@@ -451,10 +451,10 @@ func validateHostValue(field string, host string) ValidationErrors {
 	}
 
 	// Hostname / IPv4: reject unsafe characters
-	if strings.ContainsAny(bare, ", \t\n\r@/?") {
+	if strings.ContainsAny(bare, ", \t\n\r@/?='\\#") {
 		errs = append(errs, ValidationError{
 			Field:   field,
-			Message: "must not contain commas, whitespace, @, /, or ?",
+			Message: "must not contain commas, whitespace, @, /, ?, =, ', \\, or #",
 		})
 	}
 

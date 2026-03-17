@@ -1077,6 +1077,87 @@ func TestValidation_MixedIPv4IPv6Hosts(t *testing.T) {
 	}
 }
 
+func TestValidation_HostUnsafeCharacters(t *testing.T) {
+	unsafeHosts := []string{
+		"host with space",
+		"host,injected",
+		"host@injected",
+		"host/injected",
+		"host?injected",
+		"host=injected",
+		"host'injected",
+		"host\\injected",
+		"host#injected",
+	}
+	for _, h := range unsafeHosts {
+		cfg := &Config{
+			Server: ServerConfig{Port: 8080},
+			Pipelines: []Pipeline{
+				{
+					Name: "test",
+					Database: DatabaseConfig{
+						Host:     h,
+						Port:     5432,
+						Database: "testdb",
+					},
+					Tables: []TableSource{
+						{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+					},
+					EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+					RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+				},
+			},
+		}
+
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("expected validation error for host=%q", h)
+		}
+		if !contains(err.Error(), "must not contain") {
+			t.Errorf("expected 'must not contain' error for host=%q, got: %s", h, err.Error())
+		}
+	}
+}
+
+func TestValidation_HostUnsafeCharactersMultiHost(t *testing.T) {
+	unsafeHosts := []string{
+		"host=injected",
+		"host'injected",
+		"host\\injected",
+		"host#injected",
+	}
+	for _, h := range unsafeHosts {
+		cfg := &Config{
+			Server: ServerConfig{Port: 8080},
+			Pipelines: []Pipeline{
+				{
+					Name: "test",
+					Database: DatabaseConfig{
+						Hosts: []HostEntry{
+							{Host: "localhost", Port: 5432},
+							{Host: h, Port: 5433},
+						},
+						Database: "testdb",
+					},
+					Tables: []TableSource{
+						{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+					},
+					EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+					RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+				},
+			},
+		}
+
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("expected validation error for multi-host with host=%q", h)
+		}
+		if !contains(err.Error(), "must not contain") {
+			t.Errorf("expected 'must not contain' error for host=%q, got: %s", h, err.Error())
+		}
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchSubstring(s, substr)
 }
