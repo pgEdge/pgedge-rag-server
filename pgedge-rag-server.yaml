@@ -69,3 +69,7 @@ pipelines:
           # Weight for vector search vs BM25 (0.0 to 1.0, default: 0.5)
           # Set to 1.0 for vector-only search
           vector_weight: 0.7
+          # Minimum cosine similarity threshold (0.0 to 1.0)
+          # Results below this score are filtered out before reaching the LLM.
+          # Helps prevent hallucinated answers for unrelated queries.
+          # min_similarity: 0.5
