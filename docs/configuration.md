@@ -406,9 +406,9 @@ search:
 The value must be between `0.0` and `1.0`. Higher values are more
 selective:
 
-- `0.3` — lenient; filters only very poor matches
+- `0.3` — lenient; filters only poor matches
 - `0.5` — moderate; good starting point for most use cases
-- `0.7` — strict; only highly relevant results are used
+- `0.7` — strict; only relevant results are used
 
 The threshold applies to the vector similarity score (cosine
 similarity) and is evaluated at the database level before results

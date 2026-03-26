@@ -1222,6 +1222,7 @@ func TestValidation_InvalidMinSimilarity(t *testing.T) {
 		err := cfg.Validate()
 		if err == nil {
 			t.Errorf("expected validation error for min_similarity=%v", v)
+			continue
 		}
 		if !contains(err.Error(), "search.min_similarity") {
 			t.Errorf("expected error about search.min_similarity, got: %s", err.Error())
