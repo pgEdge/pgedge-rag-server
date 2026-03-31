@@ -150,9 +150,9 @@ func FormatContext(docs []ContextDocument) string {
 	sb.WriteString("Use the following context to answer the question:\n\n")
 
 	for i, doc := range docs {
-		sb.WriteString(fmt.Sprintf("--- Document %d", i+1))
+		fmt.Fprintf(&sb, "--- Document %d", i+1)
 		if doc.Source != "" {
-			sb.WriteString(fmt.Sprintf(" (Source: %s)", doc.Source))
+			fmt.Fprintf(&sb, " (Source: %s)", doc.Source)
 		}
 		sb.WriteString(" ---\n")
 		sb.WriteString(doc.Content)
