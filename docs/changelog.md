@@ -9,7 +9,17 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-04-04
+
 ### Added
+
+- Multi-host database connection support for HA deployments.
+  Configure multiple database hosts for automatic failover
+  ([#13](https://github.com/pgEdge/pgedge-rag-server/pull/13)).
+
+- Minimum similarity threshold to avoid sending irrelevant
+  documents to the LLM. Set `minimum_similarity` per-pipeline
+  to filter out low-quality search results.
 
 - Configurable `base_url` for LLM providers (Anthropic, OpenAI,
   Voyage AI). This allows routing requests through API gateways
@@ -18,12 +28,34 @@ and this project adheres to
   the same inheritance rules as `provider` and `model`
   ([#7](https://github.com/pgEdge/pgedge-rag-server/issues/7)).
 
+- `vector_weight` parameter for tuning Reciprocal Rank Fusion
+  (RRF) scoring between vector and text search results.
+
+- View support for database sources, allowing pipelines to
+  query from database views in addition to tables.
+
+- Hybrid search control options for fine-tuning search behavior.
+
 ### Improved
 
-- OpenAPI specification: added `enum` constraints for `Filter.logic`
-  (`AND`, `OR`) and `FilterCondition.operator` (all 12 valid
-  operators), and `maxItems: 50` on `Filter.conditions` to limit
-  payload size and improve client-side validation and code generation.
+- OpenAPI specification: added `enum` constraints for
+  `Filter.logic` (`AND`, `OR`) and `FilterCondition.operator`
+  (all 12 valid operators), and `maxItems: 50` on
+  `Filter.conditions` to limit payload size and improve
+  client-side validation and code generation.
+
+### Fixed
+
+- Guard against nil dereference when vector weight is unset.
+- Skip zero-weight loops in RRF scoring to avoid unnecessary
+  computation.
+
+### Security
+
+- Pinned GitHub Actions to commit SHAs to prevent supply chain
+  attacks.
+- Upgraded Go to 1.25.8 and updated dependencies to resolve
+  security findings.
 
 ## [1.0.0-beta3] - 2026-01-26
 
