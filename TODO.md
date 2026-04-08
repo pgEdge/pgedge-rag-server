@@ -11,3 +11,9 @@ implemented.
 2. Add support for use of OpenAI API-compatible local LLM providers, such as
     LM Studio, Docker Model Runner, and EXO. These should just work if 
     configured as OpenAI, but without a requirement for an API key.
+
+## Integration
+
+1. pgedge-vectorizer will support BM25 through generated sparse vectors in 
+    it's next release. We can make use of that as an optional alternative to
+    our built in hybrid search.
