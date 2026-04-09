@@ -14,8 +14,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+// pipelineNameRe is the allowlist pattern for pipeline names.
+// Only lowercase letters, digits, hyphens, and underscores are permitted.
+var pipelineNameRe = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
 // expandPath expands ~ to the user's home directory.
 func expandPath(path string) string {
@@ -172,6 +177,11 @@ func (c *Config) validatePipeline(index int, p Pipeline) ValidationErrors {
 		errs = append(errs, ValidationError{
 			Field:   prefix + ".name",
 			Message: "required",
+		})
+	} else if !pipelineNameRe.MatchString(p.Name) {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".name",
+			Message: "must contain only lowercase letters, digits, hyphens, and underscores (^[a-z0-9_-]+$)",
 		})
 	}
 
