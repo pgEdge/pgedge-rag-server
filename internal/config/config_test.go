@@ -12,6 +12,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -1354,6 +1355,44 @@ func TestValidation_PipelineNameAllowlist(t *testing.T) {
 				t.Errorf("unexpected error message for name %q: %v", name, err)
 			}
 		})
+	}
+}
+
+func TestValidation_PipelineNameMaxLength(t *testing.T) {
+	makeCfg := func(name string) *Config {
+		return &Config{
+			Server: ServerConfig{Port: 8080},
+			Pipelines: []Pipeline{
+				{
+					Name: name,
+					Database: DatabaseConfig{
+						Host:     "localhost",
+						Port:     5432,
+						Database: "testdb",
+					},
+					Tables: []TableSource{
+						{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+					},
+					EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+					RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+				},
+			},
+		}
+	}
+
+	// Exactly 63 characters — should pass
+	name63 := strings.Repeat("a", 63)
+	if err := makeCfg(name63).Validate(); err != nil {
+		t.Errorf("expected 63-char name to pass, got: %v", err)
+	}
+
+	// 64 characters — should fail
+	name64 := strings.Repeat("a", 64)
+	err := makeCfg(name64).Validate()
+	if err == nil {
+		t.Error("expected 64-char name to fail validation")
+	} else if !contains(err.Error(), "63 characters or fewer") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
 

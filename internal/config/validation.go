@@ -18,6 +18,9 @@ import (
 	"strings"
 )
 
+// maxPipelineNameLen is the maximum allowed length for a pipeline name.
+const maxPipelineNameLen = 63
+
 // pipelineNameRe is the allowlist pattern for pipeline names.
 // Only lowercase letters, digits, hyphens, and underscores are permitted.
 var pipelineNameRe = regexp.MustCompile(`^[a-z0-9_-]+$`)
@@ -177,6 +180,11 @@ func (c *Config) validatePipeline(index int, p Pipeline) ValidationErrors {
 		errs = append(errs, ValidationError{
 			Field:   prefix + ".name",
 			Message: "required",
+		})
+	} else if len(p.Name) > maxPipelineNameLen {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".name",
+			Message: fmt.Sprintf("must be %d characters or fewer", maxPipelineNameLen),
 		})
 	} else if !pipelineNameRe.MatchString(p.Name) {
 		errs = append(errs, ValidationError{
