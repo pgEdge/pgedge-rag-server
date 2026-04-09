@@ -21,6 +21,7 @@ Use the following fields within the configuration file:
 | Field       | Description                           |
 |-------------|---------------------------------------|
 | `anthropic` | Path to file containing Anthropic key |
+| `gemini`    | Path to file containing Gemini key    |
 | `openai`    | Path to file containing OpenAI key    |
 | `voyage`    | Path to file containing Voyage key    |
 
@@ -55,6 +56,7 @@ environment variables for key values:
 export OPENAI_API_KEY="sk-..."
 export ANTHROPIC_API_KEY="sk-ant-..."
 export VOYAGE_API_KEY="pa-..."
+export GEMINI_API_KEY="your-gemini-key"
 ```
 
 If neither configuration paths nor environment variables are set, the server looks for API keys in these default locations:
@@ -63,7 +65,58 @@ If neither configuration paths nor environment variables are set, the server loo
 |-----------|-------------------------|
 | OpenAI    | `~/.openai-api-key`     |
 | Anthropic | `~/.anthropic-api-key`  |
+| Gemini    | `~/.gemini-api-key`     |
 | Voyage    | `~/.voyage-api-key`     |
+
+## Gemini Configuration
+
+Google Gemini uses API key authentication. The key is sent as a
+query parameter with each request. Default models are
+`gemini-2.0-flash` for completion and `text-embedding-004` for
+embeddings.
+
+```yaml
+embedding_llm:
+  provider: "gemini"
+  model: "text-embedding-004"
+rag_llm:
+  provider: "gemini"
+  model: "gemini-2.0-flash"
+```
+
+The default base URL is
+`https://generativelanguage.googleapis.com`. To use a different
+endpoint, set `base_url` in the LLM configuration:
+
+```yaml
+rag_llm:
+  provider: "gemini"
+  model: "gemini-2.0-flash"
+  base_url: "https://generativelanguage.googleapis.com"
+```
+
+## OpenAI-Compatible Local Providers
+
+When using OpenAI-compatible local LLM servers such as
+[LM Studio](https://lmstudio.ai),
+[Docker Model Runner](https://docs.docker.com/ai/model-runner/),
+or [EXO](https://github.com/exo-explore/exo), the API key is
+optional. Set `base_url` to point at the local server:
+
+```yaml
+embedding_llm:
+  provider: "openai"
+  model: "nomic-embed-text"
+  base_url: "http://localhost:1234/v1"
+rag_llm:
+  provider: "openai"
+  model: "llama3"
+  base_url: "http://localhost:1234/v1"
+```
+
+No API key is required for local servers. If a key is provided
+(via config, environment variable, or default file location), it
+will be sent as a Bearer token as usual.
 
 ## Ollama Configuration
 
