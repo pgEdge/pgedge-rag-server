@@ -106,6 +106,8 @@ type ErrorResponse struct {
 }
 
 // parseError extracts error information from an API response.
+// It reads from resp.Body, which must not have been consumed or
+// closed. The caller remains responsible for closing resp.Body.
 func parseError(resp *http.Response) error {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -178,12 +178,18 @@ func applyDefaults(cfg *Config) {
 			}
 		}
 
-		// Apply LLM header defaults (cascade: defaults -> pipeline)
-		if len(cfg.Defaults.LLMHeaders) > 0 && len(p.LLMHeaders) == 0 {
-			p.LLMHeaders = make(map[string]string, len(cfg.Defaults.LLMHeaders))
+		// Apply LLM header defaults (cascade: defaults -> pipeline).
+		// Default headers are merged in first, then pipeline-specific
+		// headers override on a per-key basis.
+		if len(cfg.Defaults.LLMHeaders) > 0 {
+			merged := make(map[string]string, len(cfg.Defaults.LLMHeaders))
 			for k, v := range cfg.Defaults.LLMHeaders {
-				p.LLMHeaders[k] = v
+				merged[k] = v
 			}
+			for k, v := range p.LLMHeaders {
+				merged[k] = v
+			}
+			p.LLMHeaders = merged
 		}
 
 		// Apply database port default

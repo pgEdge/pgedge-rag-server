@@ -92,7 +92,7 @@ endpoint, set `base_url` in the LLM configuration:
 rag_llm:
   provider: "gemini"
   model: "gemini-2.0-flash"
-  base_url: "https://generativelanguage.googleapis.com"
+  base_url: "https://your-gemini-proxy.example.com"
 ```
 
 ## OpenAI-Compatible Local Providers

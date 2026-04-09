@@ -242,6 +242,7 @@ func (p *CompletionProvider) CompleteStream(
 		}
 
 		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
 			if line == "" {
@@ -250,7 +251,9 @@ func (p *CompletionProvider) CompleteStream(
 
 			var chunk chatResponse
 			if err := json.Unmarshal([]byte(line), &chunk); err != nil {
-				continue
+				errChan <- fmt.Errorf(
+					"stream JSON decode error: %w", err)
+				return
 			}
 
 			streamChunk := llm.StreamChunk{

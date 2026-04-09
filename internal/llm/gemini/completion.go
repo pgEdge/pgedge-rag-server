@@ -272,6 +272,7 @@ func (p *CompletionProvider) CompleteStream(
 		}
 
 		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
 			if !strings.HasPrefix(line, "data: ") {
@@ -286,7 +287,9 @@ func (p *CompletionProvider) CompleteStream(
 			var genResp generateContentResponse
 			if err := json.Unmarshal(
 				[]byte(data), &genResp); err != nil {
-				continue
+				errChan <- fmt.Errorf(
+					"stream JSON decode error: %w", err)
+				return
 			}
 
 			if len(genResp.Candidates) == 0 {

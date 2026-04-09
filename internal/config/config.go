@@ -23,7 +23,8 @@ type Config struct {
 
 // APIKeysConfig contains paths to files containing API keys for LLM providers.
 // If not specified, keys are loaded from environment variables or default
-// file locations (~/.anthropic-api-key, ~/.openai-api-key, ~/.voyage-api-key).
+// file locations (~/.anthropic-api-key, ~/.openai-api-key, ~/.voyage-api-key,
+// ~/.gemini-api-key).
 type APIKeysConfig struct {
 	Anthropic string `yaml:"anthropic"` // Path to file containing Anthropic API key
 	OpenAI    string `yaml:"openai"`    // Path to file containing OpenAI API key

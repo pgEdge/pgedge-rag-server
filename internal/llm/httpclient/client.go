@@ -71,7 +71,8 @@ func WithTimeout(d time.Duration) Option {
 	}
 }
 
-// WithHTTPClient sets a custom net/http client.
+// WithHTTPClient sets a custom net/http client. This replaces the
+// default client entirely, including its timeout setting.
 func WithHTTPClient(client *http.Client) Option {
 	return func(c *Client) {
 		c.httpClient = client

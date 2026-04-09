@@ -276,6 +276,7 @@ func (p *CompletionProvider) CompleteStream(
 		}
 
 		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
 			if !strings.HasPrefix(line, "data: ") {
@@ -290,7 +291,9 @@ func (p *CompletionProvider) CompleteStream(
 			var chunk streamChunk
 			if err := json.Unmarshal(
 				[]byte(data), &chunk); err != nil {
-				continue // Skip malformed chunks
+				errChan <- fmt.Errorf(
+					"stream JSON decode error: %w", err)
+				return
 			}
 
 			if len(chunk.Choices) == 0 {

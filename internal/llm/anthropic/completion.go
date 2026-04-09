@@ -276,6 +276,7 @@ func (p *CompletionProvider) CompleteStream(
 		}
 
 		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		var inputTokens, outputTokens int
 
 		for scanner.Scan() {
@@ -291,7 +292,9 @@ func (p *CompletionProvider) CompleteStream(
 
 			var event streamEvent
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
-				continue
+				errChan <- fmt.Errorf(
+					"stream JSON decode error: %w", err)
+				return
 			}
 
 			switch event.Type {

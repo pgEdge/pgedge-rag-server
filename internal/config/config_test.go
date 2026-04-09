@@ -1302,22 +1302,31 @@ func TestLoad_LLMHeaders(t *testing.T) {
 		t.Fatalf("failed to load config: %v", err)
 	}
 
-	// Pipeline with explicit headers
+	// Pipeline with explicit headers — overrides one default key
+	// but should still inherit the other default key.
 	p := cfg.Pipelines[0]
 	if p.LLMHeaders["x-portkey-api-key"] != "pk-pipeline" {
 		t.Errorf("expected pipeline llm_headers x-portkey-api-key=pk-pipeline, got %s",
 			p.LLMHeaders["x-portkey-api-key"])
+	}
+	if p.LLMHeaders["x-portkey-gateway"] != "default-gw" {
+		t.Errorf("expected inherited default header x-portkey-gateway=default-gw, got %s",
+			p.LLMHeaders["x-portkey-gateway"])
 	}
 	if p.EmbeddingLLM.Headers["x-portkey-provider"] != "openai" {
 		t.Errorf("expected embedding headers x-portkey-provider=openai, got %s",
 			p.EmbeddingLLM.Headers["x-portkey-provider"])
 	}
 
-	// Pipeline that inherits from defaults
+	// Pipeline that inherits all defaults
 	p2 := cfg.Pipelines[1]
 	if p2.LLMHeaders["x-portkey-api-key"] != "pk-default" {
 		t.Errorf("expected inherited llm_headers x-portkey-api-key=pk-default, got %s",
 			p2.LLMHeaders["x-portkey-api-key"])
+	}
+	if p2.LLMHeaders["x-portkey-gateway"] != "default-gw" {
+		t.Errorf("expected inherited llm_headers x-portkey-gateway=default-gw, got %s",
+			p2.LLMHeaders["x-portkey-gateway"])
 	}
 }
 

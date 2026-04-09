@@ -126,6 +126,9 @@ func TestEmbeddingProvider_EmbedRequest(t *testing.T) {
 		WithEmbeddingBaseURL(server.URL))
 	_, _ = p.Embed(context.Background(), "test text")
 
+	if len(capturedReq.Content.Parts) == 0 {
+		t.Fatal("expected Content.Parts to be non-empty")
+	}
 	if capturedReq.Content.Parts[0].Text != "test text" {
 		t.Errorf("expected 'test text' in request, got '%s'",
 			capturedReq.Content.Parts[0].Text)

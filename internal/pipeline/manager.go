@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/textproto"
 	"sync"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
@@ -276,6 +277,8 @@ func (p *Pipeline) Close() {
 
 // mergeHeaders merges pipeline-level and per-LLM headers.
 // Per-LLM headers take precedence over pipeline-level headers.
+// Keys are canonicalized so that "x-api-key" and "X-Api-Key"
+// resolve to the same header.
 func mergeHeaders(
 	pipelineHeaders, llmHeaders map[string]string,
 ) map[string]string {
@@ -284,10 +287,10 @@ func mergeHeaders(
 	}
 	merged := make(map[string]string)
 	for k, v := range pipelineHeaders {
-		merged[k] = v
+		merged[textproto.CanonicalMIMEHeaderKey(k)] = v
 	}
 	for k, v := range llmHeaders {
-		merged[k] = v
+		merged[textproto.CanonicalMIMEHeaderKey(k)] = v
 	}
 	return merged
 }

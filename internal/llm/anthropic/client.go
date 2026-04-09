@@ -65,7 +65,7 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 
 	// Merge anthropic-version into headers (always required).
 	// User-provided headers are applied first; anthropic-version is
-	// always present.
+	// always present and cannot be overridden by user headers.
 	headers := make(map[string]string)
 	for k, v := range cfg.headers {
 		headers[k] = v
