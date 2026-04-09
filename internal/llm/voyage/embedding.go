@@ -7,88 +7,91 @@
 //
 //-------------------------------------------------------------------------
 
-// Package voyage provides a Voyage AI embedding client.
 package voyage
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/llm"
 )
 
-const (
-	defaultBaseURL = "https://api.voyageai.com/v1"
-	defaultModel   = "voyage-3"
-	defaultTimeout = 60
-)
-
 // EmbeddingProvider implements the llm.EmbeddingProvider interface.
 type EmbeddingProvider struct {
-	httpClient *http.Client
-	baseURL    string
-	apiKey     string
+	client     *Client
 	model      string
 	dimensions int
 }
 
+// embeddingConfig holds configuration for building an EmbeddingProvider.
+type embeddingConfig struct {
+	model      string
+	baseURL    string
+	dimensions int
+	headers    map[string]string
+}
+
 // NewEmbeddingProvider creates a new Voyage embedding provider.
-func NewEmbeddingProvider(apiKey string, opts ...EmbeddingOption) *EmbeddingProvider {
-	p := &EmbeddingProvider{
-		httpClient: &http.Client{
-			Timeout: defaultTimeout * time.Second,
-		},
-		baseURL:    defaultBaseURL,
-		apiKey:     apiKey,
+func NewEmbeddingProvider(
+	apiKey string,
+	opts ...EmbeddingOption,
+) *EmbeddingProvider {
+	cfg := &embeddingConfig{
 		model:      defaultModel,
 		dimensions: 1024, // Default for voyage-3
 	}
 	for _, opt := range opts {
-		opt(p)
+		opt(cfg)
 	}
-	return p
+
+	// Build client options from the embedding config
+	var clientOpts []ClientOption
+	if cfg.baseURL != "" {
+		clientOpts = append(clientOpts, WithBaseURL(cfg.baseURL))
+	}
+	if len(cfg.headers) > 0 {
+		clientOpts = append(clientOpts,
+			WithClientHeaders(cfg.headers))
+	}
+
+	return &EmbeddingProvider{
+		client:     NewClient(apiKey, clientOpts...),
+		model:      cfg.model,
+		dimensions: cfg.dimensions,
+	}
 }
 
 // EmbeddingOption configures the embedding provider.
-type EmbeddingOption func(*EmbeddingProvider)
+type EmbeddingOption func(*embeddingConfig)
 
 // WithModel sets the embedding model.
 func WithModel(model string) EmbeddingOption {
-	return func(p *EmbeddingProvider) {
-		p.model = model
+	return func(cfg *embeddingConfig) {
+		cfg.model = model
 	}
 }
 
 // WithDimensions sets the expected embedding dimensions.
 func WithDimensions(dims int) EmbeddingOption {
-	return func(p *EmbeddingProvider) {
-		p.dimensions = dims
+	return func(cfg *embeddingConfig) {
+		cfg.dimensions = dims
 	}
 }
 
-// WithBaseURL sets a custom base URL.
-func WithBaseURL(url string) EmbeddingOption {
-	return func(p *EmbeddingProvider) {
-		p.baseURL = url
+// WithEmbeddingBaseURL sets a custom base URL for the embedding provider.
+func WithEmbeddingBaseURL(url string) EmbeddingOption {
+	return func(cfg *embeddingConfig) {
+		cfg.baseURL = url
 	}
 }
 
-// WithTimeout sets the HTTP timeout.
-func WithTimeout(seconds int) EmbeddingOption {
-	return func(p *EmbeddingProvider) {
-		p.httpClient.Timeout = time.Duration(seconds) * time.Second
-	}
-}
-
-// WithHTTPClient sets a custom HTTP client.
-func WithHTTPClient(client *http.Client) EmbeddingOption {
-	return func(p *EmbeddingProvider) {
-		p.httpClient = client
+// WithHeaders sets custom headers for the embedding provider.
+func WithHeaders(headers map[string]string) EmbeddingOption {
+	return func(cfg *embeddingConfig) {
+		cfg.headers = headers
 	}
 }
 
@@ -110,13 +113,11 @@ type embeddingResponse struct {
 	} `json:"usage"`
 }
 
-// ErrorResponse represents a Voyage API error.
-type ErrorResponse struct {
-	Detail string `json:"detail"`
-}
-
 // Embed generates an embedding for a single text.
-func (p *EmbeddingProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+func (p *EmbeddingProvider) Embed(
+	ctx context.Context,
+	text string,
+) ([]float32, error) {
 	embeddings, err := p.EmbedBatch(ctx, []string{text})
 	if err != nil {
 		return nil, err
@@ -147,36 +148,20 @@ func (p *EmbeddingProvider) EmbedBatch(
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		p.baseURL+"/embeddings",
-		bytes.NewReader(jsonData),
-	)
+	resp, err := p.client.http.Do(
+		ctx, http.MethodPost, "/embeddings", jsonData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := p.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, parseError(resp)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var errResp ErrorResponse
-		if err := json.Unmarshal(body, &errResp); err != nil {
-			return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
-		}
-		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, errResp.Detail)
 	}
 
 	var embResp embeddingResponse

@@ -7,10 +7,11 @@
 //
 //-------------------------------------------------------------------------
 
-// Package ollama provides an Ollama API client for local LLM inference.
-package ollama
+// Package voyage provides a Voyage AI embedding client.
+package voyage
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,13 +21,12 @@ import (
 )
 
 const (
-	defaultBaseURL        = "http://localhost:11434"
-	defaultEmbeddingModel = "nomic-embed-text"
-	defaultChatModel      = "llama3.2"
-	defaultTimeout        = 120 // Ollama can be slower for large models
+	defaultBaseURL = "https://api.voyageai.com/v1"
+	defaultModel   = "voyage-3"
+	defaultTimeout = 60
 )
 
-// Client is an Ollama API client wrapping the shared httpclient.
+// Client is a Voyage AI API client wrapping the shared httpclient.
 type Client struct {
 	http *httpclient.Client
 }
@@ -62,8 +62,8 @@ func WithClientHeaders(headers map[string]string) ClientOption {
 	}
 }
 
-// NewClient creates a new Ollama client.
-func NewClient(opts ...ClientOption) *Client {
+// NewClient creates a new Voyage AI client.
+func NewClient(apiKey string, opts ...ClientOption) *Client {
 	cfg := &clientConfig{
 		baseURL: defaultBaseURL,
 	}
@@ -86,12 +86,23 @@ func NewClient(opts ...ClientOption) *Client {
 		hcOpts = append(hcOpts, httpclient.WithHeaders(cfg.headers))
 	}
 
-	// Ollama is a local server, no auth needed
-	hcOpts = append(hcOpts, httpclient.WithAuth(httpclient.NoAuth()))
+	// Use BearerAuth when apiKey is provided, NoAuth otherwise
+	if apiKey != "" {
+		hcOpts = append(hcOpts, httpclient.WithAuth(
+			httpclient.BearerAuth(apiKey)))
+	} else {
+		hcOpts = append(hcOpts, httpclient.WithAuth(
+			httpclient.NoAuth()))
+	}
 
 	return &Client{
 		http: httpclient.NewClient(cfg.baseURL, hcOpts...),
 	}
+}
+
+// ErrorResponse represents a Voyage API error.
+type ErrorResponse struct {
+	Detail string `json:"detail"`
 }
 
 // parseError extracts error information from an API response.
@@ -101,6 +112,13 @@ func parseError(resp *http.Response) error {
 		return fmt.Errorf("API error (status %d): failed to read body",
 			resp.StatusCode)
 	}
+
+	var errResp ErrorResponse
+	if err := json.Unmarshal(body, &errResp); err != nil {
+		return fmt.Errorf("API error (status %d): %s",
+			resp.StatusCode, string(body))
+	}
+
 	return fmt.Errorf("API error (status %d): %s",
-		resp.StatusCode, string(body))
+		resp.StatusCode, errResp.Detail)
 }

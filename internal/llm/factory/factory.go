@@ -66,7 +66,7 @@ func NewEmbeddingProvider(
 			opts = append(opts, voyage.WithModel(model))
 		}
 		if baseURL != "" {
-			opts = append(opts, voyage.WithBaseURL(baseURL))
+			opts = append(opts, voyage.WithEmbeddingBaseURL(baseURL))
 		}
 		return voyage.NewEmbeddingProvider(apiKeys.Voyage, opts...), nil
 

@@ -27,47 +27,69 @@ type CompletionProvider struct {
 	temperature float64
 }
 
+// completionConfig holds configuration for building a CompletionProvider.
+type completionConfig struct {
+	model       string
+	baseURL     string
+	temperature float64
+	headers     map[string]string
+}
+
 // NewCompletionProvider creates a new Ollama completion provider.
 func NewCompletionProvider(opts ...CompletionOption) *CompletionProvider {
-	p := &CompletionProvider{
-		client:      NewClient(),
+	cfg := &completionConfig{
 		model:       defaultChatModel,
 		temperature: 0.7,
 	}
 	for _, opt := range opts {
-		opt(p)
+		opt(cfg)
 	}
-	return p
+
+	// Build client options from the completion config
+	var clientOpts []ClientOption
+	if cfg.baseURL != "" {
+		clientOpts = append(clientOpts, WithBaseURL(cfg.baseURL))
+	}
+	if len(cfg.headers) > 0 {
+		clientOpts = append(clientOpts,
+			WithClientHeaders(cfg.headers))
+	}
+
+	return &CompletionProvider{
+		client:      NewClient(clientOpts...),
+		model:       cfg.model,
+		temperature: cfg.temperature,
+	}
 }
 
 // CompletionOption configures the completion provider.
-type CompletionOption func(*CompletionProvider)
+type CompletionOption func(*completionConfig)
 
 // WithCompletionModel sets the chat model.
 func WithCompletionModel(model string) CompletionOption {
-	return func(p *CompletionProvider) {
-		p.model = model
+	return func(cfg *completionConfig) {
+		cfg.model = model
 	}
 }
 
 // WithTemperature sets the default temperature.
 func WithTemperature(temp float64) CompletionOption {
-	return func(p *CompletionProvider) {
-		p.temperature = temp
+	return func(cfg *completionConfig) {
+		cfg.temperature = temp
 	}
 }
 
 // WithCompletionBaseURL sets a custom base URL for the completion provider.
 func WithCompletionBaseURL(url string) CompletionOption {
-	return func(p *CompletionProvider) {
-		p.client.baseURL = url
+	return func(cfg *completionConfig) {
+		cfg.baseURL = url
 	}
 }
 
-// WithCompletionClient sets a custom client.
-func WithCompletionClient(client *Client) CompletionOption {
-	return func(p *CompletionProvider) {
-		p.client = client
+// WithCompletionHeaders sets custom headers for the completion provider.
+func WithCompletionHeaders(headers map[string]string) CompletionOption {
+	return func(cfg *completionConfig) {
+		cfg.headers = headers
 	}
 }
 
@@ -128,7 +150,13 @@ func (p *CompletionProvider) Complete(
 		},
 	}
 
-	resp, err := p.client.request(ctx, http.MethodPost, "/api/chat", chatReq)
+	jsonData, err := json.Marshal(chatReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	resp, err := p.client.http.Do(
+		ctx, http.MethodPost, "/api/chat", jsonData)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +221,15 @@ func (p *CompletionProvider) CompleteStream(
 			},
 		}
 
-		resp, err := p.client.request(ctx, http.MethodPost, "/api/chat", chatReq)
+		jsonData, err := json.Marshal(chatReq)
+		if err != nil {
+			errChan <- fmt.Errorf(
+				"failed to marshal request: %w", err)
+			return
+		}
+
+		resp, err := p.client.http.Do(
+			ctx, http.MethodPost, "/api/chat", jsonData)
 		if err != nil {
 			errChan <- err
 			return
@@ -226,7 +262,8 @@ func (p *CompletionProvider) CompleteStream(
 				streamChunk.Usage = &llm.TokenUsage{
 					PromptTokens:     chunk.PromptEvalCount,
 					CompletionTokens: chunk.EvalCount,
-					TotalTokens:      chunk.PromptEvalCount + chunk.EvalCount,
+					TotalTokens: chunk.PromptEvalCount +
+						chunk.EvalCount,
 				}
 			}
 
@@ -251,7 +288,9 @@ func (p *CompletionProvider) CompleteStream(
 }
 
 // buildMessages converts the request into Ollama chat messages.
-func (p *CompletionProvider) buildMessages(req llm.CompletionRequest) []chatMessage {
+func (p *CompletionProvider) buildMessages(
+	req llm.CompletionRequest,
+) []chatMessage {
 	// Calculate capacity: up to 2 system messages + all conversation messages
 	capacity := len(req.Messages)
 	if req.SystemPrompt != "" {
