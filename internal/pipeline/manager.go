@@ -122,10 +122,13 @@ func (m *Manager) createPipeline(
 	}
 
 	// Create embedding provider
+	embeddingHeaders := mergeHeaders(
+		pCfg.LLMHeaders, pCfg.EmbeddingLLM.Headers)
 	embeddingProv, err := factory.NewEmbeddingProvider(
 		pCfg.EmbeddingLLM.Provider,
 		pCfg.EmbeddingLLM.Model,
 		pCfg.EmbeddingLLM.BaseURL,
+		embeddingHeaders,
 		apiKeys,
 	)
 	if err != nil {
@@ -134,10 +137,13 @@ func (m *Manager) createPipeline(
 	}
 
 	// Create completion provider
+	completionHeaders := mergeHeaders(
+		pCfg.LLMHeaders, pCfg.RAGLLM.Headers)
 	completionProv, err := factory.NewCompletionProvider(
 		pCfg.RAGLLM.Provider,
 		pCfg.RAGLLM.Model,
 		pCfg.RAGLLM.BaseURL,
+		completionHeaders,
 		apiKeys,
 	)
 	if err != nil {
@@ -266,6 +272,24 @@ func (p *Pipeline) Close() {
 	if p.dbPool != nil {
 		p.dbPool.Close()
 	}
+}
+
+// mergeHeaders merges pipeline-level and per-LLM headers.
+// Per-LLM headers take precedence over pipeline-level headers.
+func mergeHeaders(
+	pipelineHeaders, llmHeaders map[string]string,
+) map[string]string {
+	if len(pipelineHeaders) == 0 && len(llmHeaders) == 0 {
+		return nil
+	}
+	merged := make(map[string]string)
+	for k, v := range pipelineHeaders {
+		merged[k] = v
+	}
+	for k, v := range llmHeaders {
+		merged[k] = v
+	}
+	return merged
 }
 
 // Close shuts down the manager and releases resources.

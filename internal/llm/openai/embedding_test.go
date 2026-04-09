@@ -42,8 +42,8 @@ func TestEmbeddingProvider_Embed(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("test-key", WithBaseURL(server.URL))
-	provider := NewEmbeddingProvider("test-key", WithEmbeddingClient(client))
+	provider := NewEmbeddingProvider("test-key",
+		WithEmbeddingBaseURL(server.URL))
 
 	embedding, err := provider.Embed(context.Background(), "hello world")
 	if err != nil {
@@ -78,8 +78,8 @@ func TestEmbeddingProvider_EmbedBatch(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("test-key", WithBaseURL(server.URL))
-	provider := NewEmbeddingProvider("test-key", WithEmbeddingClient(client))
+	provider := NewEmbeddingProvider("test-key",
+		WithEmbeddingBaseURL(server.URL))
 
 	embeddings, err := provider.EmbedBatch(context.Background(), []string{"hello", "world"})
 	if err != nil {

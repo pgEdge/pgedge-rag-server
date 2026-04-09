@@ -35,14 +35,15 @@ func NewEmbeddingProvider(
 	providerType string,
 	model string,
 	baseURL string,
+	headers map[string]string,
 	apiKeys *config.LoadedKeys,
 ) (llm.EmbeddingProvider, error) {
 	provider := strings.ToLower(providerType)
 
 	switch provider {
 	case ProviderOpenAI:
-		if apiKeys.OpenAI == "" {
-			return nil, fmt.Errorf("OpenAI API key not configured")
+		if apiKeys.OpenAI == "" && baseURL == "" {
+			return nil, fmt.Errorf("OpenAI API key or base URL required")
 		}
 		opts := []openai.EmbeddingOption{}
 		if model != "" {
@@ -50,6 +51,9 @@ func NewEmbeddingProvider(
 		}
 		if baseURL != "" {
 			opts = append(opts, openai.WithEmbeddingBaseURL(baseURL))
+		}
+		if len(headers) > 0 {
+			opts = append(opts, openai.WithEmbeddingHeaders(headers))
 		}
 		return openai.NewEmbeddingProvider(apiKeys.OpenAI, opts...), nil
 
@@ -89,14 +93,15 @@ func NewCompletionProvider(
 	providerType string,
 	model string,
 	baseURL string,
+	headers map[string]string,
 	apiKeys *config.LoadedKeys,
 ) (llm.CompletionProvider, error) {
 	provider := strings.ToLower(providerType)
 
 	switch provider {
 	case ProviderOpenAI:
-		if apiKeys.OpenAI == "" {
-			return nil, fmt.Errorf("OpenAI API key not configured")
+		if apiKeys.OpenAI == "" && baseURL == "" {
+			return nil, fmt.Errorf("OpenAI API key or base URL required")
 		}
 		opts := []openai.CompletionOption{}
 		if model != "" {
@@ -104,6 +109,9 @@ func NewCompletionProvider(
 		}
 		if baseURL != "" {
 			opts = append(opts, openai.WithCompletionBaseURL(baseURL))
+		}
+		if len(headers) > 0 {
+			opts = append(opts, openai.WithCompletionHeaders(headers))
 		}
 		return openai.NewCompletionProvider(apiKeys.OpenAI, opts...), nil
 
