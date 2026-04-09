@@ -87,3 +87,89 @@ func TestClient_Do_POST_WithBody(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 }
+
+func TestBearerAuth(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			auth := r.Header.Get("Authorization")
+			if auth != "Bearer test-key" {
+				t.Errorf("expected 'Bearer test-key', got '%s'",
+					auth)
+			}
+			w.WriteHeader(http.StatusOK)
+		}),
+	)
+	defer server.Close()
+
+	c := NewClient(server.URL, WithAuth(BearerAuth("test-key")))
+	resp, err := c.Do(context.Background(), http.MethodGet,
+		"/test", nil)
+	if err != nil {
+		t.Fatalf("Do failed: %v", err)
+	}
+	_ = resp.Body.Close()
+}
+
+func TestHeaderAuth(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := r.Header.Get("x-api-key")
+			if key != "test-key" {
+				t.Errorf("expected 'test-key', got '%s'", key)
+			}
+			w.WriteHeader(http.StatusOK)
+		}),
+	)
+	defer server.Close()
+
+	c := NewClient(server.URL,
+		WithAuth(HeaderAuth("x-api-key", "test-key")))
+	resp, err := c.Do(context.Background(), http.MethodGet,
+		"/test", nil)
+	if err != nil {
+		t.Fatalf("Do failed: %v", err)
+	}
+	_ = resp.Body.Close()
+}
+
+func TestQueryParamAuth(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := r.URL.Query().Get("key")
+			if key != "test-key" {
+				t.Errorf("expected 'test-key', got '%s'", key)
+			}
+			w.WriteHeader(http.StatusOK)
+		}),
+	)
+	defer server.Close()
+
+	c := NewClient(server.URL,
+		WithAuth(QueryParamAuth("key", "test-key")))
+	resp, err := c.Do(context.Background(), http.MethodGet,
+		"/test", nil)
+	if err != nil {
+		t.Fatalf("Do failed: %v", err)
+	}
+	_ = resp.Body.Close()
+}
+
+func TestNoAuth(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "" {
+				t.Error("expected no Authorization header")
+			}
+			w.WriteHeader(http.StatusOK)
+		}),
+	)
+	defer server.Close()
+
+	c := NewClient(server.URL, WithAuth(NoAuth()))
+	resp, err := c.Do(context.Background(), http.MethodGet,
+		"/test", nil)
+	if err != nil {
+		t.Fatalf("Do failed: %v", err)
+	}
+	_ = resp.Body.Close()
+}
