@@ -70,6 +70,9 @@ func NewEmbeddingProvider(
 		if baseURL != "" {
 			opts = append(opts, voyage.WithEmbeddingBaseURL(baseURL))
 		}
+		if len(headers) > 0 {
+			opts = append(opts, voyage.WithHeaders(headers))
+		}
 		return voyage.NewEmbeddingProvider(apiKeys.Voyage, opts...), nil
 
 	case ProviderOllama:
@@ -79,6 +82,9 @@ func NewEmbeddingProvider(
 		}
 		if baseURL != "" {
 			opts = append(opts, ollama.WithEmbeddingBaseURL(baseURL))
+		}
+		if len(headers) > 0 {
+			opts = append(opts, ollama.WithEmbeddingHeaders(headers))
 		}
 		return ollama.NewEmbeddingProvider(opts...), nil
 
@@ -144,6 +150,9 @@ func NewCompletionProvider(
 		if baseURL != "" {
 			opts = append(opts, anthropic.WithCompletionBaseURL(baseURL))
 		}
+		if len(headers) > 0 {
+			opts = append(opts, anthropic.WithCompletionHeaders(headers))
+		}
 		return anthropic.NewCompletionProvider(apiKeys.Anthropic, opts...), nil
 
 	case ProviderOllama:
@@ -153,6 +162,9 @@ func NewCompletionProvider(
 		}
 		if baseURL != "" {
 			opts = append(opts, ollama.WithCompletionBaseURL(baseURL))
+		}
+		if len(headers) > 0 {
+			opts = append(opts, ollama.WithCompletionHeaders(headers))
 		}
 		return ollama.NewCompletionProvider(opts...), nil
 

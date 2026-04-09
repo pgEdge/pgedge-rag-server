@@ -182,6 +182,62 @@ func TestNewCompletionProvider_WithBaseURL(t *testing.T) {
 	}
 }
 
+func TestNewEmbeddingProvider_OpenAI_BaseURLNoKey(
+	t *testing.T,
+) {
+	keys := &config.LoadedKeys{}
+
+	provider, err := NewEmbeddingProvider(
+		"openai", "", "http://localhost:1234/v1", nil, keys)
+	if err != nil {
+		t.Fatalf("expected success with base URL and no key: %v",
+			err)
+	}
+	if provider == nil {
+		t.Fatal("expected non-nil provider")
+	}
+}
+
+func TestNewCompletionProvider_OpenAI_BaseURLNoKey(
+	t *testing.T,
+) {
+	keys := &config.LoadedKeys{}
+
+	provider, err := NewCompletionProvider(
+		"openai", "", "http://localhost:1234/v1", nil, keys)
+	if err != nil {
+		t.Fatalf("expected success with base URL and no key: %v",
+			err)
+	}
+	if provider == nil {
+		t.Fatal("expected non-nil provider")
+	}
+}
+
+func TestNewEmbeddingProvider_OpenAI_NoKeyNoURL(
+	t *testing.T,
+) {
+	keys := &config.LoadedKeys{}
+
+	_, err := NewEmbeddingProvider(
+		"openai", "", "", nil, keys)
+	if err == nil {
+		t.Fatal("expected error when no key and no base URL")
+	}
+}
+
+func TestNewCompletionProvider_OpenAI_NoKeyNoURL(
+	t *testing.T,
+) {
+	keys := &config.LoadedKeys{}
+
+	_, err := NewCompletionProvider(
+		"openai", "", "", nil, keys)
+	if err == nil {
+		t.Fatal("expected error when no key and no base URL")
+	}
+}
+
 func TestNewEmbeddingProvider_Gemini(t *testing.T) {
 	keys := &config.LoadedKeys{Gemini: "test-key"}
 	provider, err := NewEmbeddingProvider("gemini", "", "", nil, keys)
