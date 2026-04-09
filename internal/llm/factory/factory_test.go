@@ -181,3 +181,41 @@ func TestNewCompletionProvider_WithBaseURL(t *testing.T) {
 		t.Fatal("expected non-nil provider")
 	}
 }
+
+func TestNewEmbeddingProvider_Gemini(t *testing.T) {
+	keys := &config.LoadedKeys{Gemini: "test-key"}
+	provider, err := NewEmbeddingProvider("gemini", "", "", nil, keys)
+	if err != nil {
+		t.Fatalf("NewEmbeddingProvider failed: %v", err)
+	}
+	if provider == nil {
+		t.Fatal("expected non-nil provider")
+	}
+}
+
+func TestNewEmbeddingProvider_Gemini_NoKey(t *testing.T) {
+	keys := &config.LoadedKeys{}
+	_, err := NewEmbeddingProvider("gemini", "", "", nil, keys)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
+	}
+}
+
+func TestNewCompletionProvider_Gemini(t *testing.T) {
+	keys := &config.LoadedKeys{Gemini: "test-key"}
+	provider, err := NewCompletionProvider("gemini", "", "", nil, keys)
+	if err != nil {
+		t.Fatalf("NewCompletionProvider failed: %v", err)
+	}
+	if provider == nil {
+		t.Fatal("expected non-nil provider")
+	}
+}
+
+func TestNewCompletionProvider_Gemini_NoKey(t *testing.T) {
+	keys := &config.LoadedKeys{}
+	_, err := NewCompletionProvider("gemini", "", "", nil, keys)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
+	}
+}
