@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestNewClient_Defaults(t *testing.T) {
@@ -249,3 +250,67 @@ func TestClient_DoStream(t *testing.T) {
 	}
 }
 
+func TestClient_CustomHeaders(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Custom") != "value" {
+				t.Errorf("expected X-Custom=value, got %s",
+					r.Header.Get("X-Custom"))
+			}
+			if r.Header.Get("X-Another") != "other" {
+				t.Errorf("expected X-Another=other, got %s",
+					r.Header.Get("X-Another"))
+			}
+			w.WriteHeader(http.StatusOK)
+		}),
+	)
+	defer server.Close()
+
+	c := NewClient(server.URL, WithHeaders(map[string]string{
+		"X-Custom":  "value",
+		"X-Another": "other",
+	}))
+	resp, err := c.Do(context.Background(), http.MethodGet,
+		"/test", nil)
+	if err != nil {
+		t.Fatalf("Do failed: %v", err)
+	}
+	_ = resp.Body.Close()
+}
+
+func TestClient_AuthOverridesCustomHeaders(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			auth := r.Header.Get("Authorization")
+			if auth != "Bearer real-key" {
+				t.Errorf(
+					"expected auth to override, got '%s'",
+					auth)
+			}
+			w.WriteHeader(http.StatusOK)
+		}),
+	)
+	defer server.Close()
+
+	c := NewClient(server.URL,
+		WithHeaders(map[string]string{
+			"Authorization": "Bearer custom-key",
+		}),
+		WithAuth(BearerAuth("real-key")),
+	)
+	resp, err := c.Do(context.Background(), http.MethodGet,
+		"/test", nil)
+	if err != nil {
+		t.Fatalf("Do failed: %v", err)
+	}
+	_ = resp.Body.Close()
+}
+
+func TestClient_WithTimeout(t *testing.T) {
+	c := NewClient("https://example.com",
+		WithTimeout(30*time.Second))
+	if c.httpClient.Timeout != 30*time.Second {
+		t.Errorf("expected 30s timeout, got %v",
+			c.httpClient.Timeout)
+	}
+}
