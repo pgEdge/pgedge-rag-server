@@ -12,6 +12,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -92,6 +93,11 @@ func TestLoad_InvalidConfigs(t *testing.T) {
 			name:        "duplicate name",
 			file:        "../../testdata/configs/invalid-duplicate-name.yaml",
 			errContains: "duplicate pipeline name",
+		},
+		{
+			name:        "invalid pipeline name characters",
+			file:        "../../testdata/configs/invalid-pipeline-name.yaml",
+			errContains: "must contain only lowercase letters",
 		},
 	}
 
@@ -1287,6 +1293,106 @@ func TestValidation_NilMinSimilarity(t *testing.T) {
 	err := cfg.Validate()
 	if err != nil {
 		t.Errorf("unexpected validation error with nil min_similarity: %v", err)
+	}
+}
+
+func TestValidation_PipelineNameAllowlist(t *testing.T) {
+	validNames := []string{
+		"my-pipeline",
+		"my_pipeline",
+		"pipeline1",
+		"abc",
+		"a-b_c-1",
+		"a",
+	}
+	invalidNames := []string{
+		"My Pipeline",
+		"pipeline!",
+		"pipe/line",
+		"pipe.line",
+		"UPPERCASE",
+		"pipe line",
+		"pipe@line",
+	}
+
+	makeCfg := func(name string) *Config {
+		return &Config{
+			Server: ServerConfig{Port: 8080},
+			Pipelines: []Pipeline{
+				{
+					Name: name,
+					Database: DatabaseConfig{
+						Host:     "localhost",
+						Port:     5432,
+						Database: "testdb",
+					},
+					Tables: []TableSource{
+						{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+					},
+					EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+					RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+				},
+			},
+		}
+	}
+
+	for _, name := range validNames {
+		t.Run("valid/"+name, func(t *testing.T) {
+			if err := makeCfg(name).Validate(); err != nil {
+				t.Errorf("expected valid name %q to pass, got: %v", name, err)
+			}
+		})
+	}
+
+	for _, name := range invalidNames {
+		t.Run("invalid/"+name, func(t *testing.T) {
+			err := makeCfg(name).Validate()
+			if err == nil {
+				t.Errorf("expected invalid name %q to fail validation", name)
+				return
+			}
+			if !contains(err.Error(), "must contain only lowercase letters") {
+				t.Errorf("unexpected error message for name %q: %v", name, err)
+			}
+		})
+	}
+}
+
+func TestValidation_PipelineNameMaxLength(t *testing.T) {
+	makeCfg := func(name string) *Config {
+		return &Config{
+			Server: ServerConfig{Port: 8080},
+			Pipelines: []Pipeline{
+				{
+					Name: name,
+					Database: DatabaseConfig{
+						Host:     "localhost",
+						Port:     5432,
+						Database: "testdb",
+					},
+					Tables: []TableSource{
+						{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+					},
+					EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+					RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+				},
+			},
+		}
+	}
+
+	// Exactly 63 characters — should pass
+	name63 := strings.Repeat("a", 63)
+	if err := makeCfg(name63).Validate(); err != nil {
+		t.Errorf("expected 63-char name to pass, got: %v", err)
+	}
+
+	// 64 characters — should fail
+	name64 := strings.Repeat("a", 64)
+	err := makeCfg(name64).Validate()
+	if err == nil {
+		t.Error("expected 64-char name to fail validation")
+	} else if !contains(err.Error(), "63 characters or fewer") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
 
