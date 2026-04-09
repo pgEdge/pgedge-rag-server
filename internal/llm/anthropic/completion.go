@@ -29,55 +29,78 @@ type CompletionProvider struct {
 	temperature float64
 }
 
-// NewCompletionProvider creates a new Anthropic completion provider.
-func NewCompletionProvider(apiKey string, opts ...CompletionOption) *CompletionProvider {
-	p := &CompletionProvider{
-		client:      NewClient(apiKey),
-		model:       defaultModel,
-		maxTokens:   4096,
-		temperature: 0.7,
-	}
-	for _, opt := range opts {
-		opt(p)
-	}
-	return p
+// completionConfig holds configuration for building a CompletionProvider.
+type completionConfig struct {
+	model       string
+	baseURL     string
+	maxTokens   int
+	temperature float64
+	headers     map[string]string
 }
 
 // CompletionOption configures the completion provider.
-type CompletionOption func(*CompletionProvider)
+type CompletionOption func(*completionConfig)
 
 // WithCompletionModel sets the model.
 func WithCompletionModel(model string) CompletionOption {
-	return func(p *CompletionProvider) {
-		p.model = model
+	return func(cfg *completionConfig) {
+		cfg.model = model
 	}
 }
 
 // WithMaxTokens sets the default max tokens.
 func WithMaxTokens(tokens int) CompletionOption {
-	return func(p *CompletionProvider) {
-		p.maxTokens = tokens
+	return func(cfg *completionConfig) {
+		cfg.maxTokens = tokens
 	}
 }
 
 // WithTemperature sets the default temperature.
 func WithTemperature(temp float64) CompletionOption {
-	return func(p *CompletionProvider) {
-		p.temperature = temp
+	return func(cfg *completionConfig) {
+		cfg.temperature = temp
 	}
 }
 
 // WithCompletionBaseURL sets a custom base URL for the completion provider.
 func WithCompletionBaseURL(url string) CompletionOption {
-	return func(p *CompletionProvider) {
-		p.client.baseURL = url
+	return func(cfg *completionConfig) {
+		cfg.baseURL = url
 	}
 }
 
-// WithCompletionClient sets a custom client.
-func WithCompletionClient(client *Client) CompletionOption {
-	return func(p *CompletionProvider) {
-		p.client = client
+// WithCompletionHeaders sets custom headers for the completion provider.
+func WithCompletionHeaders(headers map[string]string) CompletionOption {
+	return func(cfg *completionConfig) {
+		cfg.headers = headers
+	}
+}
+
+// NewCompletionProvider creates a new Anthropic completion provider.
+func NewCompletionProvider(apiKey string, opts ...CompletionOption) *CompletionProvider {
+	cfg := &completionConfig{
+		model:       defaultModel,
+		maxTokens:   4096,
+		temperature: 0.7,
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	// Build client options from the completion config
+	var clientOpts []ClientOption
+	if cfg.baseURL != "" {
+		clientOpts = append(clientOpts, WithBaseURL(cfg.baseURL))
+	}
+	if len(cfg.headers) > 0 {
+		clientOpts = append(clientOpts, WithClientHeaders(cfg.headers))
+	}
+
+	return &CompletionProvider{
+		client:      NewClient(apiKey, clientOpts...),
+		model:       cfg.model,
+		maxTokens:   cfg.maxTokens,
+		temperature: cfg.temperature,
 	}
 }
 
@@ -155,7 +178,13 @@ func (p *CompletionProvider) Complete(
 		Stream:      false,
 	}
 
-	resp, err := p.client.request(ctx, http.MethodPost, "/messages", msgReq)
+	jsonData, err := json.Marshal(msgReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	resp, err := p.client.http.Do(
+		ctx, http.MethodPost, "/messages", jsonData)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +256,14 @@ func (p *CompletionProvider) CompleteStream(
 			Stream:      true,
 		}
 
-		resp, err := p.client.request(ctx, http.MethodPost, "/messages", msgReq)
+		jsonData, err := json.Marshal(msgReq)
+		if err != nil {
+			errChan <- fmt.Errorf("failed to marshal request: %w", err)
+			return
+		}
+
+		resp, err := p.client.http.Do(
+			ctx, http.MethodPost, "/messages", jsonData)
 		if err != nil {
 			errChan <- err
 			return
@@ -309,7 +345,8 @@ func (p *CompletionProvider) CompleteStream(
 // buildMessages converts the request into Anthropic messages format.
 // Returns messages and system prompt separately (Anthropic's format).
 func (p *CompletionProvider) buildMessages(req llm.CompletionRequest) ([]message, string) {
-	// Pre-allocate messages slice (may be slightly over-allocated if there are system messages)
+	// Pre-allocate messages slice (may be slightly over-allocated if
+	// there are system messages)
 	messages := make([]message, 0, len(req.Messages))
 	var systemParts []string
 
