@@ -13,7 +13,9 @@ package httpclient
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -123,4 +125,74 @@ func (c *Client) Do(
 	}
 
 	return resp, nil
+}
+
+// DoJSON marshals reqBody to JSON, sends the request via Do, and
+// unmarshals the response into respBody. Returns an error if the
+// response status is not 2xx.
+func (c *Client) DoJSON(
+	ctx context.Context,
+	method, path string,
+	reqBody interface{},
+	respBody interface{},
+) error {
+	var body []byte
+	if reqBody != nil {
+		var err error
+		body, err = json.Marshal(reqBody)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to marshal request body: %w", err)
+		}
+	}
+
+	resp, err := c.Do(ctx, method, path, body)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf(
+			"failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("unexpected status %d: %s",
+			resp.StatusCode, string(respData))
+	}
+
+	if respBody != nil && len(respData) > 0 {
+		if err := json.Unmarshal(respData, respBody); err != nil {
+			return fmt.Errorf(
+				"failed to unmarshal response: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// DoStream sends a request via Do and returns the response body as
+// an io.ReadCloser for streaming. Returns an error if the response
+// status is not 2xx. The caller is responsible for closing the
+// returned ReadCloser.
+func (c *Client) DoStream(
+	ctx context.Context,
+	method, path string,
+	body []byte,
+) (io.ReadCloser, error) {
+	resp, err := c.Do(ctx, method, path, body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer func() { _ = resp.Body.Close() }()
+		respData, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("unexpected status %d: %s",
+			resp.StatusCode, string(respData))
+	}
+
+	return resp.Body, nil
 }

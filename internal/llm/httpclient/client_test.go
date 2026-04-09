@@ -11,6 +11,7 @@ package httpclient
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -173,3 +174,78 @@ func TestNoAuth(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 }
+
+func TestClient_DoJSON(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req map[string]string
+			body, _ := io.ReadAll(r.Body)
+			if err := json.Unmarshal(body, &req); err != nil {
+				t.Fatalf("failed to unmarshal: %v", err)
+			}
+			if req["name"] != "test" {
+				t.Errorf("expected name=test, got %s",
+					req["name"])
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"result":"ok"}`))
+		}),
+	)
+	defer server.Close()
+
+	c := NewClient(server.URL)
+	reqBody := map[string]string{"name": "test"}
+	var respBody map[string]string
+	err := c.DoJSON(context.Background(), http.MethodPost,
+		"/test", reqBody, &respBody)
+	if err != nil {
+		t.Fatalf("DoJSON failed: %v", err)
+	}
+	if respBody["result"] != "ok" {
+		t.Errorf("expected result=ok, got %s",
+			respBody["result"])
+	}
+}
+
+func TestClient_DoJSON_ErrorStatus(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"bad request"}`))
+		}),
+	)
+	defer server.Close()
+
+	c := NewClient(server.URL)
+	var respBody map[string]string
+	err := c.DoJSON(context.Background(), http.MethodPost,
+		"/test", nil, &respBody)
+	if err == nil {
+		t.Fatal("expected error for 400 status")
+	}
+}
+
+func TestClient_DoStream(t *testing.T) {
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write(
+				[]byte("data: hello\n\ndata: world\n\n"))
+		}),
+	)
+	defer server.Close()
+
+	c := NewClient(server.URL)
+	body, err := c.DoStream(context.Background(),
+		http.MethodPost, "/test", nil)
+	if err != nil {
+		t.Fatalf("DoStream failed: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	data, _ := io.ReadAll(body)
+	if len(data) == 0 {
+		t.Error("expected non-empty stream body")
+	}
+}
+
