@@ -1290,6 +1290,48 @@ func TestValidation_NilMinSimilarity(t *testing.T) {
 	}
 }
 
+func TestLoad_LLMHeaders(t *testing.T) {
+	cfg, err := Load("../../testdata/configs/llm-headers.yaml")
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	// Pipeline with explicit headers
+	p := cfg.Pipelines[0]
+	if p.LLMHeaders["x-portkey-api-key"] != "pk-pipeline" {
+		t.Errorf("expected pipeline llm_headers x-portkey-api-key=pk-pipeline, got %s",
+			p.LLMHeaders["x-portkey-api-key"])
+	}
+	if p.EmbeddingLLM.Headers["x-portkey-provider"] != "openai" {
+		t.Errorf("expected embedding headers x-portkey-provider=openai, got %s",
+			p.EmbeddingLLM.Headers["x-portkey-provider"])
+	}
+
+	// Pipeline that inherits from defaults
+	p2 := cfg.Pipelines[1]
+	if p2.LLMHeaders["x-portkey-api-key"] != "pk-default" {
+		t.Errorf("expected inherited llm_headers x-portkey-api-key=pk-default, got %s",
+			p2.LLMHeaders["x-portkey-api-key"])
+	}
+}
+
+func TestLoad_GeminiProvider(t *testing.T) {
+	cfg, err := Load("../../testdata/configs/gemini.yaml")
+	if err != nil {
+		t.Fatalf("failed to load gemini config: %v", err)
+	}
+
+	p := cfg.Pipelines[0]
+	if p.EmbeddingLLM.Provider != "gemini" {
+		t.Errorf("expected gemini embedding provider, got %s",
+			p.EmbeddingLLM.Provider)
+	}
+	if p.RAGLLM.Provider != "gemini" {
+		t.Errorf("expected gemini rag provider, got %s",
+			p.RAGLLM.Provider)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchSubstring(s, substr)
 }

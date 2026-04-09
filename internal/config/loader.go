@@ -170,6 +170,21 @@ func applyDefaults(cfg *Config) {
 				p.APIKeys.Voyage = cfg.APIKeys.Voyage
 			}
 		}
+		if p.APIKeys.Gemini == "" {
+			if cfg.Defaults.APIKeys.Gemini != "" {
+				p.APIKeys.Gemini = cfg.Defaults.APIKeys.Gemini
+			} else {
+				p.APIKeys.Gemini = cfg.APIKeys.Gemini
+			}
+		}
+
+		// Apply LLM header defaults (cascade: defaults -> pipeline)
+		if len(cfg.Defaults.LLMHeaders) > 0 && len(p.LLMHeaders) == 0 {
+			p.LLMHeaders = make(map[string]string, len(cfg.Defaults.LLMHeaders))
+			for k, v := range cfg.Defaults.LLMHeaders {
+				p.LLMHeaders[k] = v
+			}
+		}
 
 		// Apply database port default
 		if len(p.Database.Hosts) == 0 && p.Database.Port == 0 {

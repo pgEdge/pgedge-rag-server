@@ -121,13 +121,13 @@ func (c *Config) validateDefaults() ValidationErrors {
 	// Validate embedding LLM if provider is specified
 	if c.Defaults.EmbeddingLLM.Provider != "" {
 		errs = append(errs, c.validateLLMOptional("defaults.embedding_llm",
-			c.Defaults.EmbeddingLLM, []string{"openai", "voyage", "ollama"})...)
+			c.Defaults.EmbeddingLLM, []string{"openai", "voyage", "ollama", "gemini"})...)
 	}
 
 	// Validate RAG LLM if provider is specified
 	if c.Defaults.RAGLLM.Provider != "" {
 		errs = append(errs, c.validateLLMOptional("defaults.rag_llm",
-			c.Defaults.RAGLLM, []string{"anthropic", "openai", "ollama"})...)
+			c.Defaults.RAGLLM, []string{"anthropic", "openai", "ollama", "gemini"})...)
 	}
 
 	return errs
@@ -193,9 +193,9 @@ func (c *Config) validatePipeline(index int, p Pipeline) ValidationErrors {
 
 	// LLM validation
 	errs = append(errs, c.validateLLM(prefix+".embedding_llm", p.EmbeddingLLM,
-		[]string{"openai", "voyage", "ollama"})...)
+		[]string{"openai", "voyage", "ollama", "gemini"})...)
 	errs = append(errs, c.validateLLM(prefix+".rag_llm", p.RAGLLM,
-		[]string{"anthropic", "openai", "ollama"})...)
+		[]string{"anthropic", "openai", "ollama", "gemini"})...)
 
 	// Token budget validation
 	if p.TokenBudget < 0 {

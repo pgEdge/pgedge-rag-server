@@ -21,6 +21,7 @@ const (
 	EnvAnthropicAPIKey = "ANTHROPIC_API_KEY"
 	EnvOpenAIAPIKey    = "OPENAI_API_KEY"
 	EnvVoyageAPIKey    = "VOYAGE_API_KEY"
+	EnvGeminiAPIKey    = "GEMINI_API_KEY"
 )
 
 // Default API key file paths (relative to home directory).
@@ -28,6 +29,7 @@ const (
 	DefaultAnthropicKeyFile = ".anthropic-api-key"
 	DefaultOpenAIKeyFile    = ".openai-api-key"
 	DefaultVoyageKeyFile    = ".voyage-api-key"
+	DefaultGeminiKeyFile    = ".gemini-api-key"
 )
 
 // LoadedKeys holds all loaded API keys.
@@ -35,6 +37,7 @@ type LoadedKeys struct {
 	Anthropic string
 	OpenAI    string
 	Voyage    string
+	Gemini    string
 }
 
 // APIKeyLoader handles loading API keys from configured paths, environment
@@ -75,6 +78,16 @@ func (l *APIKeyLoader) LoadVoyageKey() (string, error) {
 		EnvVoyageAPIKey,
 		DefaultVoyageKeyFile,
 		"Voyage",
+	)
+}
+
+// LoadGeminiKey loads the Gemini API key.
+func (l *APIKeyLoader) LoadGeminiKey() (string, error) {
+	return l.loadKey(
+		l.config.Gemini,
+		EnvGeminiAPIKey,
+		DefaultGeminiKeyFile,
+		"Gemini",
 	)
 }
 
@@ -183,6 +196,14 @@ func (l *APIKeyLoader) LoadRequiredKeys(pipelines []Pipeline) (*LoadedKeys, erro
 		keys.Voyage = key
 	}
 
+	if needed["gemini"] {
+		key, err := l.LoadGeminiKey()
+		if err != nil {
+			return nil, err
+		}
+		keys.Gemini = key
+	}
+
 	// Ollama doesn't require an API key
 
 	return keys, nil
@@ -222,6 +243,14 @@ func (l *APIKeyLoader) LoadKeysForPipeline(pipeline Pipeline) (*LoadedKeys, erro
 			return nil, err
 		}
 		keys.Voyage = key
+	}
+
+	if needed["gemini"] {
+		key, err := l.LoadGeminiKey()
+		if err != nil {
+			return nil, err
+		}
+		keys.Gemini = key
 	}
 
 	// Ollama doesn't require an API key
