@@ -45,7 +45,7 @@ type completionConfig struct {
 	model       string
 	baseURL     string
 	maxTokens   int
-	temperature float64
+	temperature *float64
 	headers     map[string]string
 }
 
@@ -85,8 +85,8 @@ func NewCompletionProvider(
 	if cfg.maxTokens > 0 {
 		p.maxTokens = cfg.maxTokens
 	}
-	if cfg.temperature != 0 {
-		p.temperature = cfg.temperature
+	if cfg.temperature != nil {
+		p.temperature = *cfg.temperature
 	}
 	return p
 }
@@ -118,7 +118,7 @@ func WithMaxTokens(tokens int) CompletionOption {
 // WithTemperature sets the default temperature.
 func WithTemperature(temp float64) CompletionOption {
 	return func(cfg *completionConfig) {
-		cfg.temperature = temp
+		cfg.temperature = &temp
 	}
 }
 
