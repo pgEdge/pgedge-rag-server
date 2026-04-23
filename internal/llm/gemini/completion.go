@@ -143,8 +143,8 @@ type content struct {
 }
 
 type generationConfig struct {
-	MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
-	Temperature     float64 `json:"temperature,omitempty"`
+	MaxOutputTokens int      `json:"maxOutputTokens,omitempty"`
+	Temperature     *float64 `json:"temperature,omitempty"`
 }
 
 type generateContentRequest struct {
@@ -336,18 +336,19 @@ func (p *CompletionProvider) CompleteStream(
 func (p *CompletionProvider) buildRequest(
 	req llm.CompletionRequest,
 ) generateContentRequest {
+	temp := p.temperature
+	if req.Temperature >= 0 {
+		temp = req.Temperature
+	}
 	genReq := generateContentRequest{
 		GenerationConfig: &generationConfig{
 			MaxOutputTokens: p.maxTokens,
-			Temperature:     p.temperature,
+			Temperature:     &temp,
 		},
 	}
 
 	if req.MaxTokens > 0 {
 		genReq.GenerationConfig.MaxOutputTokens = req.MaxTokens
-	}
-	if req.Temperature >= 0 {
-		genReq.GenerationConfig.Temperature = req.Temperature
 	}
 
 	// Build system instruction

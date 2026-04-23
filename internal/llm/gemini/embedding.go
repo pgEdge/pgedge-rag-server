@@ -114,6 +114,7 @@ func WithEmbeddingHeaders(
 // Gemini embedding API types
 
 type embedContentRequest struct {
+	Model   string  `json:"model,omitempty"`
 	Content content `json:"content"`
 }
 
@@ -123,16 +124,54 @@ type embedContentResponse struct {
 	} `json:"embedding"`
 }
 
+type batchEmbedContentsRequest struct {
+	Requests []embedContentRequest `json:"requests"`
+}
+
+type batchEmbedContentsResponse struct {
+	Embeddings []struct {
+		Values []float32 `json:"values"`
+	} `json:"embeddings"`
+}
+
 // Embed generates an embedding for a single text.
 func (p *EmbeddingProvider) Embed(
 	ctx context.Context, text string,
 ) ([]float32, error) {
-	reqBody := embedContentRequest{
-		Content: content{
-			Parts: []part{{Text: text}},
-		},
+	embeddings, err := p.EmbedBatch(ctx, []string{text})
+	if err != nil {
+		return nil, err
+	}
+	if len(embeddings) == 0 {
+		return nil, fmt.Errorf("no embedding returned")
+	}
+	return embeddings[0], nil
+}
+
+// EmbedBatch generates embeddings for multiple texts in a single
+// request using Gemini's batchEmbedContents endpoint.
+func (p *EmbeddingProvider) EmbedBatch(
+	ctx context.Context,
+	texts []string,
+) ([][]float32, error) {
+	if len(texts) == 0 {
+		return nil, nil
 	}
 
+	// The API requires each sub-request to reference a fully
+	// qualified model name in the form "models/<model>".
+	modelRef := "models/" + p.model
+	requests := make([]embedContentRequest, len(texts))
+	for i, text := range texts {
+		requests[i] = embedContentRequest{
+			Model: modelRef,
+			Content: content{
+				Parts: []part{{Text: text}},
+			},
+		}
+	}
+
+	reqBody := batchEmbedContentsRequest{Requests: requests}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -140,7 +179,7 @@ func (p *EmbeddingProvider) Embed(
 	}
 
 	path := fmt.Sprintf(
-		"/v1beta/models/%s:embedContent", p.model)
+		"/v1beta/models/%s:batchEmbedContents", p.model)
 	resp, err := p.client.Do(ctx, http.MethodPost,
 		path, jsonData)
 	if err != nil {
@@ -160,35 +199,22 @@ func (p *EmbeddingProvider) Embed(
 			"failed to read response: %w", err)
 	}
 
-	var embResp embedContentResponse
+	var embResp batchEmbedContentsResponse
 	if err := json.Unmarshal(body, &embResp); err != nil {
 		return nil, fmt.Errorf(
 			"failed to parse response: %w", err)
 	}
 
-	return embResp.Embedding.Values, nil
-}
-
-// EmbedBatch generates embeddings for multiple texts.
-// Gemini's embedContent API handles one text at a time.
-func (p *EmbeddingProvider) EmbedBatch(
-	ctx context.Context,
-	texts []string,
-) ([][]float32, error) {
-	if len(texts) == 0 {
-		return nil, nil
+	if len(embResp.Embeddings) != len(texts) {
+		return nil, fmt.Errorf(
+			"expected %d embeddings, got %d",
+			len(texts), len(embResp.Embeddings))
 	}
 
-	embeddings := make([][]float32, len(texts))
-	for i, text := range texts {
-		emb, err := p.Embed(ctx, text)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"failed to embed text %d: %w", i, err)
-		}
-		embeddings[i] = emb
+	embeddings := make([][]float32, len(embResp.Embeddings))
+	for i, e := range embResp.Embeddings {
+		embeddings[i] = e.Values
 	}
-
 	return embeddings, nil
 }
 

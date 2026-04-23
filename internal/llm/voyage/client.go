@@ -71,16 +71,18 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 		opt(cfg)
 	}
 
-	// Build httpclient options
+	// Build httpclient options. Apply WithHTTPClient before
+	// WithTimeout so the timeout is set on the resulting client
+	// rather than being discarded when a custom client replaces it.
 	var hcOpts []httpclient.Option
-
-	hcOpts = append(hcOpts,
-		httpclient.WithTimeout(defaultTimeout*time.Second))
 
 	if cfg.httpClient != nil {
 		hcOpts = append(hcOpts,
 			httpclient.WithHTTPClient(cfg.httpClient))
 	}
+
+	hcOpts = append(hcOpts,
+		httpclient.WithTimeout(defaultTimeout*time.Second))
 
 	if len(cfg.headers) > 0 {
 		hcOpts = append(hcOpts, httpclient.WithHeaders(cfg.headers))

@@ -12,6 +12,7 @@ package gemini
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -124,6 +125,66 @@ func TestCompletionProvider_Complete_WithSystemPrompt(
 	}
 	if len(capturedReq.SystemInstruction.Parts) == 0 {
 		t.Fatal("expected system instruction parts")
+	}
+}
+
+func TestCompletionProvider_Complete_ExplicitZeroTemperature(
+	t *testing.T,
+) {
+	var rawBody []byte
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rawBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+                "candidates": [{
+                    "content": {
+                        "parts": [{"text": "ok"}],
+                        "role": "model"
+                    },
+                    "finishReason": "STOP"
+                }],
+                "usageMetadata": {
+                    "promptTokenCount": 1,
+                    "candidatesTokenCount": 1,
+                    "totalTokenCount": 2
+                }
+            }`))
+		}),
+	)
+	defer server.Close()
+
+	p := NewCompletionProvider("test-key",
+		WithCompletionBaseURL(server.URL),
+		WithTemperature(0.0))
+
+	_, err := p.Complete(context.Background(),
+		llm.CompletionRequest{
+			Temperature: -1,
+			Messages: []llm.Message{
+				{Role: "user", Content: "Hi"},
+			},
+		})
+	if err != nil {
+		t.Fatalf("Complete failed: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(rawBody, &decoded); err != nil {
+		t.Fatalf("failed to decode body: %v", err)
+	}
+	gc, ok := decoded["generationConfig"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected generationConfig in request, got %v",
+			decoded)
+	}
+	temp, present := gc["temperature"]
+	if !present {
+		t.Fatal("expected temperature field to be present when " +
+			"explicitly set to 0.0")
+	}
+	if f, _ := temp.(float64); f != 0.0 {
+		t.Errorf("expected temperature=0, got %v", temp)
 	}
 }
 
