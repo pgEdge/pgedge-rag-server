@@ -118,12 +118,6 @@ type embedContentRequest struct {
 	Content content `json:"content"`
 }
 
-type embedContentResponse struct {
-	Embedding struct {
-		Values []float32 `json:"values"`
-	} `json:"embedding"`
-}
-
 type batchEmbedContentsRequest struct {
 	Requests []embedContentRequest `json:"requests"`
 }
