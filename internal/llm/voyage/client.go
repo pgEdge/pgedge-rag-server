@@ -7,25 +7,26 @@
 //
 //-------------------------------------------------------------------------
 
-// Package openai provides an OpenAI API client.
-package openai
+// Package voyage provides a Voyage AI embedding client.
+package voyage
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/llm/httpclient"
 )
 
 const (
-	defaultBaseURL        = "https://api.openai.com/v1"
-	defaultEmbeddingModel = "text-embedding-3-small"
-	defaultChatModel      = "gpt-4o-mini"
+	defaultBaseURL = "https://api.voyageai.com/v1"
+	defaultModel   = "voyage-3"
+	defaultTimeout = 60
 )
 
-// Client is an OpenAI API client wrapping the shared httpclient.
+// Client is a Voyage AI API client wrapping the shared httpclient.
 type Client struct {
 	http *httpclient.Client
 }
@@ -61,7 +62,7 @@ func WithClientHeaders(headers map[string]string) ClientOption {
 	}
 }
 
-// NewClient creates a new OpenAI client.
+// NewClient creates a new Voyage AI client.
 func NewClient(apiKey string, opts ...ClientOption) *Client {
 	cfg := &clientConfig{
 		baseURL: defaultBaseURL,
@@ -70,12 +71,18 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 		opt(cfg)
 	}
 
-	// Build httpclient options
+	// Build httpclient options. Apply WithHTTPClient before
+	// WithTimeout so the timeout is set on the resulting client
+	// rather than being discarded when a custom client replaces it.
 	var hcOpts []httpclient.Option
 
 	if cfg.httpClient != nil {
-		hcOpts = append(hcOpts, httpclient.WithHTTPClient(cfg.httpClient))
+		hcOpts = append(hcOpts,
+			httpclient.WithHTTPClient(cfg.httpClient))
 	}
+
+	hcOpts = append(hcOpts,
+		httpclient.WithTimeout(defaultTimeout*time.Second))
 
 	if len(cfg.headers) > 0 {
 		hcOpts = append(hcOpts, httpclient.WithHeaders(cfg.headers))
@@ -95,16 +102,14 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 	}
 }
 
-// ErrorResponse represents an OpenAI API error.
+// ErrorResponse represents a Voyage API error.
 type ErrorResponse struct {
-	Error struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-		Code    string `json:"code"`
-	} `json:"error"`
+	Detail string `json:"detail"`
 }
 
 // parseError extracts error information from an API response.
+// It reads from resp.Body, which must not have been consumed or
+// closed. The caller remains responsible for closing resp.Body.
 func parseError(resp *http.Response) error {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -119,5 +124,5 @@ func parseError(resp *http.Response) error {
 	}
 
 	return fmt.Errorf("API error (status %d): %s",
-		resp.StatusCode, errResp.Error.Message)
+		resp.StatusCode, errResp.Detail)
 }

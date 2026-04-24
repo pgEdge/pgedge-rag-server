@@ -11,13 +11,12 @@
 package ollama
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/pgEdge/pgedge-rag-server/internal/llm/httpclient"
 )
 
 const (
@@ -27,85 +26,81 @@ const (
 	defaultTimeout        = 120 // Ollama can be slower for large models
 )
 
-// Client is an Ollama API client.
+// Client is an Ollama API client wrapping the shared httpclient.
 type Client struct {
-	httpClient *http.Client
-	baseURL    string
+	http *httpclient.Client
 }
 
-// NewClient creates a new Ollama client.
-func NewClient(opts ...ClientOption) *Client {
-	c := &Client{
-		httpClient: &http.Client{
-			Timeout: defaultTimeout * time.Second,
-		},
-		baseURL: defaultBaseURL,
-	}
-	for _, opt := range opts {
-		opt(c)
-	}
-	return c
+// clientConfig holds configuration for building a Client.
+type clientConfig struct {
+	baseURL    string
+	headers    map[string]string
+	httpClient *http.Client
 }
 
 // ClientOption configures the client.
-type ClientOption func(*Client)
+type ClientOption func(*clientConfig)
 
 // WithBaseURL sets a custom base URL.
 func WithBaseURL(url string) ClientOption {
-	return func(c *Client) {
-		c.baseURL = url
-	}
-}
-
-// WithTimeout sets the HTTP timeout.
-func WithTimeout(seconds int) ClientOption {
-	return func(c *Client) {
-		c.httpClient.Timeout = time.Duration(seconds) * time.Second
+	return func(cfg *clientConfig) {
+		cfg.baseURL = url
 	}
 }
 
 // WithHTTPClient sets a custom HTTP client.
 func WithHTTPClient(client *http.Client) ClientOption {
-	return func(c *Client) {
-		c.httpClient = client
+	return func(cfg *clientConfig) {
+		cfg.httpClient = client
 	}
 }
 
-// request makes an HTTP request to the Ollama API.
-func (c *Client) request(
-	ctx context.Context,
-	method, path string,
-	body interface{},
-) (*http.Response, error) {
-	var reqBody io.Reader
-	if body != nil {
-		jsonData, err := json.Marshal(body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal request: %w", err)
-		}
-		reqBody = bytes.NewReader(jsonData)
+// WithClientHeaders sets custom headers applied to every request.
+func WithClientHeaders(headers map[string]string) ClientOption {
+	return func(cfg *clientConfig) {
+		cfg.headers = headers
+	}
+}
+
+// NewClient creates a new Ollama client.
+func NewClient(opts ...ClientOption) *Client {
+	cfg := &clientConfig{
+		baseURL: defaultBaseURL,
+	}
+	for _, opt := range opts {
+		opt(cfg)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	// Build httpclient options
+	var hcOpts []httpclient.Option
+
+	hcOpts = append(hcOpts,
+		httpclient.WithTimeout(defaultTimeout*time.Second))
+
+	if cfg.httpClient != nil {
+		hcOpts = append(hcOpts,
+			httpclient.WithHTTPClient(cfg.httpClient))
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+	if len(cfg.headers) > 0 {
+		hcOpts = append(hcOpts, httpclient.WithHeaders(cfg.headers))
 	}
 
-	return resp, nil
+	// Ollama is a local server, no auth needed
+	hcOpts = append(hcOpts, httpclient.WithAuth(httpclient.NoAuth()))
+
+	return &Client{
+		http: httpclient.NewClient(cfg.baseURL, hcOpts...),
+	}
 }
 
 // parseError extracts error information from an API response.
 func parseError(resp *http.Response) error {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("API error (status %d): failed to read body", resp.StatusCode)
+		return fmt.Errorf("API error (status %d): failed to read body",
+			resp.StatusCode)
 	}
-	return fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+	return fmt.Errorf("API error (status %d): %s",
+		resp.StatusCode, string(body))
 }

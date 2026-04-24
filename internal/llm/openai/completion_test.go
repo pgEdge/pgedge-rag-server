@@ -65,8 +65,8 @@ func TestCompletionProvider_Complete(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("test-key", WithBaseURL(server.URL))
-	provider := NewCompletionProvider("test-key", WithCompletionClient(client))
+	provider := NewCompletionProvider("test-key",
+		WithCompletionBaseURL(server.URL))
 
 	req := llm.CompletionRequest{
 		Messages: []llm.Message{
@@ -122,8 +122,8 @@ func TestCompletionProvider_Complete_WithContext(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("test-key", WithBaseURL(server.URL))
-	provider := NewCompletionProvider("test-key", WithCompletionClient(client))
+	provider := NewCompletionProvider("test-key",
+		WithCompletionBaseURL(server.URL))
 
 	req := llm.CompletionRequest{
 		SystemPrompt: "You are a helpful assistant.",

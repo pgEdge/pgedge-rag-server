@@ -125,8 +125,8 @@ func TestComplete_SystemPromptInRequest(t *testing.T) {
 	defer server.Close()
 
 	// Create provider with custom client pointing to test server
-	client := NewClient("test-api-key", WithBaseURL(server.URL))
-	provider := NewCompletionProvider("test-api-key", WithCompletionClient(client))
+	provider := NewCompletionProvider("test-api-key",
+		WithCompletionBaseURL(server.URL))
 
 	customPrompt := "You are Ellie, a custom assistant for pgEdge."
 
@@ -178,8 +178,8 @@ func TestComplete_EmptySystemPrompt(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("test-api-key", WithBaseURL(server.URL))
-	provider := NewCompletionProvider("test-api-key", WithCompletionClient(client))
+	provider := NewCompletionProvider("test-api-key",
+		WithCompletionBaseURL(server.URL))
 
 	req := llm.CompletionRequest{
 		SystemPrompt: "", // Empty

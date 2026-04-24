@@ -100,6 +100,8 @@ defaults:
   api_keys:
     openai: "/etc/pgedge/keys/openai.key"
     anthropic: "/etc/pgedge/keys/anthropic.key"
+  llm_headers:
+    x-portkey-api-key: "pk-xxx"
 ```
 
 | Field            | Description                              | Default |
@@ -109,6 +111,7 @@ defaults:
 | `embedding_llm`  | Default embedding provider configuration | None    |
 | `rag_llm`        | Default completion provider configuration| None    |
 | `api_keys`       | Default API key file paths               | None    |
+| `llm_headers`    | Default HTTP headers for LLM requests    | None    |
 
 The token budget prevents sending too much context to the LLM; this ensures predictable LLM costs while maximizing relevant context.  The [orchestrator](architecture.md):
 
@@ -158,6 +161,7 @@ pipelines:
 | `embedding_llm` | [Embedding provider configuration](#llm-provider-properties) | Yes (unless set in defaults) |
 | `rag_llm`       | Completion provider configuration                            | Yes (unless set in defaults) |
 | `api_keys`      | API key file paths (overrides defaults/global)               | No       |
+| `llm_headers`   | HTTP headers applied to all LLM requests in this pipeline    | No       |
 | `token_budget`  | Maximum tokens for context documents                         | No (uses defaults) |
 | `top_n`         | Maximum number of results to retrieve                        | No (uses defaults) |
 | `system_prompt` | Custom system prompt for the LLM                             | No (uses default) |
@@ -294,23 +298,25 @@ Filters can also be specified per-request via the API's `filter` parameter. API 
 The `embedding_llm` and `rag_llm` properties use the same
 configuration structure:
 
-| Field      | Description                  | Required |
-|------------|------------------------------|----------|
-| `provider` | LLM provider name            | Yes      |
-| `model`    | Model name                   | Yes      |
-| `base_url` | Custom API base URL          | No       |
+| Field      | Description                      | Required |
+|------------|----------------------------------|----------|
+| `provider` | LLM provider name                | Yes      |
+| `model`    | Model name                       | Yes      |
+| `base_url` | Custom API base URL              | No       |
+| `headers`  | Custom HTTP headers for requests | No       |
 
 The optional `base_url` field allows you to route requests
 through an API gateway (such as [Portkey](https://portkey.ai))
 or a custom proxy. When not specified, each provider uses its
 default URL:
 
-| Provider    | Default Base URL                    |
-|-------------|-------------------------------------|
-| `openai`    | `https://api.openai.com/v1`         |
-| `anthropic` | `https://api.anthropic.com/v1`      |
-| `voyage`    | `https://api.voyageai.com/v1`       |
-| `ollama`    | `http://localhost:11434`            |
+| Provider    | Default Base URL                                     |
+|-------------|------------------------------------------------------|
+| `openai`    | `https://api.openai.com/v1`                          |
+| `anthropic` | `https://api.anthropic.com/v1`                       |
+| `gemini`    | `https://generativelanguage.googleapis.com`          |
+| `voyage`    | `https://api.voyageai.com/v1`                        |
+| `ollama`    | `http://localhost:11434`                             |
 
 Example with a custom base URL:
 
@@ -334,11 +340,86 @@ The RAG server supports the following providers:
 |-------------|-------------------|-------------------|
 | `openai`    | Yes               | Yes               |
 | `anthropic` | No*               | Yes               |
+| `gemini`    | Yes               | Yes               |
 | `voyage`    | Yes               | No                |
 | `ollama`    | Yes               | Yes               |
 
-Anthropic does not provide embedding models; use OpenAI or Voyage for
-embeddings with Anthropic for completions.
+Anthropic does not provide embedding models; use OpenAI, Gemini, or
+Voyage for embeddings with Anthropic for completions.
+
+### Custom Headers
+
+The `headers` field on each LLM block lets you attach arbitrary HTTP
+headers to every request sent to that provider. This is useful for API
+gateways, proxy servers, and observability tools such as
+[Portkey](https://portkey.ai).
+
+Headers are resolved using a three-level cascade — from broadest to
+most specific:
+
+1. `defaults.llm_headers` — applied to every LLM request across all
+   pipelines.
+2. Pipeline `llm_headers` — applied to all LLM requests in that
+   pipeline, overriding any matching key from `defaults.llm_headers`.
+3. Per-LLM `headers` — applied only to that individual
+   `embedding_llm` or `rag_llm` block, overriding any matching key
+   from the pipeline or defaults level.
+
+Later levels override earlier ones on a key-by-key basis; unmatched
+keys from earlier levels are preserved.
+
+```yaml
+defaults:
+  llm_headers:
+    x-portkey-api-key: "pk-xxx"
+
+pipelines:
+  - name: "my-pipeline"
+    llm_headers:
+      x-portkey-api-key: "pk-yyy"
+    embedding_llm:
+      provider: "openai"
+      model: "text-embedding-3-small"
+      headers:
+        x-portkey-provider: "openai"
+    rag_llm:
+      provider: "anthropic"
+      model: "claude-sonnet-4-20250514"
+      headers:
+        x-portkey-provider: "anthropic"
+```
+
+In this example the effective headers for `embedding_llm` are:
+
+- `x-portkey-api-key: "pk-yyy"` (pipeline overrides default)
+- `x-portkey-provider: "openai"` (per-LLM, no conflict)
+
+### OpenAI-Compatible Local Providers
+
+OpenAI-compatible local LLM servers such as
+[LM Studio](https://lmstudio.ai),
+[Docker Model Runner](https://docs.docker.com/ai/model-runner/), and
+[EXO](https://github.com/exo-explore/exo) expose an API that mirrors
+the OpenAI API. Use the `openai` provider with a custom `base_url` to
+connect to these servers. The API key is optional when `base_url` is
+set — omit it entirely for local servers that do not require
+authentication:
+
+```yaml
+embedding_llm:
+  provider: "openai"
+  model: "nomic-embed-text"
+  base_url: "http://localhost:1234/v1"
+rag_llm:
+  provider: "openai"
+  model: "llama3"
+  base_url: "http://localhost:1234/v1"
+```
+
+If an API key is present (in the config file, an environment variable,
+or the default key file), it is forwarded as a Bearer token as usual.
+For local servers that ignore authentication, you can leave the key
+unset with no impact on functionality.
 
 ### Search Configuration
 

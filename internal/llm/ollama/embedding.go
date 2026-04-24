@@ -26,47 +26,69 @@ type EmbeddingProvider struct {
 	dimensions int
 }
 
+// embeddingConfig holds configuration for building an EmbeddingProvider.
+type embeddingConfig struct {
+	model      string
+	baseURL    string
+	dimensions int
+	headers    map[string]string
+}
+
 // NewEmbeddingProvider creates a new Ollama embedding provider.
 func NewEmbeddingProvider(opts ...EmbeddingOption) *EmbeddingProvider {
-	p := &EmbeddingProvider{
-		client:     NewClient(),
+	cfg := &embeddingConfig{
 		model:      defaultEmbeddingModel,
 		dimensions: 768, // Default for nomic-embed-text
 	}
 	for _, opt := range opts {
-		opt(p)
+		opt(cfg)
 	}
-	return p
+
+	// Build client options from the embedding config
+	var clientOpts []ClientOption
+	if cfg.baseURL != "" {
+		clientOpts = append(clientOpts, WithBaseURL(cfg.baseURL))
+	}
+	if len(cfg.headers) > 0 {
+		clientOpts = append(clientOpts,
+			WithClientHeaders(cfg.headers))
+	}
+
+	return &EmbeddingProvider{
+		client:     NewClient(clientOpts...),
+		model:      cfg.model,
+		dimensions: cfg.dimensions,
+	}
 }
 
 // EmbeddingOption configures the embedding provider.
-type EmbeddingOption func(*EmbeddingProvider)
+type EmbeddingOption func(*embeddingConfig)
 
 // WithEmbeddingModel sets the embedding model.
 func WithEmbeddingModel(model string) EmbeddingOption {
-	return func(p *EmbeddingProvider) {
-		p.model = model
+	return func(cfg *embeddingConfig) {
+		cfg.model = model
 	}
 }
 
 // WithDimensions sets the expected embedding dimensions.
 func WithDimensions(dims int) EmbeddingOption {
-	return func(p *EmbeddingProvider) {
-		p.dimensions = dims
+	return func(cfg *embeddingConfig) {
+		cfg.dimensions = dims
 	}
 }
 
 // WithEmbeddingBaseURL sets a custom base URL for the embedding provider.
 func WithEmbeddingBaseURL(url string) EmbeddingOption {
-	return func(p *EmbeddingProvider) {
-		p.client.baseURL = url
+	return func(cfg *embeddingConfig) {
+		cfg.baseURL = url
 	}
 }
 
-// WithEmbeddingClient sets a custom client.
-func WithEmbeddingClient(client *Client) EmbeddingOption {
-	return func(p *EmbeddingProvider) {
-		p.client = client
+// WithEmbeddingHeaders sets custom headers for the embedding provider.
+func WithEmbeddingHeaders(headers map[string]string) EmbeddingOption {
+	return func(cfg *embeddingConfig) {
+		cfg.headers = headers
 	}
 }
 
@@ -82,13 +104,22 @@ type embeddingResponse struct {
 }
 
 // Embed generates an embedding for a single text.
-func (p *EmbeddingProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+func (p *EmbeddingProvider) Embed(
+	ctx context.Context,
+	text string,
+) ([]float32, error) {
 	reqBody := embeddingRequest{
 		Model:  p.model,
 		Prompt: text,
 	}
 
-	resp, err := p.client.request(ctx, http.MethodPost, "/api/embeddings", reqBody)
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	resp, err := p.client.http.Do(
+		ctx, http.MethodPost, "/api/embeddings", jsonData)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +149,8 @@ func (p *EmbeddingProvider) Embed(ctx context.Context, text string) ([]float32, 
 }
 
 // EmbedBatch generates embeddings for multiple texts.
-// Note: Ollama doesn't support batch embeddings, so we call Embed for each text.
+// Note: Ollama doesn't support batch embeddings, so we call Embed for
+// each text.
 func (p *EmbeddingProvider) EmbedBatch(
 	ctx context.Context,
 	texts []string,
@@ -131,7 +163,8 @@ func (p *EmbeddingProvider) EmbedBatch(
 	for i, text := range texts {
 		emb, err := p.Embed(ctx, text)
 		if err != nil {
-			return nil, fmt.Errorf("failed to embed text %d: %w", i, err)
+			return nil, fmt.Errorf(
+				"failed to embed text %d: %w", i, err)
 		}
 		embeddings[i] = emb
 	}

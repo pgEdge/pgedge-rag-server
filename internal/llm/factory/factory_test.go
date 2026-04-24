@@ -18,7 +18,7 @@ import (
 func TestNewEmbeddingProvider_OpenAI(t *testing.T) {
 	keys := &config.LoadedKeys{OpenAI: "test-key"}
 
-	provider, err := NewEmbeddingProvider("openai", "", "", keys)
+	provider, err := NewEmbeddingProvider("openai", "", "", nil, keys)
 	if err != nil {
 		t.Fatalf("NewEmbeddingProvider failed: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestNewEmbeddingProvider_OpenAI(t *testing.T) {
 func TestNewEmbeddingProvider_OpenAI_NoKey(t *testing.T) {
 	keys := &config.LoadedKeys{}
 
-	_, err := NewEmbeddingProvider("openai", "", "", keys)
+	_, err := NewEmbeddingProvider("openai", "", "", nil, keys)
 	if err == nil {
 		t.Fatal("expected error for missing API key")
 	}
@@ -39,7 +39,7 @@ func TestNewEmbeddingProvider_OpenAI_NoKey(t *testing.T) {
 func TestNewEmbeddingProvider_Voyage(t *testing.T) {
 	keys := &config.LoadedKeys{Voyage: "test-key"}
 
-	provider, err := NewEmbeddingProvider("voyage", "", "", keys)
+	provider, err := NewEmbeddingProvider("voyage", "", "", nil, keys)
 	if err != nil {
 		t.Fatalf("NewEmbeddingProvider failed: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestNewEmbeddingProvider_Voyage(t *testing.T) {
 func TestNewEmbeddingProvider_Ollama(t *testing.T) {
 	keys := &config.LoadedKeys{}
 
-	provider, err := NewEmbeddingProvider("ollama", "", "", keys)
+	provider, err := NewEmbeddingProvider("ollama", "", "", nil, keys)
 	if err != nil {
 		t.Fatalf("NewEmbeddingProvider failed: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestNewEmbeddingProvider_Ollama(t *testing.T) {
 func TestNewEmbeddingProvider_Anthropic(t *testing.T) {
 	keys := &config.LoadedKeys{Anthropic: "test-key"}
 
-	_, err := NewEmbeddingProvider("anthropic", "", "", keys)
+	_, err := NewEmbeddingProvider("anthropic", "", "", nil, keys)
 	if err == nil {
 		t.Fatal("expected error for Anthropic (no embedding API)")
 	}
@@ -72,7 +72,7 @@ func TestNewEmbeddingProvider_Anthropic(t *testing.T) {
 func TestNewEmbeddingProvider_Unknown(t *testing.T) {
 	keys := &config.LoadedKeys{}
 
-	_, err := NewEmbeddingProvider("unknown", "", "", keys)
+	_, err := NewEmbeddingProvider("unknown", "", "", nil, keys)
 	if err == nil {
 		t.Fatal("expected error for unknown provider")
 	}
@@ -81,7 +81,7 @@ func TestNewEmbeddingProvider_Unknown(t *testing.T) {
 func TestNewEmbeddingProvider_CaseInsensitive(t *testing.T) {
 	keys := &config.LoadedKeys{OpenAI: "test-key"}
 
-	provider, err := NewEmbeddingProvider("OpenAI", "", "", keys)
+	provider, err := NewEmbeddingProvider("OpenAI", "", "", nil, keys)
 	if err != nil {
 		t.Fatalf("NewEmbeddingProvider failed: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestNewEmbeddingProvider_WithBaseURL(t *testing.T) {
 	keys := &config.LoadedKeys{OpenAI: "test-key"}
 
 	provider, err := NewEmbeddingProvider(
-		"openai", "", "https://gateway.example.com/v1", keys)
+		"openai", "", "https://gateway.example.com/v1", nil, keys)
 	if err != nil {
 		t.Fatalf("NewEmbeddingProvider failed: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestNewEmbeddingProvider_WithBaseURL(t *testing.T) {
 func TestNewCompletionProvider_OpenAI(t *testing.T) {
 	keys := &config.LoadedKeys{OpenAI: "test-key"}
 
-	provider, err := NewCompletionProvider("openai", "", "", keys)
+	provider, err := NewCompletionProvider("openai", "", "", nil, keys)
 	if err != nil {
 		t.Fatalf("NewCompletionProvider failed: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestNewCompletionProvider_OpenAI(t *testing.T) {
 func TestNewCompletionProvider_Anthropic(t *testing.T) {
 	keys := &config.LoadedKeys{Anthropic: "test-key"}
 
-	provider, err := NewCompletionProvider("anthropic", "", "", keys)
+	provider, err := NewCompletionProvider("anthropic", "", "", nil, keys)
 	if err != nil {
 		t.Fatalf("NewCompletionProvider failed: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestNewCompletionProvider_Anthropic(t *testing.T) {
 func TestNewCompletionProvider_Ollama(t *testing.T) {
 	keys := &config.LoadedKeys{}
 
-	provider, err := NewCompletionProvider("ollama", "", "", keys)
+	provider, err := NewCompletionProvider("ollama", "", "", nil, keys)
 	if err != nil {
 		t.Fatalf("NewCompletionProvider failed: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestNewCompletionProvider_Ollama(t *testing.T) {
 func TestNewCompletionProvider_Voyage(t *testing.T) {
 	keys := &config.LoadedKeys{Voyage: "test-key"}
 
-	_, err := NewCompletionProvider("voyage", "", "", keys)
+	_, err := NewCompletionProvider("voyage", "", "", nil, keys)
 	if err == nil {
 		t.Fatal("expected error for Voyage (no completion API)")
 	}
@@ -151,7 +151,7 @@ func TestNewCompletionProvider_Voyage(t *testing.T) {
 func TestNewCompletionProvider_Unknown(t *testing.T) {
 	keys := &config.LoadedKeys{}
 
-	_, err := NewCompletionProvider("unknown", "", "", keys)
+	_, err := NewCompletionProvider("unknown", "", "", nil, keys)
 	if err == nil {
 		t.Fatal("expected error for unknown provider")
 	}
@@ -160,7 +160,7 @@ func TestNewCompletionProvider_Unknown(t *testing.T) {
 func TestNewCompletionProvider_WithModel(t *testing.T) {
 	keys := &config.LoadedKeys{OpenAI: "test-key"}
 
-	provider, err := NewCompletionProvider("openai", "gpt-4", "", keys)
+	provider, err := NewCompletionProvider("openai", "gpt-4", "", nil, keys)
 	if err != nil {
 		t.Fatalf("NewCompletionProvider failed: %v", err)
 	}
@@ -173,11 +173,105 @@ func TestNewCompletionProvider_WithBaseURL(t *testing.T) {
 	keys := &config.LoadedKeys{Anthropic: "test-key"}
 
 	provider, err := NewCompletionProvider(
-		"anthropic", "", "https://gateway.example.com/v1", keys)
+		"anthropic", "", "https://gateway.example.com/v1", nil, keys)
 	if err != nil {
 		t.Fatalf("NewCompletionProvider failed: %v", err)
 	}
 	if provider == nil {
 		t.Fatal("expected non-nil provider")
+	}
+}
+
+func TestNewEmbeddingProvider_OpenAI_BaseURLNoKey(
+	t *testing.T,
+) {
+	keys := &config.LoadedKeys{}
+
+	provider, err := NewEmbeddingProvider(
+		"openai", "", "http://localhost:1234/v1", nil, keys)
+	if err != nil {
+		t.Fatalf("expected success with base URL and no key: %v",
+			err)
+	}
+	if provider == nil {
+		t.Fatal("expected non-nil provider")
+	}
+}
+
+func TestNewCompletionProvider_OpenAI_BaseURLNoKey(
+	t *testing.T,
+) {
+	keys := &config.LoadedKeys{}
+
+	provider, err := NewCompletionProvider(
+		"openai", "", "http://localhost:1234/v1", nil, keys)
+	if err != nil {
+		t.Fatalf("expected success with base URL and no key: %v",
+			err)
+	}
+	if provider == nil {
+		t.Fatal("expected non-nil provider")
+	}
+}
+
+func TestNewEmbeddingProvider_OpenAI_NoKeyNoURL(
+	t *testing.T,
+) {
+	keys := &config.LoadedKeys{}
+
+	_, err := NewEmbeddingProvider(
+		"openai", "", "", nil, keys)
+	if err == nil {
+		t.Fatal("expected error when no key and no base URL")
+	}
+}
+
+func TestNewCompletionProvider_OpenAI_NoKeyNoURL(
+	t *testing.T,
+) {
+	keys := &config.LoadedKeys{}
+
+	_, err := NewCompletionProvider(
+		"openai", "", "", nil, keys)
+	if err == nil {
+		t.Fatal("expected error when no key and no base URL")
+	}
+}
+
+func TestNewEmbeddingProvider_Gemini(t *testing.T) {
+	keys := &config.LoadedKeys{Gemini: "test-key"}
+	provider, err := NewEmbeddingProvider("gemini", "", "", nil, keys)
+	if err != nil {
+		t.Fatalf("NewEmbeddingProvider failed: %v", err)
+	}
+	if provider == nil {
+		t.Fatal("expected non-nil provider")
+	}
+}
+
+func TestNewEmbeddingProvider_Gemini_NoKey(t *testing.T) {
+	keys := &config.LoadedKeys{}
+	_, err := NewEmbeddingProvider("gemini", "", "", nil, keys)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
+	}
+}
+
+func TestNewCompletionProvider_Gemini(t *testing.T) {
+	keys := &config.LoadedKeys{Gemini: "test-key"}
+	provider, err := NewCompletionProvider("gemini", "", "", nil, keys)
+	if err != nil {
+		t.Fatalf("NewCompletionProvider failed: %v", err)
+	}
+	if provider == nil {
+		t.Fatal("expected non-nil provider")
+	}
+}
+
+func TestNewCompletionProvider_Gemini_NoKey(t *testing.T) {
+	keys := &config.LoadedKeys{}
+	_, err := NewCompletionProvider("gemini", "", "", nil, keys)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
 	}
 }

@@ -35,3 +35,6 @@ site/
 
 # AI
 .claude/settings.local.json
+
+# Git worktrees
+.worktrees/

@@ -11,98 +11,78 @@
 package anthropic
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"time"
+
+	"github.com/pgEdge/pgedge-rag-server/internal/llm/httpclient"
 )
 
 const (
 	defaultBaseURL = "https://api.anthropic.com/v1"
 	defaultModel   = "claude-sonnet-4-20250514"
-	defaultTimeout = 60
 	apiVersion     = "2023-06-01"
 )
 
-// Client is an Anthropic API client.
+// Client is an Anthropic API client wrapping the shared httpclient.
 type Client struct {
-	httpClient *http.Client
+	http *httpclient.Client
+}
+
+// clientConfig holds configuration for building a Client.
+type clientConfig struct {
 	baseURL    string
-	apiKey     string
+	headers    map[string]string
+	httpClient *http.Client
+}
+
+// ClientOption configures the client.
+type ClientOption func(*clientConfig)
+
+// WithBaseURL sets a custom base URL.
+func WithBaseURL(url string) ClientOption {
+	return func(cfg *clientConfig) {
+		cfg.baseURL = url
+	}
+}
+
+// WithClientHeaders sets custom headers applied to every request.
+func WithClientHeaders(headers map[string]string) ClientOption {
+	return func(cfg *clientConfig) {
+		cfg.headers = headers
+	}
 }
 
 // NewClient creates a new Anthropic client.
 func NewClient(apiKey string, opts ...ClientOption) *Client {
-	c := &Client{
-		httpClient: &http.Client{
-			Timeout: defaultTimeout * time.Second,
-		},
+	cfg := &clientConfig{
 		baseURL: defaultBaseURL,
-		apiKey:  apiKey,
 	}
 	for _, opt := range opts {
-		opt(c)
-	}
-	return c
-}
-
-// ClientOption configures the client.
-type ClientOption func(*Client)
-
-// WithBaseURL sets a custom base URL.
-func WithBaseURL(url string) ClientOption {
-	return func(c *Client) {
-		c.baseURL = url
-	}
-}
-
-// WithTimeout sets the HTTP timeout.
-func WithTimeout(seconds int) ClientOption {
-	return func(c *Client) {
-		c.httpClient.Timeout = time.Duration(seconds) * time.Second
-	}
-}
-
-// WithHTTPClient sets a custom HTTP client.
-func WithHTTPClient(client *http.Client) ClientOption {
-	return func(c *Client) {
-		c.httpClient = client
-	}
-}
-
-// request makes an HTTP request to the Anthropic API.
-func (c *Client) request(
-	ctx context.Context,
-	method, path string,
-	body interface{},
-) (*http.Response, error) {
-	var reqBody io.Reader
-	if body != nil {
-		jsonData, err := json.Marshal(body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal request: %w", err)
-		}
-		reqBody = bytes.NewReader(jsonData)
+		opt(cfg)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	// Merge anthropic-version into headers (always required).
+	// User-provided headers are applied first; anthropic-version is
+	// always present and cannot be overridden by user headers.
+	headers := make(map[string]string)
+	for k, v := range cfg.headers {
+		headers[k] = v
 	}
+	headers["anthropic-version"] = apiVersion
 
-	req.Header.Set("x-api-key", c.apiKey)
-	req.Header.Set("anthropic-version", apiVersion)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+	var hcOpts []httpclient.Option
+	if cfg.httpClient != nil {
+		hcOpts = append(hcOpts, httpclient.WithHTTPClient(cfg.httpClient))
 	}
+	hcOpts = append(hcOpts, httpclient.WithHeaders(headers))
+	hcOpts = append(hcOpts, httpclient.WithAuth(
+		httpclient.HeaderAuth("x-api-key", apiKey)))
 
-	return resp, nil
+	return &Client{
+		http: httpclient.NewClient(cfg.baseURL, hcOpts...),
+	}
 }
 
 // ErrorResponse represents an Anthropic API error.
@@ -117,13 +97,16 @@ type ErrorResponse struct {
 func parseError(resp *http.Response) error {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("API error (status %d): failed to read body", resp.StatusCode)
+		return fmt.Errorf("API error (status %d): failed to read body",
+			resp.StatusCode)
 	}
 
 	var errResp ErrorResponse
 	if err := json.Unmarshal(body, &errResp); err != nil {
-		return fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
+		return fmt.Errorf("API error (status %d): %s",
+			resp.StatusCode, string(body))
 	}
 
-	return fmt.Errorf("API error (status %d): %s", resp.StatusCode, errResp.Error.Message)
+	return fmt.Errorf("API error (status %d): %s",
+		resp.StatusCode, errResp.Error.Message)
 }

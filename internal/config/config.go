@@ -23,11 +23,13 @@ type Config struct {
 
 // APIKeysConfig contains paths to files containing API keys for LLM providers.
 // If not specified, keys are loaded from environment variables or default
-// file locations (~/.anthropic-api-key, ~/.openai-api-key, ~/.voyage-api-key).
+// file locations (~/.anthropic-api-key, ~/.openai-api-key, ~/.voyage-api-key,
+// ~/.gemini-api-key).
 type APIKeysConfig struct {
 	Anthropic string `yaml:"anthropic"` // Path to file containing Anthropic API key
 	OpenAI    string `yaml:"openai"`    // Path to file containing OpenAI API key
 	Voyage    string `yaml:"voyage"`    // Path to file containing Voyage API key
+	Gemini    string `yaml:"gemini"`    // Path to file containing Gemini API key
 }
 
 // ServerConfig contains HTTP server settings.
@@ -53,26 +55,28 @@ type TLSConfig struct {
 
 // Defaults contains default values that can be overridden per-pipeline.
 type Defaults struct {
-	TokenBudget  int           `yaml:"token_budget"`
-	TopN         int           `yaml:"top_n"`
-	EmbeddingLLM LLMConfig     `yaml:"embedding_llm"` // Default embedding provider
-	RAGLLM       LLMConfig     `yaml:"rag_llm"`       // Default completion provider
-	APIKeys      APIKeysConfig `yaml:"api_keys"`      // Default API key paths
+	TokenBudget  int               `yaml:"token_budget"`
+	TopN         int               `yaml:"top_n"`
+	EmbeddingLLM LLMConfig         `yaml:"embedding_llm"` // Default embedding provider
+	RAGLLM       LLMConfig         `yaml:"rag_llm"`       // Default completion provider
+	APIKeys      APIKeysConfig     `yaml:"api_keys"`      // Default API key paths
+	LLMHeaders   map[string]string `yaml:"llm_headers"`   // Default headers for LLM calls
 }
 
 // Pipeline defines a single RAG pipeline configuration.
 type Pipeline struct {
-	Name         string         `yaml:"name"`
-	Description  string         `yaml:"description"`
-	Database     DatabaseConfig `yaml:"database"`
-	Tables       []TableSource  `yaml:"tables"`
-	EmbeddingLLM LLMConfig      `yaml:"embedding_llm"`
-	RAGLLM       LLMConfig      `yaml:"rag_llm"`
-	APIKeys      APIKeysConfig  `yaml:"api_keys"` // Pipeline-specific API key paths
-	TokenBudget  int            `yaml:"token_budget"`
-	TopN         int            `yaml:"top_n"`
-	SystemPrompt string         `yaml:"system_prompt"` // Custom system prompt for LLM
-	Search       SearchConfig   `yaml:"search"`        // Search behavior settings
+	Name         string            `yaml:"name"`
+	Description  string            `yaml:"description"`
+	Database     DatabaseConfig    `yaml:"database"`
+	Tables       []TableSource     `yaml:"tables"`
+	EmbeddingLLM LLMConfig         `yaml:"embedding_llm"`
+	RAGLLM       LLMConfig         `yaml:"rag_llm"`
+	APIKeys      APIKeysConfig     `yaml:"api_keys"` // Pipeline-specific API key paths
+	TokenBudget  int               `yaml:"token_budget"`
+	TopN         int               `yaml:"top_n"`
+	SystemPrompt string            `yaml:"system_prompt"` // Custom system prompt for LLM
+	Search       SearchConfig      `yaml:"search"`        // Search behavior settings
+	LLMHeaders   map[string]string `yaml:"llm_headers"`   // Pipeline-level headers for LLM calls
 }
 
 // HostEntry represents a single host in a multi-host database configuration.
@@ -161,9 +165,10 @@ func (cf *ConfigFilter) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 // LLMConfig contains settings for an LLM provider.
 type LLMConfig struct {
-	Provider string `yaml:"provider"`
-	Model    string `yaml:"model"`
-	BaseURL  string `yaml:"base_url"` // Optional custom base URL (e.g. for API gateways)
+	Provider string            `yaml:"provider"`
+	Model    string            `yaml:"model"`
+	BaseURL  string            `yaml:"base_url"` // Optional custom base URL (e.g. for API gateways)
+	Headers  map[string]string `yaml:"headers"`  // Per-LLM custom headers
 }
 
 // DefaultConfig returns a Config with sensible default values.

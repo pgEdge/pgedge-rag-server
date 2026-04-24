@@ -17,6 +17,7 @@ import (
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 	"github.com/pgEdge/pgedge-rag-server/internal/llm"
 	"github.com/pgEdge/pgedge-rag-server/internal/llm/anthropic"
+	"github.com/pgEdge/pgedge-rag-server/internal/llm/gemini"
 	"github.com/pgEdge/pgedge-rag-server/internal/llm/ollama"
 	"github.com/pgEdge/pgedge-rag-server/internal/llm/openai"
 	"github.com/pgEdge/pgedge-rag-server/internal/llm/voyage"
@@ -26,6 +27,7 @@ import (
 const (
 	ProviderOpenAI    = "openai"
 	ProviderAnthropic = "anthropic"
+	ProviderGemini    = "gemini"
 	ProviderVoyage    = "voyage"
 	ProviderOllama    = "ollama"
 )
@@ -35,14 +37,15 @@ func NewEmbeddingProvider(
 	providerType string,
 	model string,
 	baseURL string,
+	headers map[string]string,
 	apiKeys *config.LoadedKeys,
 ) (llm.EmbeddingProvider, error) {
 	provider := strings.ToLower(providerType)
 
 	switch provider {
 	case ProviderOpenAI:
-		if apiKeys.OpenAI == "" {
-			return nil, fmt.Errorf("OpenAI API key not configured")
+		if apiKeys.OpenAI == "" && baseURL == "" {
+			return nil, fmt.Errorf("OpenAI API key or base URL required")
 		}
 		opts := []openai.EmbeddingOption{}
 		if model != "" {
@@ -50,6 +53,9 @@ func NewEmbeddingProvider(
 		}
 		if baseURL != "" {
 			opts = append(opts, openai.WithEmbeddingBaseURL(baseURL))
+		}
+		if len(headers) > 0 {
+			opts = append(opts, openai.WithEmbeddingHeaders(headers))
 		}
 		return openai.NewEmbeddingProvider(apiKeys.OpenAI, opts...), nil
 
@@ -62,7 +68,10 @@ func NewEmbeddingProvider(
 			opts = append(opts, voyage.WithModel(model))
 		}
 		if baseURL != "" {
-			opts = append(opts, voyage.WithBaseURL(baseURL))
+			opts = append(opts, voyage.WithEmbeddingBaseURL(baseURL))
+		}
+		if len(headers) > 0 {
+			opts = append(opts, voyage.WithHeaders(headers))
 		}
 		return voyage.NewEmbeddingProvider(apiKeys.Voyage, opts...), nil
 
@@ -74,7 +83,26 @@ func NewEmbeddingProvider(
 		if baseURL != "" {
 			opts = append(opts, ollama.WithEmbeddingBaseURL(baseURL))
 		}
+		if len(headers) > 0 {
+			opts = append(opts, ollama.WithEmbeddingHeaders(headers))
+		}
 		return ollama.NewEmbeddingProvider(opts...), nil
+
+	case ProviderGemini:
+		if apiKeys.Gemini == "" {
+			return nil, fmt.Errorf("Gemini API key not configured")
+		}
+		opts := []gemini.EmbeddingOption{}
+		if model != "" {
+			opts = append(opts, gemini.WithEmbeddingModel(model))
+		}
+		if baseURL != "" {
+			opts = append(opts, gemini.WithEmbeddingBaseURL(baseURL))
+		}
+		if len(headers) > 0 {
+			opts = append(opts, gemini.WithEmbeddingHeaders(headers))
+		}
+		return gemini.NewEmbeddingProvider(apiKeys.Gemini, opts...), nil
 
 	case ProviderAnthropic:
 		return nil, fmt.Errorf("Anthropic does not provide an embedding API")
@@ -89,14 +117,15 @@ func NewCompletionProvider(
 	providerType string,
 	model string,
 	baseURL string,
+	headers map[string]string,
 	apiKeys *config.LoadedKeys,
 ) (llm.CompletionProvider, error) {
 	provider := strings.ToLower(providerType)
 
 	switch provider {
 	case ProviderOpenAI:
-		if apiKeys.OpenAI == "" {
-			return nil, fmt.Errorf("OpenAI API key not configured")
+		if apiKeys.OpenAI == "" && baseURL == "" {
+			return nil, fmt.Errorf("OpenAI API key or base URL required")
 		}
 		opts := []openai.CompletionOption{}
 		if model != "" {
@@ -104,6 +133,9 @@ func NewCompletionProvider(
 		}
 		if baseURL != "" {
 			opts = append(opts, openai.WithCompletionBaseURL(baseURL))
+		}
+		if len(headers) > 0 {
+			opts = append(opts, openai.WithCompletionHeaders(headers))
 		}
 		return openai.NewCompletionProvider(apiKeys.OpenAI, opts...), nil
 
@@ -118,6 +150,9 @@ func NewCompletionProvider(
 		if baseURL != "" {
 			opts = append(opts, anthropic.WithCompletionBaseURL(baseURL))
 		}
+		if len(headers) > 0 {
+			opts = append(opts, anthropic.WithCompletionHeaders(headers))
+		}
 		return anthropic.NewCompletionProvider(apiKeys.Anthropic, opts...), nil
 
 	case ProviderOllama:
@@ -128,7 +163,26 @@ func NewCompletionProvider(
 		if baseURL != "" {
 			opts = append(opts, ollama.WithCompletionBaseURL(baseURL))
 		}
+		if len(headers) > 0 {
+			opts = append(opts, ollama.WithCompletionHeaders(headers))
+		}
 		return ollama.NewCompletionProvider(opts...), nil
+
+	case ProviderGemini:
+		if apiKeys.Gemini == "" {
+			return nil, fmt.Errorf("Gemini API key not configured")
+		}
+		opts := []gemini.CompletionOption{}
+		if model != "" {
+			opts = append(opts, gemini.WithCompletionModel(model))
+		}
+		if baseURL != "" {
+			opts = append(opts, gemini.WithCompletionBaseURL(baseURL))
+		}
+		if len(headers) > 0 {
+			opts = append(opts, gemini.WithCompletionHeaders(headers))
+		}
+		return gemini.NewCompletionProvider(apiKeys.Gemini, opts...), nil
 
 	case ProviderVoyage:
 		return nil, fmt.Errorf("Voyage does not provide a completion API")

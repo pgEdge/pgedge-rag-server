@@ -1,0 +1,39 @@
+defaults:
+  token_budget: 1000
+  top_n: 10
+  llm_headers:
+    x-portkey-api-key: "pk-default"
+    x-portkey-gateway: "default-gw"
+  embedding_llm:
+    provider: "openai"
+    model: "text-embedding-3-small"
+  rag_llm:
+    provider: "openai"
+    model: "gpt-4o-mini"
+
+pipelines:
+  - name: "with-headers"
+    database:
+      host: "localhost"
+      database: "testdb"
+    tables:
+      - table: "documents"
+        text_column: "content"
+        vector_column: "embedding"
+    llm_headers:
+      x-portkey-api-key: "pk-pipeline"
+    embedding_llm:
+      headers:
+        x-portkey-provider: "openai"
+    rag_llm:
+      headers:
+        x-portkey-provider: "openai"
+
+  - name: "inherits-headers"
+    database:
+      host: "localhost"
+      database: "testdb"
+    tables:
+      - table: "documents"
+        text_column: "content"
+        vector_column: "embedding"

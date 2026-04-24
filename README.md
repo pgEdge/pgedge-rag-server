@@ -27,7 +27,11 @@ The RAG Server features:
 
 - Multiple RAG pipelines with configurable embedding and LLM providers
 - Hybrid search combining vector similarity and BM25 text matching
-- Support for OpenAI, Anthropic, Voyage, and Ollama LLM providers
+- Support for OpenAI, Anthropic, Google Gemini, Voyage, and Ollama LLM
+  providers
+- Support for OpenAI-compatible local LLM providers (LM Studio, Docker
+  Model Runner, EXO)
+- Configurable request headers for API gateways and proxy servers
 - Token budget management to control LLM costs
 - Optional streaming responses via Server-Sent Events
 - TLS/HTTPS support

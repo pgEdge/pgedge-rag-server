@@ -1,0 +1,15 @@
+pipelines:
+  - name: "gemini-pipeline"
+    database:
+      host: "localhost"
+      database: "testdb"
+    tables:
+      - table: "documents"
+        text_column: "content"
+        vector_column: "embedding"
+    embedding_llm:
+      provider: "gemini"
+      model: "text-embedding-004"
+    rag_llm:
+      provider: "gemini"
+      model: "gemini-2.0-flash"
