@@ -16,6 +16,108 @@ import (
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 )
 
+func minSimilarityPtr(v float64) *float64 { return &v }
+
+func TestBuildVectorSearchQuery(t *testing.T) {
+	baseTable := config.TableSource{
+		Table:        "public.chunks",
+		TextColumn:   "content",
+		VectorColumn: "embedding",
+	}
+
+	tests := []struct {
+		name          string
+		table         config.TableSource
+		topN          int
+		filter        *config.Filter
+		minSimilarity *float64
+		wantContains  []string
+		wantArgCount  int
+		wantArgAt     map[int]interface{}
+	}{
+		{
+			name:         "no filter, no minSimilarity",
+			table:        baseTable,
+			topN:         5,
+			wantContains: []string{`"embedding" IS NOT NULL`, "LIMIT $2"},
+			wantArgCount: 2,
+			wantArgAt:    map[int]interface{}{1: 5},
+		},
+		{
+			name:          "minSimilarity only",
+			table:         baseTable,
+			topN:          5,
+			minSimilarity: minSimilarityPtr(0.7),
+			wantContains:  []string{`"embedding" IS NOT NULL`, `>= $3`, "LIMIT $2"},
+			wantArgCount:  3,
+			// $1=vector, $2=topN, $3=minSimilarity
+			wantArgAt: map[int]interface{}{1: 5, 2: 0.7},
+		},
+		{
+			name:  "filter only",
+			table: baseTable,
+			topN:  5,
+			filter: &config.Filter{
+				Conditions: []config.FilterCondition{
+					{Column: "product", Operator: "=", Value: "pgEdge"},
+				},
+			},
+			// filter starts at $3, null guard appended after
+			wantContains: []string{`"product" = $3`, `"embedding" IS NOT NULL`},
+			wantArgCount: 3,
+			wantArgAt:    map[int]interface{}{1: 5, 2: "pgEdge"},
+		},
+		{
+			name:          "filter and minSimilarity",
+			table:         baseTable,
+			topN:          5,
+			minSimilarity: minSimilarityPtr(0.8),
+			filter: &config.Filter{
+				Conditions: []config.FilterCondition{
+					{Column: "product", Operator: "=", Value: "pgEdge"},
+				},
+			},
+			// $3=minSimilarity, filter starts at $4
+			wantContains: []string{`"product" = $4`, `>= $3`, `"embedding" IS NOT NULL`},
+			wantArgCount: 4,
+			// args: [vector, topN=5, minSimilarity=0.8, "pgEdge"]
+			wantArgAt: map[int]interface{}{1: 5, 2: 0.8, 3: "pgEdge"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			query, args, err := buildVectorSearchQuery(
+				[]float32{0.1, 0.2, 0.3},
+				tt.table,
+				tt.topN,
+				tt.filter,
+				tt.minSimilarity,
+			)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			for _, want := range tt.wantContains {
+				if !strings.Contains(query, want) {
+					t.Errorf("query missing %q\nquery: %s", want, query)
+				}
+			}
+
+			if len(args) != tt.wantArgCount {
+				t.Fatalf("arg count: got %d, want %d — args: %v", len(args), tt.wantArgCount, args)
+			}
+
+			// args[0] is always the vector string; skip it in wantArgAt (index from 1)
+			for idx, want := range tt.wantArgAt {
+				if args[idx] != want {
+					t.Errorf("args[%d]: got %v, want %v", idx, args[idx], want)
+				}
+			}
+		})
+	}
+}
+
 func TestBuildFilterClause(t *testing.T) {
 	tests := []struct {
 		name          string

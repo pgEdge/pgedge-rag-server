@@ -43,20 +43,18 @@ type SearchResult struct {
 	SourceInfo map[string]interface{} `json:"source_info,omitempty"`
 }
 
-// VectorSearch performs a vector similarity search using pgvector.
-// Returns results ordered by similarity (highest first).
-// The filter parameter allows additional WHERE conditions from the API request.
-// If minSimilarity is non-nil, results below that cosine similarity are excluded.
-func (p *Pool) VectorSearch(
-	ctx context.Context,
+// buildVectorSearchQuery constructs the SQL query and argument list for a
+// vector similarity search. Extracted from VectorSearch for testability.
+//
+// Arg ordering: $1=vector, $2=limit, $3=minSimilarity (when non-nil), $4+=filters.
+func buildVectorSearchQuery(
 	embedding []float32,
 	table config.TableSource,
 	topN int,
 	filter *config.Filter,
 	minSimilarity *float64,
-) ([]SearchResult, error) {
-	// Determine starting param index:
-	// $1=vector, $2=limit, optionally $3=min_similarity
+) (string, []interface{}, error) {
+	// $1=vector, $2=limit; minSimilarity occupies $3 when present
 	nextParam := 3
 	var extraArgs []interface{}
 	if minSimilarity != nil {
@@ -64,27 +62,28 @@ func (p *Pool) VectorSearch(
 		extraArgs = append(extraArgs, *minSimilarity)
 	}
 
-	// Build filter clause combining config and request filters
 	filterClause, filterArgs, err := buildFilterClause(table.Filter, filter, nextParam)
 	if err != nil {
-		return nil, fmt.Errorf("invalid filter: %w", err)
+		return "", nil, fmt.Errorf("invalid filter: %w", err)
 	}
 
-	// Add min_similarity condition to the filter clause
+	// Exclude rows with NULL vector column — NULL embeddings produce NULL scores
+	// which cannot be scanned and are useless for similarity search.
+	nullGuard := fmt.Sprintf("%s IS NOT NULL", pgx.Identifier{table.VectorColumn}.Sanitize())
+	if filterClause == "" {
+		filterClause = " WHERE " + nullGuard
+	} else {
+		filterClause = filterClause + " AND " + nullGuard
+	}
+
 	if minSimilarity != nil {
 		simCondition := fmt.Sprintf(
 			"1 - (%s <=> $1::vector) >= $3",
 			pgx.Identifier{table.VectorColumn}.Sanitize(),
 		)
-		if filterClause == "" {
-			filterClause = " WHERE " + simCondition
-		} else {
-			filterClause = filterClause + " AND " + simCondition
-		}
+		filterClause = filterClause + " AND " + simCondition
 	}
 
-	// Build the query using cosine distance operator from pgvector
-	// The <=> operator returns cosine distance, so we subtract from 1 for similarity
 	query := fmt.Sprintf(`
 		SELECT
 			%s AS content,
@@ -99,9 +98,28 @@ func (p *Pool) VectorSearch(
 		pgx.Identifier{table.VectorColumn}.Sanitize(),
 	)
 
-	// Combine vector embedding, topN, optional min_similarity, and filter args
 	args := append([]interface{}{formatVector(embedding), topN}, extraArgs...)
 	args = append(args, filterArgs...)
+	return query, args, nil
+}
+
+// VectorSearch performs a vector similarity search using pgvector.
+// Returns results ordered by similarity (highest first).
+// The filter parameter allows additional WHERE conditions from the API request.
+// If minSimilarity is non-nil, results below that cosine similarity are excluded.
+func (p *Pool) VectorSearch(
+	ctx context.Context,
+	embedding []float32,
+	table config.TableSource,
+	topN int,
+	filter *config.Filter,
+	minSimilarity *float64,
+) ([]SearchResult, error) {
+	query, args, err := buildVectorSearchQuery(embedding, table, topN, filter, minSimilarity)
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := p.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("vector search failed: %w", err)
