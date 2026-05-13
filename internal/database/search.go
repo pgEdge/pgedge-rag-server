@@ -46,7 +46,8 @@ type SearchResult struct {
 // buildVectorSearchQuery constructs the SQL query and argument list for a
 // vector similarity search. Extracted from VectorSearch for testability.
 //
-// Arg ordering: $1=vector, $2=limit, $3=minSimilarity (when non-nil), $4+=filters.
+// Arg ordering: $1=vector, $2=limit. If minSimilarity is set it occupies $3
+// and filters start at $4; otherwise filters start at $3.
 func buildVectorSearchQuery(
 	embedding []float32,
 	table config.TableSource,
@@ -54,7 +55,8 @@ func buildVectorSearchQuery(
 	filter *config.Filter,
 	minSimilarity *float64,
 ) (string, []interface{}, error) {
-	// $1=vector, $2=limit; minSimilarity occupies $3 when present
+	vectorCol := pgx.Identifier{table.VectorColumn}.Sanitize()
+
 	nextParam := 3
 	var extraArgs []interface{}
 	if minSimilarity != nil {
@@ -69,7 +71,7 @@ func buildVectorSearchQuery(
 
 	// Exclude rows with NULL vector column — NULL embeddings produce NULL scores
 	// which cannot be scanned and are useless for similarity search.
-	nullGuard := fmt.Sprintf("%s IS NOT NULL", pgx.Identifier{table.VectorColumn}.Sanitize())
+	nullGuard := vectorCol + " IS NOT NULL"
 	if filterClause == "" {
 		filterClause = " WHERE " + nullGuard
 	} else {
@@ -77,10 +79,7 @@ func buildVectorSearchQuery(
 	}
 
 	if minSimilarity != nil {
-		simCondition := fmt.Sprintf(
-			"1 - (%s <=> $1::vector) >= $3",
-			pgx.Identifier{table.VectorColumn}.Sanitize(),
-		)
+		simCondition := fmt.Sprintf("1 - (%s <=> $1::vector) >= $3", vectorCol)
 		filterClause = filterClause + " AND " + simCondition
 	}
 
@@ -92,10 +91,10 @@ func buildVectorSearchQuery(
 		ORDER BY %s <=> $1::vector
 		LIMIT $2`,
 		pgx.Identifier{table.TextColumn}.Sanitize(),
-		pgx.Identifier{table.VectorColumn}.Sanitize(),
+		vectorCol,
 		parseTableIdentifier(table.Table).Sanitize(),
 		filterClause,
-		pgx.Identifier{table.VectorColumn}.Sanitize(),
+		vectorCol,
 	)
 
 	args := append([]interface{}{formatVector(embedding), topN}, extraArgs...)
