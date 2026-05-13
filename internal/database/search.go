@@ -43,6 +43,65 @@ type SearchResult struct {
 	SourceInfo map[string]interface{} `json:"source_info,omitempty"`
 }
 
+// buildVectorSearchQuery constructs the SQL query and argument list for a
+// vector similarity search. Extracted from VectorSearch for testability.
+//
+// Arg ordering: $1=vector, $2=limit. If minSimilarity is set it occupies $3
+// and filters start at $4; otherwise filters start at $3.
+func buildVectorSearchQuery(
+	embedding []float32,
+	table config.TableSource,
+	topN int,
+	filter *config.Filter,
+	minSimilarity *float64,
+) (string, []interface{}, error) {
+	vectorCol := pgx.Identifier{table.VectorColumn}.Sanitize()
+
+	nextParam := 3
+	var extraArgs []interface{}
+	if minSimilarity != nil {
+		nextParam = 4
+		extraArgs = append(extraArgs, *minSimilarity)
+	}
+
+	filterClause, filterArgs, err := buildFilterClause(table.Filter, filter, nextParam)
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid filter: %w", err)
+	}
+
+	// Exclude rows with NULL vector column — NULL embeddings produce NULL scores
+	// which cannot be scanned and are useless for similarity search.
+	nullGuard := vectorCol + " IS NOT NULL"
+	if filterClause == "" {
+		filterClause = " WHERE " + nullGuard
+	} else {
+		filterClause = filterClause + " AND " + nullGuard
+	}
+
+	if minSimilarity != nil {
+		simCondition := fmt.Sprintf("1 - (%s <=> $1::vector) >= $3", vectorCol)
+		filterClause = filterClause + " AND " + simCondition
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			%s AS content,
+			1 - (%s <=> $1::vector) AS score
+		FROM %s%s
+		ORDER BY %s <=> $1::vector
+		LIMIT $2`,
+		pgx.Identifier{table.TextColumn}.Sanitize(),
+		vectorCol,
+		parseTableIdentifier(table.Table).Sanitize(),
+		filterClause,
+		vectorCol,
+	)
+
+	args := append([]interface{}{formatVector(embedding), topN}, extraArgs...)
+	args = append(args, filterArgs...)
+	return query, args, nil
+}
+
 // VectorSearch performs a vector similarity search using pgvector.
 // Returns results ordered by similarity (highest first).
 // The filter parameter allows additional WHERE conditions from the API request.
@@ -55,53 +114,11 @@ func (p *Pool) VectorSearch(
 	filter *config.Filter,
 	minSimilarity *float64,
 ) ([]SearchResult, error) {
-	// Determine starting param index:
-	// $1=vector, $2=limit, optionally $3=min_similarity
-	nextParam := 3
-	var extraArgs []interface{}
-	if minSimilarity != nil {
-		nextParam = 4
-		extraArgs = append(extraArgs, *minSimilarity)
-	}
-
-	// Build filter clause combining config and request filters
-	filterClause, filterArgs, err := buildFilterClause(table.Filter, filter, nextParam)
+	query, args, err := buildVectorSearchQuery(embedding, table, topN, filter, minSimilarity)
 	if err != nil {
-		return nil, fmt.Errorf("invalid filter: %w", err)
+		return nil, err
 	}
 
-	// Add min_similarity condition to the filter clause
-	if minSimilarity != nil {
-		simCondition := fmt.Sprintf(
-			"1 - (%s <=> $1::vector) >= $3",
-			pgx.Identifier{table.VectorColumn}.Sanitize(),
-		)
-		if filterClause == "" {
-			filterClause = " WHERE " + simCondition
-		} else {
-			filterClause = filterClause + " AND " + simCondition
-		}
-	}
-
-	// Build the query using cosine distance operator from pgvector
-	// The <=> operator returns cosine distance, so we subtract from 1 for similarity
-	query := fmt.Sprintf(`
-		SELECT
-			%s AS content,
-			1 - (%s <=> $1::vector) AS score
-		FROM %s%s
-		ORDER BY %s <=> $1::vector
-		LIMIT $2`,
-		pgx.Identifier{table.TextColumn}.Sanitize(),
-		pgx.Identifier{table.VectorColumn}.Sanitize(),
-		parseTableIdentifier(table.Table).Sanitize(),
-		filterClause,
-		pgx.Identifier{table.VectorColumn}.Sanitize(),
-	)
-
-	// Combine vector embedding, topN, optional min_similarity, and filter args
-	args := append([]interface{}{formatVector(embedding), topN}, extraArgs...)
-	args = append(args, filterArgs...)
 	rows, err := p.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("vector search failed: %w", err)
