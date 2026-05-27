@@ -14,6 +14,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
 )
 
 func TestFormatContext_EmptyDocs(t *testing.T) {
@@ -122,5 +124,39 @@ func TestEmbed32_EmptyVector(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty result, got len=%d", len(got))
+	}
+}
+
+func TestStopReasonString_KnownValues(t *testing.T) {
+	cases := []struct {
+		in   llmlib.StopReason
+		want string
+	}{
+		{llmlib.StopReasonEndTurn, "stop"},
+		{llmlib.StopReasonMaxTokens, "length"},
+		{llmlib.StopReasonStopSequence, "stop_sequence"},
+		{llmlib.StopReasonToolUse, "tool_use"},
+		{llmlib.StopReasonContentFilter, "content_filter"},
+		{llmlib.StopReasonError, "error"},
+	}
+	for _, c := range cases {
+		got := StopReasonString(c.in)
+		if got != c.want {
+			t.Errorf("StopReasonString(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestStopReasonString_UnknownFallsBackToStop(t *testing.T) {
+	got := StopReasonString(llmlib.StopReason("totally-made-up"))
+	if got != "stop" {
+		t.Errorf("unknown stop reason should fall back to 'stop', got %q", got)
+	}
+}
+
+func TestStopReasonString_EmptyFallsBackToStop(t *testing.T) {
+	got := StopReasonString("")
+	if got != "stop" {
+		t.Errorf("empty stop reason should fall back to 'stop', got %q", got)
 	}
 }

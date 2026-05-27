@@ -16,6 +16,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
 )
 
 // ContextDoc is a single retrieved document passed to an LLM as
@@ -68,4 +70,30 @@ func Embed32(ctx context.Context, c embedder, text string) ([]float32, error) {
 		out[i] = float32(v)
 	}
 	return out, nil
+}
+
+// StopReasonString maps the lib's normalised stop reason to the
+// finish_reason string the RAG server emits in streaming and
+// non-streaming responses. Preserved verbatim from the pre-migration
+// behaviour to avoid breaking API consumers that inspect the field.
+//
+// Unknown values fall back to "stop" — the most common case for
+// "model finished cleanly".
+func StopReasonString(r llmlib.StopReason) string {
+	switch r {
+	case llmlib.StopReasonEndTurn:
+		return "stop"
+	case llmlib.StopReasonMaxTokens:
+		return "length"
+	case llmlib.StopReasonStopSequence:
+		return "stop_sequence"
+	case llmlib.StopReasonToolUse:
+		return "tool_use"
+	case llmlib.StopReasonContentFilter:
+		return "content_filter"
+	case llmlib.StopReasonError:
+		return "error"
+	default:
+		return "stop"
+	}
 }
