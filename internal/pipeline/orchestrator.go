@@ -69,7 +69,7 @@ func NewOrchestrator(cfg OrchestratorConfig) *Orchestrator {
 
 // Execute runs the full RAG pipeline for a query.
 func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryResponse, error) {
-	o.logger.Debug("executing RAG pipeline", "query", req.Query, "stream", req.Stream)
+	o.logger.Debug("executing RAG pipeline", "stream", req.Stream, "query_len", len(req.Query))
 
 	topN := o.topN
 	if req.TopN > 0 {
