@@ -182,13 +182,13 @@ func (o *Orchestrator) ExecuteStream(
 					return
 				}
 			case llmlib.ChunkDone:
-				// The lib normalises the stop reason; pre-migration
-				// streaming code emitted "stop" for clean finishes and
-				// preserved it on the final chunk.
+				// The lib's ChunkDone does not carry a StopReason on
+				// the chunk; the pre-migration code emitted "stop" on
+				// clean finishes, so we do the same here. If we ever
+				// need to surface real stop reasons during streaming,
+				// switch to Stream.Collect and read resp.StopReason.
 				select {
-				case chunkChan <- StreamChunk{
-					FinishReason: ragllm.StopReasonString(""),
-				}:
+				case chunkChan <- StreamChunk{FinishReason: "stop"}:
 				case <-ctx.Done():
 					errChan <- ctx.Err()
 					return
