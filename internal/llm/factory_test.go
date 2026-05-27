@@ -125,3 +125,89 @@ func TestNewEmbeddingClient_CustomHeadersAccepted(t *testing.T) {
 		t.Fatalf("custom headers should not cause an error: %v", err)
 	}
 }
+
+func TestNewCompletionClient_Anthropic(t *testing.T) {
+	keys := &config.LoadedKeys{Anthropic: "sk-test"}
+	c, err := NewCompletionClient(
+		"anthropic", "claude-sonnet-4-20250514", "", nil, keys,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c.Provider() != "anthropic" {
+		t.Errorf("Provider()=%q, want anthropic", c.Provider())
+	}
+}
+
+func TestNewCompletionClient_OpenAI(t *testing.T) {
+	keys := &config.LoadedKeys{OpenAI: "sk-test"}
+	c, err := NewCompletionClient("openai", "gpt-4o", "", nil, keys)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c == nil {
+		t.Fatal("expected non-nil client")
+	}
+}
+
+func TestNewCompletionClient_OpenAI_BaseURLSubstitutesForKey(t *testing.T) {
+	keys := &config.LoadedKeys{}
+	c, err := NewCompletionClient(
+		"openai", "local-model",
+		"http://localhost:1234/v1", nil, keys,
+	)
+	if err != nil {
+		t.Fatalf("baseURL should satisfy the 'API key required' check: %v", err)
+	}
+	if c == nil {
+		t.Fatal("expected non-nil client")
+	}
+}
+
+func TestNewCompletionClient_AnthropicMissingKey(t *testing.T) {
+	keys := &config.LoadedKeys{}
+	_, err := NewCompletionClient(
+		"anthropic", "claude-sonnet-4-20250514", "", nil, keys,
+	)
+	if err == nil || !strings.Contains(err.Error(), "Anthropic") {
+		t.Errorf("expected Anthropic key error, got %v", err)
+	}
+}
+
+func TestNewCompletionClient_GeminiMissingKey(t *testing.T) {
+	keys := &config.LoadedKeys{}
+	_, err := NewCompletionClient("gemini", "gemini-1.5-pro", "", nil, keys)
+	if err == nil || !strings.Contains(err.Error(), "Gemini") {
+		t.Errorf("expected Gemini key error, got %v", err)
+	}
+}
+
+func TestNewCompletionClient_Ollama_NoKeyOK(t *testing.T) {
+	keys := &config.LoadedKeys{}
+	c, err := NewCompletionClient(
+		"ollama", "llama3",
+		"http://localhost:11434", nil, keys,
+	)
+	if err != nil {
+		t.Fatalf("Ollama should not require a key: %v", err)
+	}
+	if c == nil {
+		t.Fatal("expected non-nil client")
+	}
+}
+
+func TestNewCompletionClient_VoyageRejected(t *testing.T) {
+	keys := &config.LoadedKeys{Voyage: "vk-test"}
+	_, err := NewCompletionClient("voyage", "", "", nil, keys)
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "completion") {
+		t.Errorf("Voyage should be rejected for completion, got: %v", err)
+	}
+}
+
+func TestNewCompletionClient_UnknownProvider(t *testing.T) {
+	keys := &config.LoadedKeys{}
+	_, err := NewCompletionClient("nonesuch", "", "", nil, keys)
+	if err == nil || !strings.Contains(err.Error(), "nonesuch") {
+		t.Errorf("expected error naming the unknown provider, got %v", err)
+	}
+}

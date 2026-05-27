@@ -83,3 +83,57 @@ func NewEmbeddingClient(
 		return nil, fmt.Errorf("unknown embedding provider: %s", provider)
 	}
 }
+
+// NewCompletionClient builds an llm.Client for chat completion. The
+// factory validates that the provider supports completion (Voyage is
+// embeddings-only) and that the necessary API key is present.
+func NewCompletionClient(
+	provider, model, baseURL string,
+	headers map[string]string,
+	keys *config.LoadedKeys,
+) (llmlib.Client, error) {
+	p := strings.ToLower(provider)
+
+	switch p {
+	case ProviderVoyage:
+		return nil, fmt.Errorf("Voyage does not provide a completion API")
+	case ProviderOpenAI:
+		if keys.OpenAI == "" && baseURL == "" {
+			return nil, fmt.Errorf("OpenAI API key or base URL required")
+		}
+		return llmlib.NewClient(p, llmlib.Options{
+			APIKey:        keys.OpenAI,
+			Model:         model,
+			BaseURL:       baseURL,
+			CustomHeaders: headers,
+		})
+	case ProviderAnthropic:
+		if keys.Anthropic == "" {
+			return nil, fmt.Errorf("Anthropic API key not configured")
+		}
+		return llmlib.NewClient(p, llmlib.Options{
+			APIKey:        keys.Anthropic,
+			Model:         model,
+			BaseURL:       baseURL,
+			CustomHeaders: headers,
+		})
+	case ProviderGemini:
+		if keys.Gemini == "" {
+			return nil, fmt.Errorf("Gemini API key not configured")
+		}
+		return llmlib.NewClient(p, llmlib.Options{
+			APIKey:        keys.Gemini,
+			Model:         model,
+			BaseURL:       baseURL,
+			CustomHeaders: headers,
+		})
+	case ProviderOllama:
+		return llmlib.NewClient(p, llmlib.Options{
+			Model:         model,
+			BaseURL:       baseURL,
+			CustomHeaders: headers,
+		})
+	default:
+		return nil, fmt.Errorf("unknown completion provider: %s", provider)
+	}
+}
