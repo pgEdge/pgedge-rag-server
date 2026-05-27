@@ -10,6 +10,8 @@
 package llm
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -67,5 +69,58 @@ func TestFormatContext_OrderingAndNumbering(t *testing.T) {
 		if !strings.Contains(got, header) {
 			t.Errorf("expected header %q in output\n--- got ---\n%s", header, got)
 		}
+	}
+}
+
+// stubEmbedClient implements just the Embed method of llm.Client for
+// testing Embed32. All other methods are unused; we don't need a full
+// llm.Client because Embed32 doesn't take one — see note in body.
+//
+// Note: Embed32 takes an interface{ Embed(ctx, text) ([]float64, error) }
+// to keep tests cheap. The real argument type is llm.Client from the
+// shared lib, which satisfies the local interface structurally.
+
+type stubEmbedClient struct {
+	vec []float64
+	err error
+}
+
+func (s *stubEmbedClient) Embed(ctx context.Context, text string) ([]float64, error) {
+	return s.vec, s.err
+}
+
+func TestEmbed32_ConvertsFloat64ToFloat32(t *testing.T) {
+	stub := &stubEmbedClient{vec: []float64{0.1, -0.25, 1.5, 0}}
+	got, err := Embed32(context.Background(), stub, "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []float32{0.1, -0.25, 1.5, 0}
+	if len(got) != len(want) {
+		t.Fatalf("len(got)=%d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d]=%v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestEmbed32_PropagatesError(t *testing.T) {
+	stub := &stubEmbedClient{err: errors.New("upstream down")}
+	_, err := Embed32(context.Background(), stub, "hello")
+	if err == nil || err.Error() != "upstream down" {
+		t.Fatalf("expected upstream error to propagate, got: %v", err)
+	}
+}
+
+func TestEmbed32_EmptyVector(t *testing.T) {
+	stub := &stubEmbedClient{vec: nil}
+	got, err := Embed32(context.Background(), stub, "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty result, got len=%d", len(got))
 	}
 }

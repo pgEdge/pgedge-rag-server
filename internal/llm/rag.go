@@ -13,6 +13,7 @@
 package llm
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -45,4 +46,26 @@ func FormatContext(docs []ContextDoc) string {
 	}
 
 	return sb.String()
+}
+
+// embedder is the minimal interface Embed32 needs from a client.
+// The lib's llm.Client satisfies it structurally — there is no
+// runtime conversion or wrapper. Defined locally so tests can stub
+// without depending on the lib.
+type embedder interface {
+	Embed(ctx context.Context, text string) ([]float64, error)
+}
+
+// Embed32 returns the embedding for text as a []float32 — pgvector
+// expects float32, and this is the only place we narrow.
+func Embed32(ctx context.Context, c embedder, text string) ([]float32, error) {
+	vec, err := c.Embed(ctx, text)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]float32, len(vec))
+	for i, v := range vec {
+		out[i] = float32(v)
+	}
+	return out, nil
 }
