@@ -314,7 +314,7 @@ func (p *CompletionProvider) buildMessages(
 
 	// Add context documents as a system message if provided
 	if len(req.Context) > 0 {
-		contextContent := llm.FormatContext(req.Context)
+		contextContent := llm.FormatContextLegacy(req.Context)
 		messages = append(messages, chatMessage{
 			Role:    "system",
 			Content: contextContent,

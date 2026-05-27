@@ -358,7 +358,7 @@ func (p *CompletionProvider) buildRequest(
 	}
 	if len(req.Context) > 0 {
 		systemParts = append(systemParts,
-			llm.FormatContext(req.Context))
+			llm.FormatContextLegacy(req.Context))
 	}
 	if len(systemParts) > 0 {
 		genReq.SystemInstruction = &content{

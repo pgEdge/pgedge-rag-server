@@ -143,9 +143,10 @@ func IsRetryable(err error) bool {
 	return false
 }
 
-// FormatContext formats context documents for inclusion in an LLM prompt.
-// This provides a consistent format across all completion providers.
-func FormatContext(docs []ContextDocument) string {
+// FormatContextLegacy formats ContextDocument slices for inclusion in an LLM
+// prompt. Kept for callers that still use ContextDocument; will be removed
+// when those callers are migrated to ContextDoc in the llm-lib migration.
+func FormatContextLegacy(docs []ContextDocument) string {
 	var sb strings.Builder
 	sb.WriteString("Use the following context to answer the question:\n\n")
 

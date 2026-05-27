@@ -360,7 +360,7 @@ func (p *CompletionProvider) buildMessages(req llm.CompletionRequest) ([]message
 
 	// Add context documents to system prompt
 	if len(req.Context) > 0 {
-		systemParts = append(systemParts, llm.FormatContext(req.Context))
+		systemParts = append(systemParts, llm.FormatContextLegacy(req.Context))
 	}
 
 	system := strings.Join(systemParts, "\n\n")
