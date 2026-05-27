@@ -38,6 +38,9 @@ func NewEmbeddingClient(
 	headers map[string]string,
 	keys *config.LoadedKeys,
 ) (llmlib.Client, error) {
+	if keys == nil {
+		keys = &config.LoadedKeys{}
+	}
 	p := strings.ToLower(provider)
 
 	switch p {
@@ -92,6 +95,9 @@ func NewCompletionClient(
 	headers map[string]string,
 	keys *config.LoadedKeys,
 ) (llmlib.Client, error) {
+	if keys == nil {
+		keys = &config.LoadedKeys{}
+	}
 	p := strings.ToLower(provider)
 
 	switch p {

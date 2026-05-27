@@ -211,3 +211,25 @@ func TestNewCompletionClient_UnknownProvider(t *testing.T) {
 		t.Errorf("expected error naming the unknown provider, got %v", err)
 	}
 }
+
+// Nil-keys regression tests: passing a nil *config.LoadedKeys must
+// surface as a normal validation error, not a nil-pointer panic.
+func TestNewEmbeddingClient_NilKeys(t *testing.T) {
+	_, err := NewEmbeddingClient("openai", "text-embedding-3-small", "", nil, nil)
+	if err == nil {
+		t.Fatal("expected error when keys is nil and no baseURL")
+	}
+	if !strings.Contains(err.Error(), "OpenAI") {
+		t.Errorf("error should name OpenAI: %v", err)
+	}
+}
+
+func TestNewCompletionClient_NilKeys(t *testing.T) {
+	_, err := NewCompletionClient("anthropic", "claude-sonnet-4-20250514", "", nil, nil)
+	if err == nil {
+		t.Fatal("expected error when keys is nil")
+	}
+	if !strings.Contains(err.Error(), "Anthropic") {
+		t.Errorf("error should name Anthropic: %v", err)
+	}
+}
