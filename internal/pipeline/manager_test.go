@@ -15,9 +15,10 @@ import (
 	"log/slog"
 	"testing"
 
+	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
+
 	"github.com/pgEdge/pgedge-rag-server/internal/bm25"
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
-	"github.com/pgEdge/pgedge-rag-server/internal/llm"
 )
 
 // newTestManager creates a Manager with mock pipelines for testing.
@@ -30,8 +31,8 @@ func newTestManager(cfg *config.Config) *Manager {
 
 	for _, pCfg := range cfg.Pipelines {
 		// Create mock providers
-		embeddingProv := &MockEmbeddingProvider{}
-		completionProv := &MockCompletionProvider{}
+		embeddingProv := &MockEmbedder{}
+		completionProv := &MockCompleter{}
 
 		// Create a copy of pCfg for the pointer
 		pCfgCopy := pCfg
@@ -60,13 +61,15 @@ func newTestManager(cfg *config.Config) *Manager {
 
 // newTestPipeline creates a Pipeline with mock providers for testing.
 func newTestPipeline(name, description string) *Pipeline {
-	embeddingProv := &MockEmbeddingProvider{}
-	completionProv := &MockCompletionProvider{
-		CompleteFunc: func(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			return &llm.CompletionResponse{
-				Content:      "Test response for: " + req.Messages[0].Content,
-				FinishReason: "stop",
-				Usage: llm.TokenUsage{
+	embeddingProv := &MockEmbedder{}
+	completionProv := &MockCompleter{
+		ChatFunc: func(ctx context.Context, req llmlib.ChatRequest) (*llmlib.ChatResponse, error) {
+			return &llmlib.ChatResponse{
+				Content: []llmlib.ContentBlock{
+					{Type: llmlib.BlockText, Text: "Test response for: " + req.Messages[len(req.Messages)-1].Content[0].Text},
+				},
+				StopReason: llmlib.StopReasonEndTurn,
+				Usage: llmlib.TokenUsage{
 					PromptTokens:     100,
 					CompletionTokens: 20,
 					TotalTokens:      120,
@@ -255,8 +258,8 @@ func TestPipeline_Execute_NoDocuments(t *testing.T) {
 
 func TestPipeline_ExecuteStream_NoDocuments(t *testing.T) {
 	// Create a test pipeline with no documents configured
-	embeddingProv := &MockEmbeddingProvider{}
-	completionProv := &MockCompletionProvider{}
+	embeddingProv := &MockEmbedder{}
+	completionProv := &MockCompleter{}
 
 	pCfg := config.Pipeline{
 		Name:        "stream-test",

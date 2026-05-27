@@ -19,8 +19,7 @@ import (
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 	"github.com/pgEdge/pgedge-rag-server/internal/database"
-	"github.com/pgEdge/pgedge-rag-server/internal/llm"
-	"github.com/pgEdge/pgedge-rag-server/internal/llm/factory"
+	ragllm "github.com/pgEdge/pgedge-rag-server/internal/llm"
 )
 
 // ErrPipelineNotFound is returned when a requested pipeline does not exist.
@@ -46,8 +45,8 @@ type Pipeline struct {
 	description    string
 	config         config.Pipeline
 	dbPool         *database.Pool
-	embeddingProv  llm.EmbeddingProvider
-	completionProv llm.CompletionProvider
+	embeddingProv  Embedder
+	completionProv Completer
 	orchestrator   *Orchestrator
 	logger         *slog.Logger
 }
@@ -122,10 +121,9 @@ func (m *Manager) createPipeline(
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Create embedding provider
-	embeddingHeaders := mergeHeaders(
-		pCfg.LLMHeaders, pCfg.EmbeddingLLM.Headers)
-	embeddingProv, err := factory.NewEmbeddingProvider(
+	// Create embedding client
+	embeddingHeaders := mergeHeaders(pCfg.LLMHeaders, pCfg.EmbeddingLLM.Headers)
+	embeddingProv, err := ragllm.NewEmbeddingClient(
 		pCfg.EmbeddingLLM.Provider,
 		pCfg.EmbeddingLLM.Model,
 		pCfg.EmbeddingLLM.BaseURL,
@@ -134,13 +132,12 @@ func (m *Manager) createPipeline(
 	)
 	if err != nil {
 		dbPool.Close()
-		return nil, fmt.Errorf("failed to create embedding provider: %w", err)
+		return nil, fmt.Errorf("failed to create embedding client: %w", err)
 	}
 
-	// Create completion provider
-	completionHeaders := mergeHeaders(
-		pCfg.LLMHeaders, pCfg.RAGLLM.Headers)
-	completionProv, err := factory.NewCompletionProvider(
+	// Create completion client
+	completionHeaders := mergeHeaders(pCfg.LLMHeaders, pCfg.RAGLLM.Headers)
+	completionProv, err := ragllm.NewCompletionClient(
 		pCfg.RAGLLM.Provider,
 		pCfg.RAGLLM.Model,
 		pCfg.RAGLLM.BaseURL,
@@ -149,7 +146,7 @@ func (m *Manager) createPipeline(
 	)
 	if err != nil {
 		dbPool.Close()
-		return nil, fmt.Errorf("failed to create completion provider: %w", err)
+		return nil, fmt.Errorf("failed to create completion client: %w", err)
 	}
 
 	// Determine token budget: pipeline > global defaults > hardcoded default

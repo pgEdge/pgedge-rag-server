@@ -11,22 +11,26 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
+
+	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/bm25"
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 	"github.com/pgEdge/pgedge-rag-server/internal/database"
-	"github.com/pgEdge/pgedge-rag-server/internal/llm"
+	ragllm "github.com/pgEdge/pgedge-rag-server/internal/llm"
 )
 
 // Orchestrator coordinates the RAG pipeline execution.
 type Orchestrator struct {
 	cfg            *config.Pipeline
 	dbPool         *database.Pool
-	embeddingProv  llm.EmbeddingProvider
-	completionProv llm.CompletionProvider
+	embeddingProv  Embedder
+	completionProv Completer
 	bm25Index      *bm25.Index
 	tokenBudget    int
 	topN           int
@@ -37,8 +41,8 @@ type Orchestrator struct {
 type OrchestratorConfig struct {
 	Pipeline       *config.Pipeline
 	DBPool         *database.Pool
-	EmbeddingProv  llm.EmbeddingProvider
-	CompletionProv llm.CompletionProvider
+	EmbeddingProv  Embedder
+	CompletionProv Completer
 	TokenBudget    int
 	TopN           int
 	Logger         *slog.Logger
@@ -65,103 +69,23 @@ func NewOrchestrator(cfg OrchestratorConfig) *Orchestrator {
 
 // Execute runs the full RAG pipeline for a query.
 func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryResponse, error) {
-	o.logger.Debug("executing RAG pipeline",
-		"query", req.Query,
-		"stream", req.Stream,
-	)
+	o.logger.Debug("executing RAG pipeline", "query", req.Query, "stream", req.Stream)
 
-	// Get topN from request or use default
 	topN := o.topN
 	if req.TopN > 0 {
 		topN = req.TopN
 	}
 
-	// Step 1: Generate query embedding
-	embedding, err := o.embeddingProv.Embed(ctx, req.Query)
+	embedding, err := ragllm.Embed32(ctx, o.embeddingProv, req.Query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate embedding: %w", err)
 	}
 
-	// Step 2: Perform search for each table
-	var allResults []database.SearchResult
-
-	// Normalize vector weight before the hybrid gate decision
-	vectorWeight := 0.5
-	if o.cfg.Search.VectorWeight != nil {
-		vectorWeight = *o.cfg.Search.VectorWeight
-	}
-	if vectorWeight < 0 || vectorWeight > 1 {
-		vectorWeight = 0.5
+	results, err := o.search(ctx, req, embedding, topN)
+	if err != nil {
+		return nil, err
 	}
 
-	// Determine if hybrid search should be used
-	useHybrid := o.cfg.Search.HybridEnabled != nil && *o.cfg.Search.HybridEnabled &&
-		vectorWeight < 1.0
-
-	for _, table := range o.cfg.Tables {
-		// Skip if no database pool (shouldn't happen in production)
-		if o.dbPool == nil {
-			o.logger.Warn("no database pool configured",
-				"table", table.Table,
-			)
-			continue
-		}
-
-		// Vector search (with optional filter from request)
-		vectorResults, err := o.dbPool.VectorSearch(
-			ctx, embedding, table, topN*2, req.Filter,
-			o.cfg.Search.MinSimilarity,
-		)
-		if err != nil {
-			o.logger.Warn("vector search failed",
-				"table", table.Table,
-				"error", err,
-			)
-			continue
-		}
-
-		if useHybrid {
-			// BM25 search - need to fetch documents first and index them
-			docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter)
-			if err != nil {
-				o.logger.Warn("failed to fetch documents for BM25",
-					"table", table.Table,
-					"error", err,
-				)
-				// Continue with just vector results
-				allResults = append(allResults, vectorResults...)
-				continue
-			}
-
-			// Index documents for BM25
-			o.bm25Index.Clear()
-			o.bm25Index.AddDocuments(docs)
-
-			// Search with BM25
-			bm25Results := o.bm25Index.Search(req.Query, topN*2)
-
-			// Convert BM25 results to SearchResult format. When the table
-			// has no stable id_column, ids are cleared so fusion keys on
-			// content (matching the vector arm) rather than on unstable,
-			// non-comparable identifiers.
-			bm25SearchResults := bm25ToSearchResults(bm25Results, table.IDColumn != "")
-
-			// Combine using RRF
-			hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN, vectorWeight)
-			allResults = append(allResults, hybridResults...)
-		} else {
-			// Vector-only mode
-			o.logger.Debug("using vector-only search",
-				"table", table.Table,
-			)
-			allResults = append(allResults, vectorResults...)
-		}
-	}
-
-	// Step 3: Deduplicate and limit results
-	results := o.deduplicateResults(allResults, topN)
-
-	// Check if we have any results
 	if len(results) == 0 {
 		return &QueryResponse{
 			Answer:     "No relevant information found in the available documents.",
@@ -169,41 +93,25 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 		}, nil
 	}
 
-	// Step 4: Build context with token budget
 	contextDocs := o.buildContext(results)
 
-	// Step 5: Generate completion
-	// Build messages array with conversation history
-	messages := make([]llm.Message, 0, len(req.Messages)+1)
-	for _, m := range req.Messages {
-		messages = append(messages, llm.Message{Role: m.Role, Content: m.Content})
-	}
-	messages = append(messages, llm.Message{Role: "user", Content: req.Query})
+	chatReq := o.buildChatRequest(req, contextDocs)
 
-	completionReq := llm.CompletionRequest{
-		SystemPrompt: o.buildSystemPrompt(),
-		Context:      contextDocs,
-		Messages:     messages,
-		Temperature:  0.7,
-	}
-
-	// Non-streaming response
-	completionResp, err := o.completionProv.Complete(ctx, completionReq)
+	resp, err := o.completionProv.Chat(ctx, chatReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate completion: %w", err)
 	}
 
-	resp := &QueryResponse{
-		Answer:     completionResp.Content,
-		TokensUsed: completionResp.Usage.TotalTokens,
-	}
+	answer := joinTextBlocks(resp.Content)
 
-	// Only include sources if requested
+	out := &QueryResponse{
+		Answer:     answer,
+		TokensUsed: resp.Usage.TotalTokens,
+	}
 	if req.IncludeSources {
-		resp.Sources = o.buildSources(results)
+		out.Sources = o.buildSources(results)
 	}
-
-	return resp, nil
+	return out, nil
 }
 
 // ExecuteStream runs the RAG pipeline and returns a streaming response.
@@ -218,82 +126,23 @@ func (o *Orchestrator) ExecuteStream(
 		defer close(chunkChan)
 		defer close(errChan)
 
-		// Get topN from request or use default
 		topN := o.topN
 		if req.TopN > 0 {
 			topN = req.TopN
 		}
 
-		// Step 1: Generate query embedding
-		embedding, err := o.embeddingProv.Embed(ctx, req.Query)
+		embedding, err := ragllm.Embed32(ctx, o.embeddingProv, req.Query)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to generate embedding: %w", err)
 			return
 		}
 
-		// Step 2: Perform search
-		var allResults []database.SearchResult
-
-		// Normalize vector weight before the hybrid gate decision
-		vectorWeight := 0.5
-		if o.cfg.Search.VectorWeight != nil {
-			vectorWeight = *o.cfg.Search.VectorWeight
-		}
-		if vectorWeight < 0 || vectorWeight > 1 {
-			vectorWeight = 0.5
+		results, err := o.search(ctx, req, embedding, topN)
+		if err != nil {
+			errChan <- err
+			return
 		}
 
-		// Determine if hybrid search should be used
-		useHybrid := o.cfg.Search.HybridEnabled != nil && *o.cfg.Search.HybridEnabled &&
-			vectorWeight < 1.0
-
-		for _, table := range o.cfg.Tables {
-			// Skip if no database pool (shouldn't happen in production)
-			if o.dbPool == nil {
-				o.logger.Warn("no database pool configured",
-					"table", table.Table,
-				)
-				continue
-			}
-
-			vectorResults, err := o.dbPool.VectorSearch(
-				ctx, embedding, table, topN*2, req.Filter,
-				o.cfg.Search.MinSimilarity,
-			)
-			if err != nil {
-				o.logger.Warn("vector search failed", "error", err)
-				continue
-			}
-
-			if useHybrid {
-				docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter)
-				if err != nil {
-					allResults = append(allResults, vectorResults...)
-					continue
-				}
-
-				o.bm25Index.Clear()
-				o.bm25Index.AddDocuments(docs)
-
-				bm25Results := o.bm25Index.Search(req.Query, topN*2)
-				// Clear ids when the table has no stable id_column so
-				// fusion keys on content, matching the vector arm.
-				bm25SearchResults := bm25ToSearchResults(bm25Results, table.IDColumn != "")
-
-				hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN, vectorWeight)
-				allResults = append(allResults, hybridResults...)
-			} else {
-				// Vector-only mode
-				o.logger.Debug("using vector-only search",
-					"table", table.Table,
-				)
-				allResults = append(allResults, vectorResults...)
-			}
-		}
-
-		results := o.deduplicateResults(allResults, topN)
-
-		// Check if we have any results
 		if len(results) == 0 {
 			chunkChan <- StreamChunk{
 				Content:      "No relevant information found in the available documents.",
@@ -303,40 +152,48 @@ func (o *Orchestrator) ExecuteStream(
 		}
 
 		contextDocs := o.buildContext(results)
+		chatReq := o.buildChatRequest(req, contextDocs)
 
-		// Step 3: Stream completion
-		// Build messages array with conversation history
-		messages := make([]llm.Message, 0, len(req.Messages)+1)
-		for _, m := range req.Messages {
-			messages = append(messages, llm.Message{Role: m.Role, Content: m.Content})
-		}
-		messages = append(messages, llm.Message{Role: "user", Content: req.Query})
-
-		completionReq := llm.CompletionRequest{
-			SystemPrompt: o.buildSystemPrompt(),
-			Context:      contextDocs,
-			Messages:     messages,
-			Temperature:  0.7,
+		stream, err := o.completionProv.ChatStream(ctx, chatReq)
+		if err != nil {
+			errChan <- fmt.Errorf("failed to start completion stream: %w", err)
+			return
 		}
 
-		llmChunkChan, llmErrChan := o.completionProv.CompleteStream(ctx, completionReq)
-
-		// Forward chunks
-		for chunk := range llmChunkChan {
-			select {
-			case chunkChan <- StreamChunk{
-				Content:      chunk.Content,
-				FinishReason: chunk.FinishReason,
-			}:
-			case <-ctx.Done():
-				errChan <- ctx.Err()
+		for {
+			chunk, recvErr := stream.Recv()
+			if errors.Is(recvErr, io.EOF) {
 				return
 			}
-		}
+			if recvErr != nil {
+				errChan <- recvErr
+				return
+			}
 
-		// Check for errors
-		if err := <-llmErrChan; err != nil {
-			errChan <- err
+			switch chunk.Type {
+			case llmlib.ChunkText:
+				if chunk.Text == "" {
+					continue
+				}
+				select {
+				case chunkChan <- StreamChunk{Content: chunk.Text}:
+				case <-ctx.Done():
+					errChan <- ctx.Err()
+					return
+				}
+			case llmlib.ChunkDone:
+				// The lib normalises the stop reason; pre-migration
+				// streaming code emitted "stop" for clean finishes and
+				// preserved it on the final chunk.
+				select {
+				case chunkChan <- StreamChunk{
+					FinishReason: ragllm.StopReasonString(""),
+				}:
+				case <-ctx.Done():
+					errChan <- ctx.Err()
+					return
+				}
+			}
 		}
 	}()
 
@@ -375,6 +232,117 @@ func bm25ToSearchResults(
 	return out
 }
 
+// search runs the configured vector / hybrid search across all tables
+// and returns deduplicated, topN-capped results. Extracted so Execute
+// and ExecuteStream share the same retrieval path.
+func (o *Orchestrator) search(
+	ctx context.Context,
+	req QueryRequest,
+	embedding []float32,
+	topN int,
+) ([]database.SearchResult, error) {
+	var allResults []database.SearchResult
+
+	vectorWeight := 0.5
+	if o.cfg.Search.VectorWeight != nil {
+		vectorWeight = *o.cfg.Search.VectorWeight
+	}
+	if vectorWeight < 0 || vectorWeight > 1 {
+		vectorWeight = 0.5
+	}
+
+	useHybrid := o.cfg.Search.HybridEnabled != nil && *o.cfg.Search.HybridEnabled &&
+		vectorWeight < 1.0
+
+	for _, table := range o.cfg.Tables {
+		if o.dbPool == nil {
+			o.logger.Warn("no database pool configured", "table", table.Table)
+			continue
+		}
+
+		vectorResults, err := o.dbPool.VectorSearch(
+			ctx, embedding, table, topN*2, req.Filter,
+			o.cfg.Search.MinSimilarity,
+		)
+		if err != nil {
+			o.logger.Warn("vector search failed", "table", table.Table, "error", err)
+			continue
+		}
+
+		if !useHybrid {
+			o.logger.Debug("using vector-only search", "table", table.Table)
+			allResults = append(allResults, vectorResults...)
+			continue
+		}
+
+		docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter)
+		if err != nil {
+			o.logger.Warn("failed to fetch documents for BM25",
+				"table", table.Table, "error", err)
+			allResults = append(allResults, vectorResults...)
+			continue
+		}
+
+		o.bm25Index.Clear()
+		o.bm25Index.AddDocuments(docs)
+		bm25Results := o.bm25Index.Search(req.Query, topN*2)
+
+		// Clear ids when the table has no stable id_column so fusion
+		// keys on content, matching the vector arm.
+		bm25SearchResults := bm25ToSearchResults(bm25Results, table.IDColumn != "")
+
+		hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN, vectorWeight)
+		allResults = append(allResults, hybridResults...)
+	}
+
+	return o.deduplicateResults(allResults, topN), nil
+}
+
+// buildChatRequest converts the QueryRequest + retrieved context into
+// an llmlib.ChatRequest with the system prompt carrying the context
+// block. Standardising on system-prompt-carries-context matches the
+// pre-migration Anthropic/Gemini behaviour and is functionally
+// equivalent for OpenAI/Ollama.
+func (o *Orchestrator) buildChatRequest(
+	req QueryRequest,
+	contextDocs []ragllm.ContextDoc,
+) llmlib.ChatRequest {
+	system := o.buildSystemPrompt()
+	if len(contextDocs) > 0 {
+		system = system + "\n\n" + ragllm.FormatContext(contextDocs)
+	}
+
+	messages := make([]llmlib.Message, 0, len(req.Messages)+1)
+	for _, m := range req.Messages {
+		messages = append(messages, llmlib.Message{
+			Role: llmlib.Role(m.Role),
+			Content: []llmlib.ContentBlock{
+				{Type: llmlib.BlockText, Text: m.Content},
+			},
+		})
+	}
+	messages = append(messages, llmlib.UserText(req.Query))
+
+	return llmlib.ChatRequest{
+		SystemPrompt: system,
+		Messages:     messages,
+		Temperature:  llmlib.Float(0.7),
+	}
+}
+
+// joinTextBlocks concatenates the Text fields of all BlockText blocks
+// in the response. The lib returns content as a typed slice; today's
+// non-RAG API consumers expect a single string in QueryResponse.Answer.
+func joinTextBlocks(content []llmlib.ContentBlock) string {
+	var sb strings.Builder
+	for _, b := range content {
+		if b.Type == llmlib.BlockText {
+			sb.WriteString(b.Text)
+		}
+	}
+	return sb.String()
+}
+
 // deduplicateResults removes duplicate content and limits to topN.
 func (o *Orchestrator) deduplicateResults(
 	results []database.SearchResult,
@@ -402,22 +370,20 @@ func (o *Orchestrator) deduplicateResults(
 }
 
 // buildContext converts search results to context documents, respecting token budget.
-func (o *Orchestrator) buildContext(results []database.SearchResult) []llm.ContextDocument {
-	contextDocs := make([]llm.ContextDocument, 0, len(results))
+func (o *Orchestrator) buildContext(results []database.SearchResult) []ragllm.ContextDoc {
+	contextDocs := make([]ragllm.ContextDoc, 0, len(results))
 	totalTokens := 0
 
 	for _, r := range results {
-		// Rough token estimate: ~4 characters per token
 		estimatedTokens := len(r.Content) / 4
 		if totalTokens+estimatedTokens > o.tokenBudget {
-			// Truncate content to fit within budget
 			remaining := o.tokenBudget - totalTokens
 			if remaining > 100 {
 				truncated := r.Content[:min(len(r.Content), remaining*4)]
 				if idx := strings.LastIndex(truncated, ". "); idx > 0 {
 					truncated = truncated[:idx+1]
 				}
-				contextDocs = append(contextDocs, llm.ContextDocument{
+				contextDocs = append(contextDocs, ragllm.ContextDoc{
 					Content: truncated + "...",
 					Score:   r.Score,
 				})
@@ -425,7 +391,7 @@ func (o *Orchestrator) buildContext(results []database.SearchResult) []llm.Conte
 			break
 		}
 
-		contextDocs = append(contextDocs, llm.ContextDocument{
+		contextDocs = append(contextDocs, ragllm.ContextDoc{
 			Content: r.Content,
 			Score:   r.Score,
 		})
@@ -443,7 +409,6 @@ Do NOT use your general knowledge to answer. Only use facts from the provided co
 Be concise and accurate in your responses.`
 
 // buildSystemPrompt returns the system prompt for RAG.
-// Uses the pipeline's configured system_prompt if set, otherwise returns the default.
 func (o *Orchestrator) buildSystemPrompt() string {
 	if o.cfg != nil && o.cfg.SystemPrompt != "" {
 		return o.cfg.SystemPrompt
