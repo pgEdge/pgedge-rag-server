@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/jackc/pgx/v5 v5.9.1
-	github.com/pgEdge/pgedge-go-llm-lib v0.0.0-20260527091055-23f6ef29ba95
+	github.com/pgEdge/pgedge-go-llm-lib v0.1.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

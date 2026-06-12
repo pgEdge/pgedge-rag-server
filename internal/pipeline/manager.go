@@ -129,6 +129,8 @@ func (m *Manager) createPipeline(
 		pCfg.EmbeddingLLM.BaseURL,
 		embeddingHeaders,
 		apiKeys,
+		ragllm.WithRequestTimeout(pCfg.EmbeddingLLM.RequestTimeout.Std()),
+		ragllm.WithPerAttemptTimeout(pCfg.EmbeddingLLM.PerAttemptTimeout.Std()),
 	)
 	if err != nil {
 		dbPool.Close()
@@ -143,6 +145,8 @@ func (m *Manager) createPipeline(
 		pCfg.RAGLLM.BaseURL,
 		completionHeaders,
 		apiKeys,
+		ragllm.WithRequestTimeout(pCfg.RAGLLM.RequestTimeout.Std()),
+		ragllm.WithPerAttemptTimeout(pCfg.RAGLLM.PerAttemptTimeout.Std()),
 	)
 	if err != nil {
 		dbPool.Close()

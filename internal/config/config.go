@@ -11,7 +11,41 @@
 // pgEdge RAG Server.
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
+
+// Duration is a time.Duration that unmarshals from a YAML string such
+// as "90s" or "2m". An empty or absent value unmarshals to zero, which
+// callers treat as "use the default". Representing timeouts as strings
+// keeps the configuration human-readable rather than forcing raw
+// nanosecond integers.
+type Duration time.Duration
+
+// Std returns the value as a standard time.Duration.
+func (d Duration) Std() time.Duration {
+	return time.Duration(d)
+}
+
+// UnmarshalYAML parses a duration string (e.g. "90s") into a Duration.
+// An empty string is permitted and yields zero.
+func (d *Duration) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var s string
+	if err := unmarshal(&s); err != nil {
+		return err
+	}
+	if s == "" {
+		*d = 0
+		return nil
+	}
+	parsed, err := time.ParseDuration(s)
+	if err != nil {
+		return fmt.Errorf("invalid duration %q: %w", s, err)
+	}
+	*d = Duration(parsed)
+	return nil
+}
 
 // Config is the root configuration structure for the server.
 type Config struct {
@@ -169,6 +203,18 @@ type LLMConfig struct {
 	Model    string            `yaml:"model"`
 	BaseURL  string            `yaml:"base_url"` // Optional custom base URL (e.g. for API gateways)
 	Headers  map[string]string `yaml:"headers"`  // Per-LLM custom headers
+
+	// RequestTimeout caps the wall-clock time of a single request to
+	// this provider, spanning every retry. Zero uses the library
+	// default (120s). Specified as a duration string, e.g. "120s".
+	RequestTimeout Duration `yaml:"request_timeout"`
+
+	// PerAttemptTimeout, when greater than zero, bounds each individual
+	// HTTP attempt so a single slow upstream (e.g. a heavy embedding
+	// batch) is retried rather than burning the whole RequestTimeout
+	// budget in one go. Set it below RequestTimeout to leave room for
+	// retries. Zero disables per-attempt timeouts.
+	PerAttemptTimeout Duration `yaml:"per_attempt_timeout"`
 }
 
 // DefaultConfig returns a Config with sensible default values.

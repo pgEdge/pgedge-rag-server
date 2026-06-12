@@ -12,6 +12,9 @@ package llm
 import (
 	"strings"
 	"testing"
+	"time"
+
+	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 )
@@ -231,5 +234,29 @@ func TestNewCompletionClient_NilKeys(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Anthropic") {
 		t.Errorf("error should name Anthropic: %v", err)
+	}
+}
+
+func TestWithOptions_AppliesTimeouts(t *testing.T) {
+	got := withOptions(llmlib.Options{Model: "x"}, []ClientOption{
+		WithRequestTimeout(90 * time.Second),
+		WithPerAttemptTimeout(30 * time.Second),
+	})
+	if got.RequestTimeout != 90*time.Second {
+		t.Errorf("RequestTimeout = %v, want 90s", got.RequestTimeout)
+	}
+	if got.PerAttemptTimeout != 30*time.Second {
+		t.Errorf("PerAttemptTimeout = %v, want 30s", got.PerAttemptTimeout)
+	}
+	if got.Model != "x" {
+		t.Errorf("base Options not preserved: Model = %q", got.Model)
+	}
+}
+
+func TestWithOptions_NoOptionsLeavesTimeoutsZero(t *testing.T) {
+	got := withOptions(llmlib.Options{}, nil)
+	if got.RequestTimeout != 0 || got.PerAttemptTimeout != 0 {
+		t.Errorf("expected zero timeouts, got request=%v per-attempt=%v",
+			got.RequestTimeout, got.PerAttemptTimeout)
 	}
 }

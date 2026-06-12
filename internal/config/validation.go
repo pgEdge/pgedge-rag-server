@@ -418,6 +418,38 @@ func (c *Config) validateLLM(prefix string, llm LLMConfig, validProviders []stri
 		})
 	}
 
+	errs = append(errs, validateLLMTimeouts(prefix, llm)...)
+
+	return errs
+}
+
+// validateLLMTimeouts checks the relationship between the two optional
+// timeout fields: a per-attempt timeout only makes sense when it leaves
+// room for retries within the overall request budget, so it must not
+// exceed RequestTimeout when both are set. Negative values are rejected.
+func validateLLMTimeouts(prefix string, llm LLMConfig) ValidationErrors {
+	var errs ValidationErrors
+
+	if llm.RequestTimeout < 0 {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".request_timeout",
+			Message: "must not be negative",
+		})
+	}
+	if llm.PerAttemptTimeout < 0 {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".per_attempt_timeout",
+			Message: "must not be negative",
+		})
+	}
+
+	if llm.RequestTimeout > 0 && llm.PerAttemptTimeout > llm.RequestTimeout {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".per_attempt_timeout",
+			Message: "must not exceed request_timeout",
+		})
+	}
+
 	return errs
 }
 
@@ -452,6 +484,8 @@ func (c *Config) validateLLMOptional(prefix string, llm LLMConfig, validProvider
 			})
 		}
 	}
+
+	errs = append(errs, validateLLMTimeouts(prefix, llm)...)
 
 	return errs
 }

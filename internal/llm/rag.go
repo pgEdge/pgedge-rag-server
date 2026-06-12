@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
+	"github.com/pgEdge/pgedge-go-llm-lib/llm/vec"
 )
 
 // ContextDoc is a single retrieved document passed to an LLM as
@@ -59,17 +60,14 @@ type embedder interface {
 }
 
 // Embed32 returns the embedding for text as a []float32 — pgvector
-// expects float32, and this is the only place we narrow.
+// expects float32, and this is the only place we narrow. The narrowing
+// itself is delegated to the lib's vec.Float64ToFloat32 helper.
 func Embed32(ctx context.Context, c embedder, text string) ([]float32, error) {
-	vec, err := c.Embed(ctx, text)
+	raw, err := c.Embed(ctx, text)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]float32, len(vec))
-	for i, v := range vec {
-		out[i] = float32(v)
-	}
-	return out, nil
+	return vec.Float64ToFloat32(raw), nil
 }
 
 // StopReasonString maps the lib's normalised stop reason to the

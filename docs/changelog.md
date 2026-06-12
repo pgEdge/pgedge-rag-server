@@ -9,6 +9,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Configurable `request_timeout` and `per_attempt_timeout` for LLM
+  providers. Both accept a duration string such as `90s` or `2m` and
+  can be set per-pipeline or in defaults. The per-attempt timeout makes
+  a slow upstream (for example a heavy embedding batch) retryable rather
+  than consuming the whole request budget in one attempt.
+
 ### Fixed
 
 - Vector search now selects the configured `id_column`, so vector

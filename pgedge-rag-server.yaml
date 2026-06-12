@@ -48,6 +48,12 @@ pipelines:
           model: "text-embedding-3-small"
           # Optional: route through an API gateway
           # base_url: "https://gateway.example.com/v1"
+          # Optional: overall request timeout (default: 120s)
+          # request_timeout: "120s"
+          # Optional: per-attempt timeout, so a slow embedding batch is
+          # retried rather than burning the whole request budget. Set it
+          # below request_timeout to leave room for retries.
+          # per_attempt_timeout: "30s"
 
       # RAG LLM configuration
       rag_llm:
@@ -55,6 +61,9 @@ pipelines:
           model: "claude-sonnet-4-20250514"
           # Optional: route through an API gateway
           # base_url: "https://gateway.example.com/anthropic"
+          # Optional: request and per-attempt timeouts (see embedding_llm)
+          # request_timeout: "120s"
+          # per_attempt_timeout: "30s"
 
       # Token budget for context documents
       token_budget: 4000
