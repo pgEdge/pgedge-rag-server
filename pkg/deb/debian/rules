@@ -1,0 +1,31 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_builddeb:
+	dh_builddeb -- -Zgzip
+
+override_dh_auto_install:
+	# --- SBOM generation and signing ---
+	mkdir -p debian/tmp/sbom
+	syft dir:$(CURDIR) -o cyclonedx-json > debian/tmp/sbom/pgedge-rag-server-sbom.json || exit 1
+	# Extract the signing key id and sign in ONE shell line: in a Makefile
+	# recipe, $$(...) is shell command substitution, $$5 is awk's $5, and
+	# joining with '; \' keeps KEY_ID in scope for the gpg call.
+	KEY_ID=$$(gpg --list-secret-keys --with-colons | awk -F: '/^sec/{print $$5}' | head -n 1); \
+	gpg --armor --detach-sign --local-user "$$KEY_ID" \
+		--output debian/tmp/sbom/pgedge-rag-server-sbom.json.asc \
+		debian/tmp/sbom/pgedge-rag-server-sbom.json || exit 1
+	install -D -m 0755 pgedge-rag-server debian/pgedge-rag-server/usr/bin/pgedge-rag-server
+	install -D -m 0644 debian/pgedge-rag-server.tmpfiles.conf debian/pgedge-rag-server/usr/lib/tmpfiles.d/pgedge-rag-server.conf
+	install -D -m 0644 debian/pgedge-rag-server.logrotate debian/pgedge-rag-server/etc/logrotate.d/pgedge-rag-server
+	install -D -m 0644 debian/pgedge-rag-server.yaml debian/pgedge-rag-server/etc/pgedge/pgedge-rag-server.yaml
+	install -D -m 0644 debian/tmp/sbom/pgedge-rag-server-sbom.json debian/pgedge-rag-server/usr/share/pgedge-rag-server/pgedge-rag-server-sbom.json
+	install -D -m 0644 debian/tmp/sbom/pgedge-rag-server-sbom.json.asc debian/pgedge-rag-server/usr/share/pgedge-rag-server/pgedge-rag-server-sbom.json.asc
+	rm -rf debian/tmp/sbom
+
+override_dh_installsystemd:
+	dh_installsystemd --name=pgedge-rag-server --no-stop-on-upgrade

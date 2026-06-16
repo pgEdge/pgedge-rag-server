@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+# Tmpfiles setup
+if [ "$1" = "configure" ]; then
+    systemd-tmpfiles --create /usr/lib/tmpfiles.d/pgedge-rag-server.conf || true
+fi
+
+# dh_installsystemd takes care of systemctl enable/start
+exit 0
+

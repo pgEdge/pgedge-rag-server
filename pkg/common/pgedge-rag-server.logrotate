@@ -1,0 +1,14 @@
+/var/log/pgedge/rag-server/*.log {
+    daily
+    missingok
+    rotate 7
+    compress
+    delaycompress
+    notifempty
+    create 0640 pgedge pgedge
+    sharedscripts
+    postrotate
+        /bin/systemctl kill -s HUP pgedge-rag-server.service >/dev/null 2>&1 || true
+    endscript
+}
+

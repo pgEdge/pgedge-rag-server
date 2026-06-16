@@ -1,0 +1,30 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    install|upgrade)
+
+        # Create parent directory first
+        mkdir -p /var/lib/pgedge
+
+        # Create pgedge user if it doesn't exist
+        if ! getent group pgedge >/dev/null; then
+            addgroup --system pgedge
+        fi
+        if ! getent passwd pgedge >/dev/null; then
+            adduser --system --home /var/lib/pgedge --no-create-home \
+                --ingroup pgedge --disabled-password --shell /bin/false \
+                --gecos "pgEdge Services" pgedge
+        fi
+
+        # Create directories
+        mkdir -p /var/log/pgedge/rag-server
+        mkdir -p /var/lib/pgedge/rag-server
+        chown -R pgedge:pgedge /var/log/pgedge/rag-server
+        chown -R pgedge:pgedge /var/lib/pgedge/rag-server
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0
