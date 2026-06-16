@@ -43,7 +43,9 @@ archives:
       {{- if eq .Arch "amd64" }}x86_64
       {{- else }}{{ .Arch }}{{ end }}
     files:
-      - LICENSE*
+      # LICEN[CS]E* matches both the American (LICENSE) and British (LICENCE)
+      # spellings — this repo ships LICENCE.md, which a bare LICENSE* misses.
+      - LICEN[CS]E*
       - README*
       - CHANGELOG*
       - docs/*

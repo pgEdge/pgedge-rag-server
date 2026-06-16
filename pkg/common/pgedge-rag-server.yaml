@@ -1,0 +1,63 @@
+server:
+  listen_address: "0.0.0.0"
+  port: 8080
+  cors:
+    enabled: true
+    allowed_origins:
+      - "http://localhost:3000"
+
+api_keys:
+  openai: "/var/lib/postgresql/.openai-api-key"
+  anthropic: "/var/lib/postgresql/.anthropic-api-key"
+
+pipelines:
+  - name: "docs"
+    description: "Search our documentation"
+    database:
+      host: "localhost"
+      port: 5432
+      database: "ragdb"
+      username: "docuser"
+      password: "your_secure_password"
+      ssl_mode: "prefer"
+      # hosts:
+      #     - host: "postgres-n1"
+      #       port: 5432
+      #     - host: "postgres-n2"
+      #       port: 5432
+      # target_session_attrs: "prefer-standby"
+    tables:
+      - table: "documents_content_chunks"
+        text_column: "content"
+        vector_column: "embedding"
+        # Optional: specify ID column for views or explicit document IDs
+        # id_column: "id"
+    embedding_llm:
+      provider: "openai"
+      model: "text-embedding-3-small"
+      # Optional: route through an API gateway
+      # base_url: "https://gateway.example.com/v1"
+    rag_llm:
+      provider: "anthropic"
+      model: "claude-sonnet-4-20250514"
+      # Optional: route through an API gateway
+      # base_url: "https://gateway.example.com/anthropic"
+    token_budget: 4000
+    top_n: 10
+    # Search configuration (optional)
+    search:
+      # Enable hybrid search combining vector + BM25 (default: true)
+      hybrid_enabled: true
+      # Weight for vector search vs BM25 (0.0 to 1.0, default: 0.5)
+      # Set to 1.0 for vector-only search
+      vector_weight: 0.7
+      # Minimum cosine similarity threshold (0.0 to 1.0)
+      # Results below this score are filtered out before reaching the LLM.
+      # Helps prevent hallucinated answers for unrelated queries.
+      # min_similarity: 0.5
+    system_prompt: |
+      You are Ellie, a friendly pgEdge documentation assistant.
+      Always start your response with "Hi! I'm Ellie."
+      Answer questions based only on the provided context.
+      Be concise and helpful.
+

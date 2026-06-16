@@ -1,0 +1,15 @@
+Source: pgedge-rag-server
+Section: net
+Priority: optional
+Maintainer: pgEdge Build Team <support@pgedge.com>
+Build-Depends: debhelper-compat (= 13), systemd
+Standards-Version: 4.6.2
+Homepage: https://github.com/pgEdge/pgedge-rag-server
+Rules-Requires-Root: no
+
+Package: pgedge-rag-server
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}, systemd, logrotate, adduser
+Description: pgEdge RAG server — Retrieval-Augmented Generation API over PostgreSQL/pgvector
+ A simple API server for performing Retrieval-Augmented Generation (RAG) of
+ text based on content from a PostgreSQL database using pgvector.

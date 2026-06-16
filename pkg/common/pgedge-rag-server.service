@@ -1,0 +1,16 @@
+[Unit]
+Description=A simple API server for performing Retrieval-Augmented Generation (RAG) of text based on content from a PostgreSQL database using pgvector
+After=network.target postgresql.service
+
+[Service]
+User=pgedge
+Group=pgedge
+WorkingDirectory=/var/lib/pgedge/rag-server
+ExecStart=/usr/bin/pgedge-rag-server -config /etc/pgedge/pgedge-rag-server.yaml
+StandardOutput=append:/var/log/pgedge/rag-server/pgedge-rag-server.log
+StandardError=append:/var/log/pgedge/rag-server/pgedge-rag-server.log
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+
