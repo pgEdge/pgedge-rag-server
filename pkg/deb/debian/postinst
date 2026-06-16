@@ -1,11 +1,13 @@
 #!/bin/sh
 set -e
 
-# Tmpfiles setup
+# Tmpfiles setup (explicit because the unit is installed manually, not via a
+# debian/<pkg>.tmpfiles source that dh_installtmpfiles would auto-handle).
 if [ "$1" = "configure" ]; then
-    systemd-tmpfiles --create /usr/lib/tmpfiles.d/pgedge-rag-server.conf || true
+    systemd-tmpfiles --create /usr/lib/tmpfiles.d/pgedge-rag-server.conf >/dev/null 2>&1 || true
 fi
 
-# dh_installsystemd takes care of systemctl enable/start
+#DEBHELPER#
+
 exit 0
 

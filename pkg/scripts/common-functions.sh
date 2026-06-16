@@ -2,8 +2,12 @@
 
 install_syft(){
 
-  echo "Installing syft ..."
-  curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sudo sh -s -- -b /usr/local/bin
+  # Pin the installer to a tagged ref (not mutable main) AND pin the installed
+  # version, so release builds are reproducible and not exposed to upstream
+  # changes on syft's main branch. Override SYFT_VERSION to bump.
+  SYFT_VERSION="${SYFT_VERSION:-v1.45.1}"
+  echo "Installing syft ${SYFT_VERSION}..."
+  curl -sSfL "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" | sudo sh -s -- -b /usr/local/bin "${SYFT_VERSION}"
 }
 
 setup_dnf_build_env(){
@@ -45,13 +49,13 @@ setup_apt_build_env(){
 }
 
 rename_ddeb_packages(){
-
-  BUILD_DIR=$1
-  pushd $BUILD_DIR
-  for file in $(ls | grep ddeb); do
-    mv "$file" "${file%.ddeb}.deb";
+  # Rename any *.ddeb (debug-symbol packages) to *.deb. Uses find -print0 so it
+  # is safe under `set -euo pipefail` when there are NO .ddeb files (no grep
+  # non-zero exit) and tolerates filenames with spaces.
+  local build_dir="$1" f
+  find "$build_dir" -maxdepth 1 -type f -name '*.ddeb' -print0 | while IFS= read -r -d '' f; do
+    mv -- "$f" "${f%.ddeb}.deb"
   done
-  popd
 }
 
 configure_pgedge_dnf_repo() {

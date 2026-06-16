@@ -9,7 +9,7 @@ Rules-Requires-Root: no
 
 Package: pgedge-rag-server
 Architecture: any
-Depends: ${misc:Depends}, ${shlibs:Depends}, systemd, logrotate
+Depends: ${misc:Depends}, ${shlibs:Depends}, systemd, logrotate, adduser
 Description: pgEdge RAG server — Retrieval-Augmented Generation API over PostgreSQL/pgvector
  A simple API server for performing Retrieval-Augmented Generation (RAG) of
  text based on content from a PostgreSQL database using pgvector.

@@ -44,7 +44,7 @@ prepare() {
 
   echo "Moving Debian packaging into source directory..."
   cp -rp "${CWD}/${COMPONENT_NAME}/deb/debian" "$SRC_DIR/"
-  cp ${COMPONENT_NAME}/common/pgedge-rag-server.* "$SRC_DIR/debian/"
+  cp "${COMPONENT_NAME}"/common/pgedge-rag-server.* "$SRC_DIR/debian/"
 
   echo "Staging LICENCE.md..."
   # GoReleaser archive globs LICENSE* and so omits the repo's LICENCE.md.

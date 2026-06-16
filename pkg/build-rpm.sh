@@ -18,7 +18,7 @@ prepare() {
   setup_dnf_build_env
 
   echo "Copying packaging files..."
-  cp ${COMPONENT_NAME}/rpm/pgedge-rag-server.spec ~/rpmbuild/SPECS/
+  cp "${COMPONENT_NAME}/rpm/pgedge-rag-server.spec" ~/rpmbuild/SPECS/
 
   echo "Staging source tarball into SOURCES..."
   # Prefer the workflow-staged tarball (release-artifacts/) so simulate_tag
@@ -40,7 +40,7 @@ prepare() {
     wget -q "${RAW_URL}/LICENCE.md" -O ~/rpmbuild/SOURCES/LICENCE.md
   fi
 
-  cp ${COMPONENT_NAME}/common/pgedge-rag-server.* ~/rpmbuild/SOURCES/
+  cp "${COMPONENT_NAME}"/common/pgedge-rag-server.* ~/rpmbuild/SOURCES/
 
   # This function is for debugging purpose if you have your own keys. GH workflow does not need it.
   #import_gpg_keys
