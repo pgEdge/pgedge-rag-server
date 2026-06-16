@@ -171,7 +171,10 @@ jobs:
             needs.detect-matrix.result == 'success' &&
             needs.build.result == 'success' &&
             needs.detect-matrix.outputs.has_rpm == 'true'
-        runs-on: ubuntu-latest
+        # arm64 cells run on native arm64 runners to avoid QEMU emulation
+        # (emulated glibc ldconfig segfaults during build-env setup); amd64
+        # stays on the standard x86_64 runner.
+        runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
         strategy:
             fail-fast: false
             matrix: ${{ fromJSON(needs.detect-matrix.outputs.rpm_matrix) }}
@@ -336,7 +339,10 @@ jobs:
             needs.detect-matrix.result == 'success' &&
             needs.build.result == 'success' &&
             needs.detect-matrix.outputs.has_deb == 'true'
-        runs-on: ubuntu-latest
+        # arm64 cells run on native arm64 runners to avoid QEMU emulation
+        # (emulated glibc ldconfig segfaults during build-env setup); amd64
+        # stays on the standard x86_64 runner.
+        runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
         strategy:
             fail-fast: false
             matrix: ${{ fromJSON(needs.detect-matrix.outputs.deb_matrix) }}
