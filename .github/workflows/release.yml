@@ -75,7 +75,7 @@ jobs:
                   component_name: pkg
                   archs: '["amd64","arm64"]'
                   rpm_images: '["almalinux:9","almalinux:10"]'
-                  deb_images: '["ubuntu:jammy","ubuntu:noble","debian:bullseye","debian:bookworm","debian:trixie"]'
+                  deb_images: '["ubuntu:jammy","ubuntu:noble","ubuntu:resolute","debian:bullseye","debian:bookworm","debian:trixie"]'
 
     # =========================================================================
     # Tag parsing → repo routing
