@@ -619,7 +619,51 @@ func TestBuildChatRequest_OmitsTemperature(t *testing.T) {
 	}
 }
 
-// Verify mocks implement the interfaces
+// TestRetrievalFailureError_AllTablesFailed is a regression test for
+// issue #25: when every configured table's search failed and none
+// produced results, retrievalFailureError must return a non-nil error so
+// callers surface an infrastructure failure instead of a false "no
+// relevant information" response.
+func TestRetrievalFailureError_AllTablesFailed(t *testing.T) {
+	err := retrievalFailureError(0, true, false)
+	if err == nil {
+		t.Fatal("expected a non-nil error when every table failed and none succeeded")
+	}
+}
+
+// TestRetrievalFailureError_NoTablesConfigured verifies that having zero
+// configured tables (hadError=false, hadSuccessfulLookup=false) is treated
+// as a legitimate empty result, not a failure — there was nothing to fail.
+func TestRetrievalFailureError_NoTablesConfigured(t *testing.T) {
+	err := retrievalFailureError(0, false, false)
+	if err != nil {
+		t.Errorf("expected no error with no tables configured, got %v", err)
+	}
+}
+
+// TestRetrievalFailureError_PartialFailureWithSuccessfulLookup verifies
+// that a partial failure (some tables errored, but at least one search
+// completed successfully) is NOT treated as a total failure, even if the
+// successful table happened to return zero matching documents — that's a
+// legitimate empty result, not an infrastructure problem.
+func TestRetrievalFailureError_PartialFailureWithSuccessfulLookup(t *testing.T) {
+	err := retrievalFailureError(0, true, true)
+	if err != nil {
+		t.Errorf("expected no error when at least one table's search succeeded, got %v", err)
+	}
+}
+
+// TestRetrievalFailureError_ResultsPresent verifies that having any
+// results at all short-circuits the failure check, regardless of the
+// error/success flags — results in hand always mean a usable response.
+func TestRetrievalFailureError_ResultsPresent(t *testing.T) {
+	err := retrievalFailureError(1, true, false)
+	if err != nil {
+		t.Errorf("expected no error when results were found, got %v", err)
+	}
+}
+
+// Verify mock providers implement the interfaces
 var (
 	_ Embedder  = (*MockEmbedder)(nil)
 	_ Completer = (*MockCompleter)(nil)

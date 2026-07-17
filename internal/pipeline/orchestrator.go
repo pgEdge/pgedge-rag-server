@@ -200,6 +200,20 @@ func (o *Orchestrator) ExecuteStream(
 	return chunkChan, errChan
 }
 
+// retrievalFailureError distinguishes "search ran cleanly and found
+// nothing" from "the backend is broken" (issue #25). It returns a non-nil
+// error only when every configured table's search failed and none
+// produced results — a partial failure, where at least one table
+// completed a lookup (hadSuccessfulLookup), still falls through to the
+// normal "no relevant information" response, since a search that ran
+// successfully and found nothing is a legitimate empty result.
+func retrievalFailureError(resultCount int, hadError, hadSuccessfulLookup bool) error {
+	if resultCount == 0 && hadError && !hadSuccessfulLookup {
+		return errors.New("retrieval failed for all configured tables")
+	}
+	return nil
+}
+
 // bm25ToSearchResults converts BM25 results into database.SearchResult.
 //
 // When the table has a configured id_column (hasIDColumn is true), the BM25
@@ -235,6 +249,14 @@ func bm25ToSearchResults(
 // search runs the configured vector / hybrid search across all tables
 // and returns deduplicated, topN-capped results. Extracted so Execute
 // and ExecuteStream share the same retrieval path.
+//
+// If every configured table's search fails and none produce results, an
+// error is returned instead of an empty slice, so callers can surface an
+// infrastructure failure rather than a false "no relevant information"
+// response — see issue #25. For streaming callers this arrives as an
+// "error" SSE event rather than a different HTTP status code, since the
+// response status is already committed to 200 by the time streaming
+// starts.
 func (o *Orchestrator) search(
 	ctx context.Context,
 	req QueryRequest,
@@ -242,6 +264,7 @@ func (o *Orchestrator) search(
 	topN int,
 ) ([]database.SearchResult, error) {
 	var allResults []database.SearchResult
+	var hadError, hadSuccessfulLookup bool
 
 	vectorWeight := 0.5
 	if o.cfg.Search.VectorWeight != nil {
@@ -266,8 +289,10 @@ func (o *Orchestrator) search(
 		)
 		if err != nil {
 			o.logger.Warn("vector search failed", "table", table.Table, "error", err)
+			hadError = true
 			continue
 		}
+		hadSuccessfulLookup = true
 
 		if !useHybrid {
 			o.logger.Debug("using vector-only search", "table", table.Table)
@@ -279,6 +304,7 @@ func (o *Orchestrator) search(
 		if err != nil {
 			o.logger.Warn("failed to fetch documents for BM25",
 				"table", table.Table, "error", err)
+			hadError = true
 			allResults = append(allResults, vectorResults...)
 			continue
 		}
@@ -293,6 +319,10 @@ func (o *Orchestrator) search(
 
 		hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN, vectorWeight)
 		allResults = append(allResults, hybridResults...)
+	}
+
+	if err := retrievalFailureError(len(allResults), hadError, hadSuccessfulLookup); err != nil {
+		return nil, err
 	}
 
 	return o.deduplicateResults(allResults, topN), nil
