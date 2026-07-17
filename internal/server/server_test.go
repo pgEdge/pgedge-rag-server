@@ -11,11 +11,13 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 	"github.com/pgEdge/pgedge-rag-server/internal/pipeline"
@@ -302,6 +304,144 @@ func TestOpenAPIEndpoint(t *testing.T) {
 	}
 }
 
+// TestUnknownRoute_ReturnsJSON404 is a regression test for issue #31:
+// requests to unregistered paths must get a structured JSON error, not
+// net/http's default plain-text "404 page not found". Uses the full
+// middleware chain (applyMiddleware), not the raw mux, since that's
+// where routingMiddleware intercepts the mismatch.
+func TestUnknownRoute_ReturnsJSON404(t *testing.T) {
+	srv := testServer()
+	handler := srv.applyMiddleware(srv.mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/this-route-does-not-exist", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status %d, got %d", http.StatusNotFound, w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("response body is not valid JSON: %v", err)
+	}
+	if resp.Error.Code != "NOT_FOUND" {
+		t.Errorf("expected error code NOT_FOUND, got %q", resp.Error.Code)
+	}
+}
+
+// TestMethodNotAllowed_ThroughMiddleware_ReturnsJSON405 is a regression
+// test for issue #31: a registered path hit with the wrong method must
+// get a structured JSON error with a correct Allow header, not net/http's
+// default plain-text "405 Method Not Allowed". net/http's ServeMux
+// intercepts this before any handler runs, so this only exercises the
+// fix when going through the full middleware chain (applyMiddleware),
+// unlike TestHealthEndpoint_MethodNotAllowed above which hits the raw
+// mux and observes net/http's own (also-405, but plain-text) response.
+func TestMethodNotAllowed_ThroughMiddleware_ReturnsJSON405(t *testing.T) {
+	srv := testServer()
+	handler := srv.applyMiddleware(srv.mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/health", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
+	if allow := w.Header().Get("Allow"); !strings.Contains(allow, "GET") {
+		t.Errorf("expected Allow header to contain GET, got %q", allow)
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("response body is not valid JSON: %v", err)
+	}
+	if resp.Error.Code != "METHOD_NOT_ALLOWED" {
+		t.Errorf("expected error code METHOD_NOT_ALLOWED, got %q", resp.Error.Code)
+	}
+}
+
+// TestAllowedMethods_ReflectsRegisteredRoutes checks the mux-probing
+// helper directly against this server's actual registered routes.
+func TestAllowedMethods_ReflectsRegisteredRoutes(t *testing.T) {
+	srv := testServer()
+
+	req := httptest.NewRequest(http.MethodDelete, "/v1/pipelines/some-name", nil)
+	allowed := srv.allowedMethods(req)
+
+	if len(allowed) != 1 || allowed[0] != http.MethodPost {
+		t.Errorf("expected only POST allowed for /v1/pipelines/{name}, got %v", allowed)
+	}
+
+	req2 := httptest.NewRequest(http.MethodDelete, "/no-such-path", nil)
+	if allowed2 := srv.allowedMethods(req2); len(allowed2) != 0 {
+		t.Errorf("expected no allowed methods for an unregistered path, got %v", allowed2)
+	}
+}
+
+// TestAllowedMethods_IncludesImplicitHEAD verifies that a GET-registered
+// route reports HEAD as allowed too, matching net/http.ServeMux's own
+// behavior of implicitly serving HEAD wherever GET is registered — even
+// though only GET appears in routes.go.
+func TestAllowedMethods_IncludesImplicitHEAD(t *testing.T) {
+	srv := testServer()
+
+	req := httptest.NewRequest(http.MethodDelete, "/v1/health", nil)
+	allowed := srv.allowedMethods(req)
+
+	hasGet, hasHead := false, false
+	for _, m := range allowed {
+		if m == http.MethodGet {
+			hasGet = true
+		}
+		if m == http.MethodHead {
+			hasHead = true
+		}
+	}
+	if !hasGet || !hasHead {
+		t.Errorf("expected both GET and HEAD allowed for /v1/health, got %v", allowed)
+	}
+}
+
+// TestPipelineEndpoint_RequestTooLarge is a regression test for issue
+// #31: a request body over maxRequestBodyBytes must be rejected with a
+// structured JSON 413, not silently accepted (previously there was no
+// size limit at all) or surfaced as a generic 400.
+func TestPipelineEndpoint_RequestTooLarge(t *testing.T) {
+	srv := testServer()
+
+	oversized := strings.Repeat("x", maxRequestBodyBytes+1)
+	body := `{"query":"` + oversized + `"}`
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/pipelines/test-pipeline",
+		bytes.NewBufferString(body))
+	w := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("expected status %d, got %d", http.StatusRequestEntityTooLarge, w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", ct)
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("response body is not valid JSON: %v", err)
+	}
+	if resp.Error.Code != "REQUEST_TOO_LARGE" {
+		t.Errorf("expected error code REQUEST_TOO_LARGE, got %q", resp.Error.Code)
+	}
+}
+
 func TestRFC8631LinkHeader(t *testing.T) {
 	srv := testServer()
 
@@ -331,5 +471,41 @@ func TestRFC8631LinkHeader(t *testing.T) {
 		if !strings.Contains(link, `rel="service-desc"`) {
 			t.Errorf("%s %s: Link header should have rel=\"service-desc\"", ep.method, ep.path)
 		}
+	}
+}
+
+// TestIsRequestTimeout_DeadlineExceeded is a regression test for issue
+// #31: isRequestTimeout must report true when a context's own deadline
+// elapsed (the server's request timeout firing).
+func TestIsRequestTimeout_DeadlineExceeded(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+	<-ctx.Done()
+
+	if !isRequestTimeout(ctx) {
+		t.Errorf("expected isRequestTimeout to be true after the deadline elapsed, ctx.Err()=%v", ctx.Err())
+	}
+}
+
+// TestIsRequestTimeout_Canceled verifies isRequestTimeout distinguishes
+// its own timeout from an ordinary cancellation (e.g. the client
+// disconnecting), which must NOT be reported as a timeout.
+func TestIsRequestTimeout_Canceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if isRequestTimeout(ctx) {
+		t.Error("expected isRequestTimeout to be false for a plain cancellation, not a deadline")
+	}
+}
+
+// TestIsRequestTimeout_StillRunning verifies isRequestTimeout is false
+// while a context is still active.
+func TestIsRequestTimeout_StillRunning(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Hour)
+	defer cancel()
+
+	if isRequestTimeout(ctx) {
+		t.Error("expected isRequestTimeout to be false for a context that hasn't finished")
 	}
 }
