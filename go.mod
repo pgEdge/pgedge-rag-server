@@ -1,9 +1,10 @@
 module github.com/pgEdge/pgedge-rag-server
 
-go 1.25.8
+go 1.26.1
 
 require (
 	github.com/jackc/pgx/v5 v5.9.1
+	github.com/pgEdge/pgedge-go-llm-lib v0.1.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

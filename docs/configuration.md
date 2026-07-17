@@ -298,12 +298,14 @@ Filters can also be specified per-request via the API's `filter` parameter. API 
 The `embedding_llm` and `rag_llm` properties use the same
 configuration structure:
 
-| Field      | Description                      | Required |
-|------------|----------------------------------|----------|
-| `provider` | LLM provider name                | Yes      |
-| `model`    | Model name                       | Yes      |
-| `base_url` | Custom API base URL              | No       |
-| `headers`  | Custom HTTP headers for requests | No       |
+| Field                 | Description                          | Required |
+|-----------------------|--------------------------------------|----------|
+| `provider`            | LLM provider name                    | Yes      |
+| `model`               | Model name                           | Yes      |
+| `base_url`            | Custom API base URL                  | No       |
+| `headers`             | Custom HTTP headers for requests     | No       |
+| `request_timeout`     | Overall timeout for a single request | No       |
+| `per_attempt_timeout` | Timeout for each individual attempt  | No       |
 
 The optional `base_url` field allows you to route requests
 through an API gateway (such as [Portkey](https://portkey.ai))
@@ -333,6 +335,29 @@ rag_llm:
 
 The `base_url` can also be set in the `defaults` section and
 will be inherited by pipelines that don't specify their own.
+
+The optional `request_timeout` and `per_attempt_timeout` fields
+control how long the server waits on a provider. Both accept a
+duration string such as `90s` or `2m`. The `request_timeout`
+field caps the wall-clock time of a single request, spanning
+every retry; when omitted, the server uses its built-in default
+of 120 seconds. The `per_attempt_timeout` field bounds each
+individual HTTP attempt, so a slow upstream such as a heavy
+embedding batch is retried rather than consuming the whole
+request budget in one attempt. Set `per_attempt_timeout` below
+`request_timeout` to leave room for retries; when omitted, no
+per-attempt limit applies.
+
+The following example raises the request budget and makes slow
+embedding attempts retryable:
+
+```yaml
+embedding_llm:
+  provider: "gemini"
+  model: "text-embedding-004"
+  request_timeout: "120s"
+  per_attempt_timeout: "30s"
+```
 
 The RAG server supports the following providers:
 

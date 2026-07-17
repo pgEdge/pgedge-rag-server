@@ -12,117 +12,74 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
+
+	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/bm25"
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 	"github.com/pgEdge/pgedge-rag-server/internal/database"
-	"github.com/pgEdge/pgedge-rag-server/internal/llm"
 )
 
-// MockEmbeddingProvider implements llm.EmbeddingProvider for testing.
-type MockEmbeddingProvider struct {
-	EmbedFunc      func(ctx context.Context, text string) ([]float32, error)
-	EmbedBatchFunc func(ctx context.Context, texts []string) ([][]float32, error)
-	DimensionsVal  int
-	ModelNameVal   string
+// MockEmbedder implements pipeline.Embedder for orchestrator tests.
+type MockEmbedder struct {
+	EmbedFunc func(ctx context.Context, text string) ([]float64, error)
 }
 
-func (m *MockEmbeddingProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+func (m *MockEmbedder) Embed(ctx context.Context, text string) ([]float64, error) {
 	if m.EmbedFunc != nil {
 		return m.EmbedFunc(ctx, text)
 	}
-	return []float32{0.1, 0.2, 0.3}, nil
+	return []float64{0.1, 0.2, 0.3}, nil
 }
 
-func (m *MockEmbeddingProvider) EmbedBatch(
+// MockCompleter implements pipeline.Completer for orchestrator tests.
+type MockCompleter struct {
+	ChatFunc       func(ctx context.Context, req llmlib.ChatRequest) (*llmlib.ChatResponse, error)
+	ChatStreamFunc func(ctx context.Context, req llmlib.ChatRequest) (*llmlib.Stream, error)
+}
+
+func (m *MockCompleter) Chat(
 	ctx context.Context,
-	texts []string,
-) ([][]float32, error) {
-	if m.EmbedBatchFunc != nil {
-		return m.EmbedBatchFunc(ctx, texts)
+	req llmlib.ChatRequest,
+) (*llmlib.ChatResponse, error) {
+	if m.ChatFunc != nil {
+		return m.ChatFunc(ctx, req)
 	}
-	results := make([][]float32, len(texts))
-	for i := range texts {
-		results[i] = []float32{0.1, 0.2, 0.3}
-	}
-	return results, nil
-}
-
-func (m *MockEmbeddingProvider) Dimensions() int {
-	if m.DimensionsVal > 0 {
-		return m.DimensionsVal
-	}
-	return 768
-}
-
-func (m *MockEmbeddingProvider) ModelName() string {
-	if m.ModelNameVal != "" {
-		return m.ModelNameVal
-	}
-	return "mock-embedding-model"
-}
-
-// MockCompletionProvider implements llm.CompletionProvider for testing.
-type MockCompletionProvider struct {
-	CompleteFunc       func(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error)
-	CompleteStreamFunc func(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, <-chan error)
-	ModelNameVal       string
-}
-
-func (m *MockCompletionProvider) Complete(
-	ctx context.Context,
-	req llm.CompletionRequest,
-) (*llm.CompletionResponse, error) {
-	if m.CompleteFunc != nil {
-		return m.CompleteFunc(ctx, req)
-	}
-	return &llm.CompletionResponse{
-		Content:      "This is a mock response.",
-		FinishReason: "stop",
-		Usage: llm.TokenUsage{
-			PromptTokens:     100,
-			CompletionTokens: 20,
-			TotalTokens:      120,
+	return &llmlib.ChatResponse{
+		Content: []llmlib.ContentBlock{
+			{Type: llmlib.BlockText, Text: "This is a mock response."},
 		},
+		StopReason: llmlib.StopReasonEndTurn,
+		Usage:      llmlib.TokenUsage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120},
 	}, nil
 }
 
-func (m *MockCompletionProvider) CompleteStream(
+func (m *MockCompleter) ChatStream(
 	ctx context.Context,
-	req llm.CompletionRequest,
-) (<-chan llm.StreamChunk, <-chan error) {
-	if m.CompleteStreamFunc != nil {
-		return m.CompleteStreamFunc(ctx, req)
+	req llmlib.ChatRequest,
+) (*llmlib.Stream, error) {
+	if m.ChatStreamFunc != nil {
+		return m.ChatStreamFunc(ctx, req)
 	}
-	chunkChan := make(chan llm.StreamChunk, 3)
-	errChan := make(chan error, 1)
+
+	chunks := make(chan llmlib.StreamChunk, 4)
+	errs := make(chan error, 1)
 
 	go func() {
-		defer close(chunkChan)
-		defer close(errChan)
-		chunkChan <- llm.StreamChunk{Content: "This is "}
-		chunkChan <- llm.StreamChunk{Content: "a streaming response."}
-		chunkChan <- llm.StreamChunk{
-			Content:      "",
-			FinishReason: "stop",
-			Usage: &llm.TokenUsage{
-				PromptTokens:     100,
-				CompletionTokens: 20,
-				TotalTokens:      120,
-			},
+		defer close(chunks)
+		defer close(errs)
+		chunks <- llmlib.StreamChunk{Type: llmlib.ChunkText, Text: "This is "}
+		chunks <- llmlib.StreamChunk{Type: llmlib.ChunkText, Text: "a streaming response."}
+		chunks <- llmlib.StreamChunk{
+			Type:  llmlib.ChunkDone,
+			Usage: &llmlib.TokenUsage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120},
 		}
 	}()
 
-	return chunkChan, errChan
-}
-
-func (m *MockCompletionProvider) ModelName() string {
-	if m.ModelNameVal != "" {
-		return m.ModelNameVal
-	}
-	return "mock-completion-model"
+	return &llmlib.Stream{Chunks: chunks, Err: errs}, nil
 }
 
 func TestNewOrchestrator(t *testing.T) {
@@ -130,8 +87,8 @@ func TestNewOrchestrator(t *testing.T) {
 		Pipeline: &config.Pipeline{
 			Name: "test-pipeline",
 		},
-		EmbeddingProv:  &MockEmbeddingProvider{},
-		CompletionProv: &MockCompletionProvider{},
+		EmbeddingProv:  &MockEmbedder{},
+		CompletionProv: &MockCompleter{},
 		TokenBudget:    4000,
 		TopN:           5,
 	}
@@ -363,8 +320,8 @@ func TestSystemPromptPassedToCompletion(t *testing.T) {
 				{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
 			},
 		},
-		EmbeddingProv:  &MockEmbeddingProvider{},
-		CompletionProv: &MockCompletionProvider{},
+		EmbeddingProv:  &MockEmbedder{},
+		CompletionProv: &MockCompleter{},
 		TokenBudget:    4000,
 		TopN:           5,
 	})
@@ -451,117 +408,88 @@ func TestQueryRequestTopNOverride(t *testing.T) {
 	}
 }
 
-// Test mock providers work correctly
-func TestMockEmbeddingProvider(t *testing.T) {
-	provider := &MockEmbeddingProvider{
-		DimensionsVal: 384,
-		ModelNameVal:  "test-model",
-	}
-
-	// Test Embed
-	embedding, err := provider.Embed(context.Background(), "test text")
+// Test mock embedder/completer work correctly
+func TestMockEmbedder(t *testing.T) {
+	mb := &MockEmbedder{}
+	v, err := mb.Embed(context.Background(), "x")
 	if err != nil {
 		t.Fatalf("Embed failed: %v", err)
 	}
-	if len(embedding) != 3 {
-		t.Errorf("expected 3 dimensions, got %d", len(embedding))
-	}
-
-	// Test EmbedBatch
-	embeddings, err := provider.EmbedBatch(context.Background(), []string{"text1", "text2"})
-	if err != nil {
-		t.Fatalf("EmbedBatch failed: %v", err)
-	}
-	if len(embeddings) != 2 {
-		t.Errorf("expected 2 embeddings, got %d", len(embeddings))
-	}
-
-	// Test Dimensions
-	if provider.Dimensions() != 384 {
-		t.Errorf("expected 384 dimensions, got %d", provider.Dimensions())
-	}
-
-	// Test ModelName
-	if provider.ModelName() != "test-model" {
-		t.Errorf("expected 'test-model', got '%s'", provider.ModelName())
+	if len(v) != 3 {
+		t.Errorf("expected 3 dims, got %d", len(v))
 	}
 }
 
-func TestMockCompletionProvider(t *testing.T) {
-	provider := &MockCompletionProvider{
-		ModelNameVal: "test-completion-model",
-	}
-
-	// Test Complete
-	resp, err := provider.Complete(context.Background(), llm.CompletionRequest{
+func TestMockCompleter_Chat(t *testing.T) {
+	mc := &MockCompleter{}
+	resp, err := mc.Chat(context.Background(), llmlib.ChatRequest{
 		SystemPrompt: "You are a test assistant.",
-		Messages:     []llm.Message{{Role: "user", Content: "Hello"}},
+		Messages:     []llmlib.Message{llmlib.UserText("Hello")},
 	})
 	if err != nil {
-		t.Fatalf("Complete failed: %v", err)
+		t.Fatalf("Chat failed: %v", err)
 	}
-	if resp.Content != "This is a mock response." {
-		t.Errorf("unexpected content: %s", resp.Content)
-	}
-	if resp.FinishReason != "stop" {
-		t.Errorf("expected finish_reason 'stop', got '%s'", resp.FinishReason)
-	}
-
-	// Test CompleteStream
-	chunkChan, errChan := provider.CompleteStream(context.Background(), llm.CompletionRequest{
-		SystemPrompt: "You are a test assistant.",
-		Messages:     []llm.Message{{Role: "user", Content: "Hello"}},
-	})
-
-	var content string
-	for chunk := range chunkChan {
-		content += chunk.Content
-	}
-
-	if err := <-errChan; err != nil {
-		t.Fatalf("CompleteStream failed: %v", err)
-	}
-
-	if content != "This is a streaming response." {
-		t.Errorf("unexpected streaming content: %s", content)
-	}
-
-	// Test ModelName
-	if provider.ModelName() != "test-completion-model" {
-		t.Errorf("expected 'test-completion-model', got '%s'", provider.ModelName())
+	if len(resp.Content) == 0 || resp.Content[0].Text != "This is a mock response." {
+		t.Errorf("unexpected response content: %+v", resp.Content)
 	}
 }
 
-func TestMockProvidersWithCustomFunctions(t *testing.T) {
-	// Test embedding provider with custom function
-	embeddingProvider := &MockEmbeddingProvider{
-		EmbedFunc: func(ctx context.Context, text string) ([]float32, error) {
-			return nil, errors.New("embedding error")
-		},
+func TestMockCompleter_ChatStream(t *testing.T) {
+	mc := &MockCompleter{}
+	stream, err := mc.ChatStream(context.Background(), llmlib.ChatRequest{
+		Messages: []llmlib.Message{llmlib.UserText("Hello")},
+	})
+	if err != nil {
+		t.Fatalf("ChatStream failed: %v", err)
 	}
 
-	_, err := embeddingProvider.Embed(context.Background(), "test")
-	if err == nil || err.Error() != "embedding error" {
-		t.Error("expected custom error from EmbedFunc")
+	var body strings.Builder
+	for {
+		chunk, recvErr := stream.Recv()
+		if errors.Is(recvErr, io.EOF) {
+			break
+		}
+		if recvErr != nil {
+			t.Fatalf("Recv: %v", recvErr)
+		}
+		if chunk.Type == llmlib.ChunkText {
+			body.WriteString(chunk.Text)
+		}
 	}
+	if body.String() != "This is a streaming response." {
+		t.Errorf("unexpected streaming body: %q", body.String())
+	}
+}
 
-	// Test completion provider with custom function
-	completionProvider := &MockCompletionProvider{
-		CompleteFunc: func(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			return &llm.CompletionResponse{
-				Content: "Custom response for: " + req.Messages[0].Content,
+func TestMockCompleter_CustomChatFunc(t *testing.T) {
+	mc := &MockCompleter{
+		ChatFunc: func(ctx context.Context, req llmlib.ChatRequest) (*llmlib.ChatResponse, error) {
+			return &llmlib.ChatResponse{
+				Content: []llmlib.ContentBlock{
+					{Type: llmlib.BlockText, Text: "Custom: " + req.Messages[0].Content[0].Text},
+				},
 			}, nil
 		},
 	}
-
-	resp, err := completionProvider.Complete(context.Background(), llm.CompletionRequest{
-		Messages: []llm.Message{{Role: "user", Content: "test question"}},
+	resp, err := mc.Chat(context.Background(), llmlib.ChatRequest{
+		Messages: []llmlib.Message{llmlib.UserText("ping")},
 	})
 	if err != nil {
-		t.Fatalf("Complete failed: %v", err)
+		t.Fatalf("Chat failed: %v", err)
 	}
-	if resp.Content != "Custom response for: test question" {
-		t.Errorf("unexpected content: %s", resp.Content)
+	if resp.Content[0].Text != "Custom: ping" {
+		t.Errorf("unexpected content: %+v", resp.Content)
+	}
+}
+
+func TestMockEmbedder_CustomErrorFunc(t *testing.T) {
+	mb := &MockEmbedder{
+		EmbedFunc: func(ctx context.Context, text string) ([]float64, error) {
+			return nil, errors.New("embedding error")
+		},
+	}
+	if _, err := mb.Embed(context.Background(), "x"); err == nil || err.Error() != "embedding error" {
+		t.Errorf("expected 'embedding error', got %v", err)
 	}
 }
 
@@ -676,8 +604,23 @@ func TestBM25ToSearchResults_FusesWithVectorArmWhenNoIDColumn(t *testing.T) {
 	}
 }
 
-// Verify mock providers implement the interfaces
+// TestBuildChatRequest_OmitsTemperature is a regression test: Temperature
+// must stay nil so each provider/model uses its own default. A hardcoded
+// value here previously broke requests to models that reject a
+// temperature parameter outright (observed live against claude-sonnet-5:
+// "400: `temperature` is deprecated for this model").
+func TestBuildChatRequest_OmitsTemperature(t *testing.T) {
+	orch := &Orchestrator{bm25Index: bm25.NewIndex()}
+
+	req := orch.buildChatRequest(QueryRequest{Query: "hello"}, nil)
+
+	if req.Temperature != nil {
+		t.Errorf("expected Temperature to be nil (let the provider default apply), got %v", *req.Temperature)
+	}
+}
+
+// Verify mocks implement the interfaces
 var (
-	_ llm.EmbeddingProvider  = (*MockEmbeddingProvider)(nil)
-	_ llm.CompletionProvider = (*MockCompletionProvider)(nil)
+	_ Embedder  = (*MockEmbedder)(nil)
+	_ Completer = (*MockCompleter)(nil)
 )

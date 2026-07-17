@@ -14,7 +14,79 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"gopkg.in/yaml.v3"
 )
+
+func TestLLMConfig_DurationUnmarshal(t *testing.T) {
+	var cfg LLMConfig
+	in := "provider: gemini\nmodel: text-embedding-004\n" +
+		"request_timeout: 120s\nper_attempt_timeout: 30s\n"
+	if err := yaml.Unmarshal([]byte(in), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if cfg.RequestTimeout.Std() != 120*time.Second {
+		t.Errorf("request_timeout = %v, want 120s", cfg.RequestTimeout.Std())
+	}
+	if cfg.PerAttemptTimeout.Std() != 30*time.Second {
+		t.Errorf("per_attempt_timeout = %v, want 30s", cfg.PerAttemptTimeout.Std())
+	}
+}
+
+func TestLLMConfig_DurationUnmarshal_EmptyIsZero(t *testing.T) {
+	var cfg LLMConfig
+	if err := yaml.Unmarshal([]byte("provider: ollama\nmodel: llama3\n"), &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if cfg.RequestTimeout.Std() != 0 || cfg.PerAttemptTimeout.Std() != 0 {
+		t.Errorf("absent timeouts should be zero, got %v/%v",
+			cfg.RequestTimeout.Std(), cfg.PerAttemptTimeout.Std())
+	}
+}
+
+func TestLLMConfig_DurationUnmarshal_Invalid(t *testing.T) {
+	var cfg LLMConfig
+	err := yaml.Unmarshal([]byte("request_timeout: notaduration\n"), &cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid duration string")
+	}
+	if !strings.Contains(err.Error(), "invalid duration") {
+		t.Errorf("error should mention invalid duration: %v", err)
+	}
+}
+
+func TestValidateLLMTimeouts(t *testing.T) {
+	tests := []struct {
+		name    string
+		req     time.Duration
+		attempt time.Duration
+		wantErr bool
+	}{
+		{"both zero", 0, 0, false},
+		{"per-attempt only", 0, 30 * time.Second, false},
+		{"attempt below request", 120 * time.Second, 30 * time.Second, false},
+		{"attempt equals request", 60 * time.Second, 60 * time.Second, false},
+		{"attempt exceeds request", 30 * time.Second, 60 * time.Second, true},
+		{"negative request", -1 * time.Second, 0, true},
+		{"negative attempt", 0, -1 * time.Second, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			llm := LLMConfig{
+				RequestTimeout:    Duration(tt.req),
+				PerAttemptTimeout: Duration(tt.attempt),
+			}
+			errs := validateLLMTimeouts("test", llm)
+			if tt.wantErr && len(errs) == 0 {
+				t.Error("expected a validation error, got none")
+			}
+			if !tt.wantErr && len(errs) != 0 {
+				t.Errorf("expected no errors, got: %v", errs)
+			}
+		})
+	}
+}
 
 func TestLoad_ValidConfig(t *testing.T) {
 	cfg, err := Load("../../testdata/configs/valid.yaml")
