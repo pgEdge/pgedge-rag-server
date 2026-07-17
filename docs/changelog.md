@@ -9,6 +9,20 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- Vector search now selects the configured `id_column`, so vector
+  results carry an id. Previously the vector arm returned empty
+  ids, which prevented Reciprocal Rank Fusion from merging the
+  vector and BM25 arms (a document found by both was scored as
+  two separate half-weight entries) and made vector results
+  unusable for id-based source resolution (citations). When no
+  `id_column` is configured, both search arms now fall back to
+  keying on content for fusion, so a document found by both arms
+  fuses into one result instead of appearing twice (and unstable
+  `ROW_NUMBER()` ids no longer cause false merges)
+  ([#27](https://github.com/pgEdge/pgedge-rag-server/issues/27)).
+
 ## [1.0.0] - 2026-04-04
 
 ### Added

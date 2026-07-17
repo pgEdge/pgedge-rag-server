@@ -140,15 +140,11 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 			// Search with BM25
 			bm25Results := o.bm25Index.Search(req.Query, topN*2)
 
-			// Convert BM25 results to SearchResult format
-			bm25SearchResults := make([]database.SearchResult, len(bm25Results))
-			for i, r := range bm25Results {
-				bm25SearchResults[i] = database.SearchResult{
-					ID:      r.ID,
-					Content: r.Content,
-					Score:   r.Score,
-				}
-			}
+			// Convert BM25 results to SearchResult format. When the table
+			// has no stable id_column, ids are cleared so fusion keys on
+			// content (matching the vector arm) rather than on unstable,
+			// non-comparable identifiers.
+			bm25SearchResults := bm25ToSearchResults(bm25Results, table.IDColumn != "")
 
 			// Combine using RRF
 			hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN, vectorWeight)
@@ -280,14 +276,9 @@ func (o *Orchestrator) ExecuteStream(
 				o.bm25Index.AddDocuments(docs)
 
 				bm25Results := o.bm25Index.Search(req.Query, topN*2)
-				bm25SearchResults := make([]database.SearchResult, len(bm25Results))
-				for i, r := range bm25Results {
-					bm25SearchResults[i] = database.SearchResult{
-						ID:      r.ID,
-						Content: r.Content,
-						Score:   r.Score,
-					}
-				}
+				// Clear ids when the table has no stable id_column so
+				// fusion keys on content, matching the vector arm.
+				bm25SearchResults := bm25ToSearchResults(bm25Results, table.IDColumn != "")
 
 				hybridResults := database.HybridSearch(vectorResults, bm25SearchResults, topN, vectorWeight)
 				allResults = append(allResults, hybridResults...)
@@ -350,6 +341,38 @@ func (o *Orchestrator) ExecuteStream(
 	}()
 
 	return chunkChan, errChan
+}
+
+// bm25ToSearchResults converts BM25 results into database.SearchResult.
+//
+// When the table has a configured id_column (hasIDColumn is true), the BM25
+// id is a stable identifier shared with the vector arm, so it is preserved:
+// both arms then key on the same id in Reciprocal Rank Fusion and a document
+// found by both arms fuses into a single entry.
+//
+// When there is no id_column, the BM25 id is a ROW_NUMBER() assigned
+// independently of the vector query and does not identify the same document
+// across arms. Carrying it into fusion would leave the two arms in disjoint
+// key spaces (BM25 keyed by row number, vector keyed by content), so a shared
+// document would appear twice instead of fusing. Clearing the id makes both
+// arms key on content — the only reliable cross-arm identity in that case.
+func bm25ToSearchResults(
+	bm25Results []bm25.SearchResult,
+	hasIDColumn bool,
+) []database.SearchResult {
+	out := make([]database.SearchResult, len(bm25Results))
+	for i, r := range bm25Results {
+		id := r.ID
+		if !hasIDColumn {
+			id = ""
+		}
+		out[i] = database.SearchResult{
+			ID:      id,
+			Content: r.Content,
+			Score:   r.Score,
+		}
+	}
+	return out
 }
 
 // deduplicateResults removes duplicate content and limits to topN.

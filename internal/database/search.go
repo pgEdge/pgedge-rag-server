@@ -83,13 +83,35 @@ func buildVectorSearchQuery(
 		filterClause = filterClause + " AND " + simCondition
 	}
 
+	// Determine the ID expression. When an id_column is configured we select
+	// it so vector results carry a stable id — this is what makes both search
+	// arms key on the same id in RRF (correct fusion) and what makes vector
+	// results usable for id-based source resolution (citations).
+	//
+	// When no id_column is configured there is no stable identifier. We must
+	// NOT emit a ROW_NUMBER() id here: the vector query (ORDER BY ... LIMIT)
+	// and the BM25 FetchDocuments query (full scan) number their rows
+	// independently, so a row number from one arm does not identify the same
+	// document as the same row number from the other. Using it as an RRF key
+	// would falsely fuse unrelated documents. Emitting an empty id makes RRF
+	// and deduplication fall back to keying on content, which is the only
+	// reliable cross-arm identity when no id_column exists.
+	var idExpr string
+	if table.IDColumn != "" {
+		idExpr = pgx.Identifier{table.IDColumn}.Sanitize() + "::text"
+	} else {
+		idExpr = "''::text"
+	}
+
 	query := fmt.Sprintf(`
 		SELECT
+			%s AS id,
 			%s AS content,
 			1 - (%s <=> $1::vector) AS score
 		FROM %s%s
 		ORDER BY %s <=> $1::vector
 		LIMIT $2`,
+		idExpr,
 		pgx.Identifier{table.TextColumn}.Sanitize(),
 		vectorCol,
 		parseTableIdentifier(table.Table).Sanitize(),
@@ -128,7 +150,7 @@ func (p *Pool) VectorSearch(
 	var results []SearchResult
 	for rows.Next() {
 		var r SearchResult
-		if err := rows.Scan(&r.Content, &r.Score); err != nil {
+		if err := rows.Scan(&r.ID, &r.Content, &r.Score); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 		results = append(results, r)

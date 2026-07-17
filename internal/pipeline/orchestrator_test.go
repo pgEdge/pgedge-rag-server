@@ -598,6 +598,84 @@ func TestMinSimilarityConfigInSearchConfig(t *testing.T) {
 	}
 }
 
+// TestBM25ToSearchResults_PreservesIDWithIDColumn verifies that when the
+// table has a configured id_column, BM25 result ids are preserved so both
+// search arms key on the same stable id during fusion.
+func TestBM25ToSearchResults_PreservesIDWithIDColumn(t *testing.T) {
+	bm25Results := []bm25.SearchResult{
+		{ID: "42", Content: "doc-a"},
+		{ID: "43", Content: "doc-b"},
+	}
+
+	out := bm25ToSearchResults(bm25Results, true)
+
+	if len(out) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(out))
+	}
+	if out[0].ID != "42" || out[1].ID != "43" {
+		t.Errorf("ids should be preserved with id_column set, got %q and %q",
+			out[0].ID, out[1].ID)
+	}
+	if out[0].Content != "doc-a" || out[1].Content != "doc-b" {
+		t.Errorf("content not carried through: %+v", out)
+	}
+}
+
+// TestBM25ToSearchResults_ClearsIDWithoutIDColumn is a regression test for
+// the no-id_column half of issue #27: without a stable id_column, the BM25
+// arm's ROW_NUMBER() ids are not comparable to the vector arm, so they must
+// be cleared. Otherwise BM25 keys by row number while the vector arm keys by
+// content, leaving a document found by both arms duplicated instead of fused.
+func TestBM25ToSearchResults_ClearsIDWithoutIDColumn(t *testing.T) {
+	bm25Results := []bm25.SearchResult{
+		{ID: "1", Content: "doc-a"},
+		{ID: "2", Content: "doc-b"},
+	}
+
+	out := bm25ToSearchResults(bm25Results, false)
+
+	if len(out) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(out))
+	}
+	for i, r := range out {
+		if r.ID != "" {
+			t.Errorf("result %d: id should be cleared without id_column, got %q", i, r.ID)
+		}
+	}
+	// Content must still be present so fusion can key on it.
+	if out[0].Content != "doc-a" || out[1].Content != "doc-b" {
+		t.Errorf("content not carried through: %+v", out)
+	}
+}
+
+// TestBM25ToSearchResults_FusesWithVectorArmWhenNoIDColumn ties the pieces
+// together: with no id_column, vector results have empty ids (from
+// buildVectorSearchQuery) and BM25 results have their ids cleared here, so a
+// document returned by both arms fuses into ONE entry (keyed by content)
+// rather than appearing twice.
+func TestBM25ToSearchResults_FusesWithVectorArmWhenNoIDColumn(t *testing.T) {
+	// Vector arm: no id_column -> empty ids, keyed by content.
+	vectorResults := []database.SearchResult{
+		{ID: "", Content: "shared-doc", Score: 0.9},
+	}
+	// BM25 arm returns the same document with a ROW_NUMBER id.
+	bm25Raw := []bm25.SearchResult{
+		{ID: "7", Content: "shared-doc", Score: 5.0},
+	}
+
+	bm25Results := bm25ToSearchResults(bm25Raw, false)
+
+	fused := database.HybridSearch(vectorResults, bm25Results, 10, 0.5)
+
+	if len(fused) != 1 {
+		t.Fatalf("expected the shared document to fuse into 1 result, got %d: %+v",
+			len(fused), fused)
+	}
+	if fused[0].Content != "shared-doc" {
+		t.Errorf("expected fused content 'shared-doc', got %q", fused[0].Content)
+	}
+}
+
 // Verify mock providers implement the interfaces
 var (
 	_ llm.EmbeddingProvider  = (*MockEmbeddingProvider)(nil)

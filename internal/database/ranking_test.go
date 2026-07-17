@@ -298,6 +298,98 @@ func TestReciprocalRankFusion_EmptyBM25Results(t *testing.T) {
 	}
 }
 
+// TestReciprocalRankFusion_FusesSameDocumentAcrossArms is a regression
+// test for the hybrid-search bug (issue #27): when a document is returned
+// by BOTH the vector and BM25 arms with the same id, RRF must fuse the two
+// rankings into a SINGLE entry whose score is the sum of both arms'
+// contributions — not two separate half-weight entries.
+//
+// The original bug left vector results with an empty id, so a doc found by
+// both arms was keyed by content (vector) and by id (BM25), producing two
+// entries. This test asserts the fused-single-entry behavior that the fix
+// restores by giving vector results a populated id.
+func TestReciprocalRankFusion_FusesSameDocumentAcrossArms(t *testing.T) {
+	// Same document (id "a") ranked #1 by each arm, now that vector
+	// results carry an id.
+	vec := []SearchResult{
+		{ID: "a", Content: "doc-a", Score: 0.9},
+	}
+	bm25 := []SearchResult{
+		{ID: "a", Content: "doc-a", Score: 5.0},
+	}
+
+	results := ReciprocalRankFusion(vec, bm25, 60, 0.5)
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 fused result, got %d: %+v", len(results), results)
+	}
+
+	// Fused score is the sum of both arms' rank-1 contributions, not a
+	// single half-weight entry (0.5/61 == 0.008197, the pre-fix value).
+	fused := 0.5/(60+1) + 0.5/(60+1)
+	if math.Abs(results[0].Score-fused) > 1e-9 {
+		t.Errorf("expected fused score %f, got %f", fused, results[0].Score)
+	}
+	if results[0].VecRank != 1 || results[0].BM25Rank != 1 {
+		t.Errorf("expected doc fused from both arms (VecRank=1, BM25Rank=1), got VecRank=%d BM25Rank=%d",
+			results[0].VecRank, results[0].BM25Rank)
+	}
+	if results[0].ID != "a" {
+		t.Errorf("expected fused result id 'a', got '%s'", results[0].ID)
+	}
+}
+
+// TestReciprocalRankFusion_ContentKeyedWhenNoID verifies the no-id_column
+// path: when neither arm carries an id, RRF keys on content. Documents with
+// the same content fuse into one entry; documents with different content stay
+// separate. This guards against the false-fusion regression that a
+// ROW_NUMBER() id would cause — colliding but meaningless ids from the two
+// arms would otherwise merge unrelated documents.
+func TestReciprocalRankFusion_ContentKeyedWhenNoID(t *testing.T) {
+	// Same document (same content) found by both arms, no ids.
+	vec := []SearchResult{
+		{ID: "", Content: "shared-doc", Score: 0.9},
+		{ID: "", Content: "vec-only", Score: 0.8},
+	}
+	bm25 := []SearchResult{
+		{ID: "", Content: "shared-doc", Score: 5.0},
+		{ID: "", Content: "bm25-only", Score: 3.0},
+	}
+
+	results := ReciprocalRankFusion(vec, bm25, 60, 0.5)
+
+	// Expect 3 entries: shared-doc (fused), vec-only, bm25-only.
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d: %+v", len(results), results)
+	}
+
+	byContent := map[string]RRFResult{}
+	for _, r := range results {
+		byContent[r.Content] = r
+	}
+
+	shared, ok := byContent["shared-doc"]
+	if !ok {
+		t.Fatal("expected a fused 'shared-doc' entry")
+	}
+	if shared.VecRank != 1 || shared.BM25Rank != 1 {
+		t.Errorf("shared-doc should be fused from both arms, got VecRank=%d BM25Rank=%d",
+			shared.VecRank, shared.BM25Rank)
+	}
+	fused := 0.5/(60+1) + 0.5/(60+1)
+	if math.Abs(shared.Score-fused) > 1e-9 {
+		t.Errorf("shared-doc fused score: expected %f, got %f", fused, shared.Score)
+	}
+
+	// The single-arm docs must NOT be fused with each other.
+	if vo := byContent["vec-only"]; vo.BM25Rank != 0 {
+		t.Errorf("vec-only should have no BM25 rank, got %d", vo.BM25Rank)
+	}
+	if bo := byContent["bm25-only"]; bo.VecRank != 0 {
+		t.Errorf("bm25-only should have no vector rank, got %d", bo.VecRank)
+	}
+}
+
 // TestReciprocalRankFusion_BothEmpty verifies that when both result
 // sets are empty, an empty slice is returned.
 func TestReciprocalRankFusion_BothEmpty(t *testing.T) {
