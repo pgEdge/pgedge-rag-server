@@ -604,6 +604,21 @@ func TestBM25ToSearchResults_FusesWithVectorArmWhenNoIDColumn(t *testing.T) {
 	}
 }
 
+// TestBuildChatRequest_OmitsTemperature is a regression test: Temperature
+// must stay nil so each provider/model uses its own default. A hardcoded
+// value here previously broke requests to models that reject a
+// temperature parameter outright (observed live against claude-sonnet-5:
+// "400: `temperature` is deprecated for this model").
+func TestBuildChatRequest_OmitsTemperature(t *testing.T) {
+	orch := &Orchestrator{bm25Index: bm25.NewIndex()}
+
+	req := orch.buildChatRequest(QueryRequest{Query: "hello"}, nil)
+
+	if req.Temperature != nil {
+		t.Errorf("expected Temperature to be nil (let the provider default apply), got %v", *req.Temperature)
+	}
+}
+
 // Verify mocks implement the interfaces
 var (
 	_ Embedder  = (*MockEmbedder)(nil)

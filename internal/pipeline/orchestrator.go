@@ -303,6 +303,17 @@ func (o *Orchestrator) search(
 // block. Standardising on system-prompt-carries-context matches the
 // pre-migration Anthropic/Gemini behaviour and is functionally
 // equivalent for OpenAI/Ollama.
+//
+// Temperature is intentionally left unset here: pgedge-go-llm-lib's
+// Options.WithDefaults() always fills an unset per-request Temperature
+// with a client-level default (0.7), so no pgedge-rag-server-side value
+// (including omitting it, as here) prevents a temperature field from
+// reaching the wire. Some newer models (observed: claude-sonnet-5)
+// reject any temperature value outright ("400: `temperature` is
+// deprecated for this model"). This is a pgedge-go-llm-lib limitation,
+// not something fixable from this layer without hand-rolling
+// provider-specific HTTP handling — tracked upstream instead of worked
+// around here.
 func (o *Orchestrator) buildChatRequest(
 	req QueryRequest,
 	contextDocs []ragllm.ContextDoc,
@@ -326,7 +337,6 @@ func (o *Orchestrator) buildChatRequest(
 	return llmlib.ChatRequest{
 		SystemPrompt: system,
 		Messages:     messages,
-		Temperature:  llmlib.Float(0.7),
 	}
 }
 
