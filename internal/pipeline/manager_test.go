@@ -219,23 +219,29 @@ func TestManager_Stats(t *testing.T) {
 		byName[s.Name] = s
 	}
 
-	p1, ok := byName["pipeline-1"]
-	if !ok {
-		t.Fatal("expected pipeline-1 in stats")
-	}
-	if p1.Embedding.TotalTokens != 10 {
-		t.Errorf("expected pipeline-1 embedding total 10, got %d", p1.Embedding.TotalTokens)
-	}
-	if p1.Completion.TotalTokens != 75 {
-		t.Errorf("expected pipeline-1 completion total 75, got %d", p1.Completion.TotalTokens)
-	}
+	assertPipelineUsage(t, byName, "pipeline-1", 10, 75)
+	assertPipelineUsage(t, byName, "pipeline-2", 0, 0)
+}
 
-	p2, ok := byName["pipeline-2"]
+// assertPipelineUsage checks that stats for the named pipeline exist and
+// report the expected cumulative embedding/completion token totals.
+func assertPipelineUsage(
+	t *testing.T,
+	byName map[string]Usage,
+	name string,
+	wantEmbeddingTotal, wantCompletionTotal int,
+) {
+	t.Helper()
+
+	p, ok := byName[name]
 	if !ok {
-		t.Fatal("expected pipeline-2 in stats")
+		t.Fatalf("expected %s in stats", name)
 	}
-	if p2.Embedding.TotalTokens != 0 || p2.Completion.TotalTokens != 0 {
-		t.Errorf("expected pipeline-2 usage to be zero (never queried), got %+v", p2)
+	if p.Embedding.TotalTokens != wantEmbeddingTotal {
+		t.Errorf("expected %s embedding total %d, got %d", name, wantEmbeddingTotal, p.Embedding.TotalTokens)
+	}
+	if p.Completion.TotalTokens != wantCompletionTotal {
+		t.Errorf("expected %s completion total %d, got %d", name, wantCompletionTotal, p.Completion.TotalTokens)
 	}
 }
 
