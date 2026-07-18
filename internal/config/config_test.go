@@ -1519,6 +1519,93 @@ func TestValidation_PipelineNameMaxLength(t *testing.T) {
 	}
 }
 
+// TestAPIKeyFilePaths_ExplicitPath verifies a pipeline's explicitly
+// configured API key file path is included, for use by the config
+// watcher (issue #30).
+func TestAPIKeyFilePaths_ExplicitPath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate from any real default key files
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "openai-key")
+	if err := os.WriteFile(keyFile, []byte("sk-test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{
+		Pipelines: []Pipeline{
+			{APIKeys: APIKeysConfig{OpenAI: keyFile}},
+		},
+	}
+
+	paths := APIKeyFilePaths(cfg)
+	if len(paths) != 1 || paths[0] != keyFile {
+		t.Errorf("expected [%s], got %v", keyFile, paths)
+	}
+}
+
+// TestAPIKeyFilePaths_MissingFileExcluded verifies a configured path
+// that doesn't exist on disk is excluded — nothing to watch, and
+// watching a nonexistent parent path would fail anyway.
+func TestAPIKeyFilePaths_MissingFileExcluded(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate from any real default key files
+	cfg := &Config{
+		Pipelines: []Pipeline{
+			{APIKeys: APIKeysConfig{OpenAI: "/no/such/path/openai-key"}},
+		},
+	}
+
+	if paths := APIKeyFilePaths(cfg); len(paths) != 0 {
+		t.Errorf("expected no paths for a nonexistent key file, got %v", paths)
+	}
+}
+
+// TestAPIKeyFilePaths_DeduplicatesAcrossPipelines verifies that multiple
+// pipelines pointing at the same key file only produce one watched path.
+func TestAPIKeyFilePaths_DeduplicatesAcrossPipelines(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate from any real default key files
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "anthropic-key")
+	if err := os.WriteFile(keyFile, []byte("sk-test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{
+		Pipelines: []Pipeline{
+			{APIKeys: APIKeysConfig{Anthropic: keyFile}},
+			{APIKeys: APIKeysConfig{Anthropic: keyFile}},
+		},
+	}
+
+	if paths := APIKeyFilePaths(cfg); len(paths) != 1 {
+		t.Errorf("expected 1 deduplicated path, got %v", paths)
+	}
+}
+
+// TestAPIKeyFilePaths_DefaultFileLocation verifies that when no explicit
+// path is configured, the default ~/.provider-api-key file is included
+// if (and only if) it actually exists on disk.
+func TestAPIKeyFilePaths_DefaultFileLocation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg := &Config{
+		Pipelines: []Pipeline{{APIKeys: APIKeysConfig{}}}, // no explicit paths
+	}
+
+	if paths := APIKeyFilePaths(cfg); len(paths) != 0 {
+		t.Errorf("expected no paths when no default key files exist, got %v", paths)
+	}
+
+	defaultOpenAI := filepath.Join(home, DefaultOpenAIKeyFile)
+	if err := os.WriteFile(defaultOpenAI, []byte("sk-test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	paths := APIKeyFilePaths(cfg)
+	if len(paths) != 1 || paths[0] != defaultOpenAI {
+		t.Errorf("expected [%s] once the default file exists, got %v", defaultOpenAI, paths)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchSubstring(s, substr)
 }

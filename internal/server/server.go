@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
@@ -41,10 +42,11 @@ const defaultRequestTimeout = 50 * time.Second
 // Server is the HTTP server for the RAG API.
 type Server struct {
 	config         *config.Config
-	pipelines      PipelineManager
 	logger         *slog.Logger
 	server         *http.Server
 	mux            *http.ServeMux
+	pipelinesMu    sync.RWMutex
+	pipelines      PipelineManager // guarded by pipelinesMu; use pipelineManager()/SwapPipelineManager
 	requestTimeout time.Duration
 }
 
@@ -66,6 +68,26 @@ func New(cfg *config.Config, pm PipelineManager, logger *slog.Logger) *Server {
 	s.setupRoutes()
 
 	return s
+}
+
+// pipelineManager returns the currently active PipelineManager. Safe for
+// concurrent use with SwapPipelineManager.
+func (s *Server) pipelineManager() PipelineManager {
+	s.pipelinesMu.RLock()
+	defer s.pipelinesMu.RUnlock()
+	return s.pipelines
+}
+
+// SwapPipelineManager atomically replaces the active PipelineManager and
+// returns the one it replaced, so the caller can close it once any
+// in-flight requests still using it have had a chance to finish — see
+// issue #30 (config/secret hot-reload).
+func (s *Server) SwapPipelineManager(pm PipelineManager) PipelineManager {
+	s.pipelinesMu.Lock()
+	defer s.pipelinesMu.Unlock()
+	old := s.pipelines
+	s.pipelines = pm
+	return old
 }
 
 // ListenAndServe starts the HTTP server.

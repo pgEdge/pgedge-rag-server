@@ -61,7 +61,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handleListPipelines handles the GET /pipelines endpoint.
 func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
-	pipelines := s.pipelines.List()
+	pipelines := s.pipelineManager().List()
 	s.respondJSON(w, http.StatusOK, PipelinesResponse{Pipelines: pipelines})
 }
 
@@ -76,7 +76,7 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the pipeline
-	p, err := s.pipelines.Get(name)
+	p, err := s.pipelineManager().Get(name)
 	if err != nil {
 		if errors.Is(err, pipeline.ErrPipelineNotFound) {
 			s.respondError(w, http.StatusNotFound, "PIPELINE_NOT_FOUND",
