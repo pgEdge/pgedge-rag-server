@@ -46,6 +46,16 @@ type Watcher struct {
 	debounce time.Duration
 	onChange func()
 	logger   *slog.Logger
+
+	// reloadTrigger hands off debounced change notifications to a
+	// separate worker goroutine (see reloadWorker) so that a slow
+	// onChange (e.g. rebuilding pipelines) never blocks this package's
+	// event loop from draining fsnotify events/errors or observing
+	// context cancellation. Buffered to 1: a pending-but-not-yet-picked-up
+	// notification coalesces with any further ones that arrive while
+	// onChange is still running, so a burst during a slow reload
+	// produces at most one more reload rather than one per event.
+	reloadTrigger chan struct{}
 }
 
 // New creates a Watcher for the given file paths. Directories are
@@ -78,16 +88,19 @@ func New(paths []string, debounce time.Duration, onChange func(), logger *slog.L
 	}
 
 	return &Watcher{
-		fsw:      fsw,
-		debounce: debounce,
-		onChange: onChange,
-		logger:   logger,
+		fsw:           fsw,
+		debounce:      debounce,
+		onChange:      onChange,
+		logger:        logger,
+		reloadTrigger: make(chan struct{}, 1),
 	}, nil
 }
 
 // Start runs the watch loop until ctx is canceled. Intended to be run in
 // its own goroutine.
 func (w *Watcher) Start(ctx context.Context) {
+	go w.reloadWorker(ctx)
+
 	var timer *time.Timer
 	var timerC <-chan time.Time
 
@@ -123,6 +136,26 @@ func (w *Watcher) Start(ctx context.Context) {
 
 		case <-timerC:
 			timerC = nil
+			select {
+			case w.reloadTrigger <- struct{}{}:
+			default:
+				// A reload is already pending or running; it will
+				// observe this change too since reloadWorker only
+				// dequeues once it starts the next onChange call.
+			}
+		}
+	}
+}
+
+// reloadWorker serializes onChange invocations on their own goroutine,
+// so a slow onChange never blocks Start's event loop. It runs until ctx
+// is canceled.
+func (w *Watcher) reloadWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-w.reloadTrigger:
 			w.onChange()
 		}
 	}

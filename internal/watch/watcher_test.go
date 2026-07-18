@@ -182,3 +182,88 @@ func TestWatcher_Debounce(t *testing.T) {
 		t.Errorf("expected exactly 1 debounced callback for 5 rapid writes, got %d", got)
 	}
 }
+
+// TestWatcher_SlowOnChangeDoesNotBlockEventLoop is a regression test for
+// a CodeRabbit finding: onChange used to run inline in Start's select
+// loop, so a slow onChange (e.g. rebuilding pipelines) would prevent
+// the loop from observing further fsnotify events/errors or ctx
+// cancellation until it returned. It must now run on a separate
+// worker, dispatched via a coalescing trigger, so Start stays
+// responsive regardless of how long onChange takes.
+func TestWatcher_SlowOnChangeDoesNotBlockEventLoop(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("v1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var callCount atomic.Int32
+	started := make(chan struct{}, 10)
+	release := make(chan struct{})
+
+	onChange := func() {
+		callCount.Add(1)
+		started <- struct{}{}
+		<-release // blocks until the test releases it
+	}
+
+	w, err := New([]string{path}, 20*time.Millisecond, onChange, nil)
+	if err != nil {
+		t.Fatalf("failed to create watcher: %v", err)
+	}
+	defer w.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	startDone := make(chan struct{})
+	go func() {
+		w.Start(ctx)
+		close(startDone)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Trigger the first (slow, blocking) reload.
+	if err := os.WriteFile(path, []byte("v2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("onChange never started")
+	}
+
+	// onChange is now blocked. While it's blocked, fire several more
+	// changes: they must coalesce (thanks to the buffered trigger)
+	// rather than piling up, and the event loop must keep observing
+	// them without waiting for onChange to return.
+	for i := 0; i < 5; i++ {
+		if err := os.WriteFile(path, []byte("v"+string(rune('3'+i))), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+
+	// Cancel now, while onChange is still blocked. Start's event loop
+	// must return promptly instead of waiting for the blocked onChange.
+	cancelStart := time.Now()
+	cancel()
+
+	select {
+	case <-startDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Start did not return promptly after ctx cancellation; " +
+			"event loop appears blocked on a slow onChange")
+	}
+	if elapsed := time.Since(cancelStart); elapsed > 400*time.Millisecond {
+		t.Errorf("Start took %v to return after cancellation; expected a near-immediate return", elapsed)
+	}
+
+	// Unblock onChange so its goroutine (and any coalesced follow-up
+	// call) can finish before the test exits.
+	close(release)
+	time.Sleep(50 * time.Millisecond)
+
+	if got := callCount.Load(); got < 1 || got > 2 {
+		t.Errorf("expected 1 or 2 onChange calls (1 in-flight + at most 1 coalesced), got %d", got)
+	}
+}
