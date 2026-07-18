@@ -27,6 +27,11 @@ type PipelinesResponse struct {
 	Pipelines []pipeline.Info `json:"pipelines"`
 }
 
+// StatsResponse is the response for the stats endpoint.
+type StatsResponse struct {
+	Pipelines []pipeline.Usage `json:"pipelines"`
+}
+
 // ErrorResponse is the standard error response format.
 type ErrorResponse struct {
 	Error ErrorDetail `json:"error"`
@@ -57,6 +62,18 @@ func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
 
 	pipelines := s.pipelines.List()
 	s.respondJSON(w, http.StatusOK, PipelinesResponse{Pipelines: pipelines})
+}
+
+// handleStats handles the GET /stats endpoint, reporting cumulative
+// token usage for every configured pipeline. See issue #21.
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.respondMethodNotAllowed(w, http.MethodGet)
+		return
+	}
+
+	stats := s.pipelines.Stats()
+	s.respondJSON(w, http.StatusOK, StatsResponse{Pipelines: stats})
 }
 
 // handlePipeline handles the POST /pipelines/{name} endpoint.

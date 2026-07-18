@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 
+	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
+
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 	"github.com/pgEdge/pgedge-rag-server/internal/pipeline"
 )
@@ -29,6 +31,8 @@ type mockPipelineManager struct {
 type mockPipelineInfo struct {
 	name        string
 	description string
+	embedding   llmlib.TokenUsage
+	completion  llmlib.TokenUsage
 }
 
 func newMockPipelineManager() *mockPipelineManager {
@@ -37,6 +41,8 @@ func newMockPipelineManager() *mockPipelineManager {
 			"test-pipeline": {
 				name:        "test-pipeline",
 				description: "A test pipeline",
+				embedding:   llmlib.TokenUsage{PromptTokens: 5, TotalTokens: 5},
+				completion:  llmlib.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 			},
 		},
 	}
@@ -60,6 +66,19 @@ func (m *mockPipelineManager) Get(name string) (*pipeline.Pipeline, error) {
 	// Return nil pipeline - tests that need a real pipeline should use
 	// a different approach
 	return nil, nil
+}
+
+func (m *mockPipelineManager) Stats() []pipeline.Usage {
+	stats := make([]pipeline.Usage, 0, len(m.pipelines))
+	for _, p := range m.pipelines {
+		stats = append(stats, pipeline.Usage{
+			Name:        p.name,
+			Description: p.description,
+			Embedding:   p.embedding,
+			Completion:  p.completion,
+		})
+	}
+	return stats
 }
 
 func (m *mockPipelineManager) Close() error {
@@ -146,6 +165,52 @@ func TestListPipelinesEndpoint(t *testing.T) {
 	if resp.Pipelines[0].Name != "test-pipeline" {
 		t.Errorf("expected pipeline name 'test-pipeline', got '%s'",
 			resp.Pipelines[0].Name)
+	}
+}
+
+func TestStatsEndpoint(t *testing.T) {
+	srv := testServer()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/stats", nil)
+	w := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp StatsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.Pipelines) != 1 {
+		t.Fatalf("expected 1 pipeline, got %d", len(resp.Pipelines))
+	}
+
+	got := resp.Pipelines[0]
+	if got.Name != "test-pipeline" {
+		t.Errorf("expected pipeline name 'test-pipeline', got '%s'", got.Name)
+	}
+	if got.Embedding.TotalTokens != 5 {
+		t.Errorf("expected embedding total 5, got %d", got.Embedding.TotalTokens)
+	}
+	if got.Completion.TotalTokens != 15 {
+		t.Errorf("expected completion total 15, got %d", got.Completion.TotalTokens)
+	}
+}
+
+func TestStatsEndpoint_MethodNotAllowed(t *testing.T) {
+	srv := testServer()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/stats", nil)
+	w := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
 	}
 }
 
@@ -312,6 +377,7 @@ func TestRFC8631LinkHeader(t *testing.T) {
 	}{
 		{http.MethodGet, "/v1/health"},
 		{http.MethodGet, "/v1/pipelines"},
+		{http.MethodGet, "/v1/stats"},
 		{http.MethodGet, "/v1/openapi.json"},
 	}
 

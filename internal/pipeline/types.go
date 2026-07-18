@@ -11,6 +11,8 @@
 package pipeline
 
 import (
+	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
+
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 )
 
@@ -18,6 +20,18 @@ import (
 type Info struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+}
+
+// Usage reports a pipeline's cumulative LLM token consumption, broken
+// down by embedding and completion provider. Each is cumulative since
+// the underlying client was created (or last reset) — a monotonically
+// increasing counter, not a per-request or windowed figure. See issue
+// #21.
+type Usage struct {
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Embedding   llmlib.TokenUsage `json:"embedding"`
+	Completion  llmlib.TokenUsage `json:"completion"`
 }
 
 // Message represents a message in the conversation history.

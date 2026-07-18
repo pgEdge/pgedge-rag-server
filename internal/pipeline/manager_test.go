@@ -197,6 +197,48 @@ func TestManager_List(t *testing.T) {
 	}
 }
 
+// TestManager_Stats is a regression test for issue #21: the manager
+// must report cumulative token usage for every pipeline.
+func TestManager_Stats(t *testing.T) {
+	cfg := testConfig()
+	m := newTestManager(cfg)
+	defer func() { _ = m.Close() }()
+
+	m.pipelines["pipeline-1"].embeddingProv.(*MockEmbedder).UsageVal =
+		llmlib.TokenUsage{PromptTokens: 10, TotalTokens: 10}
+	m.pipelines["pipeline-1"].completionProv.(*MockCompleter).UsageVal =
+		llmlib.TokenUsage{PromptTokens: 50, CompletionTokens: 25, TotalTokens: 75}
+
+	stats := m.Stats()
+	if len(stats) != 2 {
+		t.Fatalf("expected 2 pipelines in stats, got %d", len(stats))
+	}
+
+	byName := make(map[string]Usage)
+	for _, s := range stats {
+		byName[s.Name] = s
+	}
+
+	p1, ok := byName["pipeline-1"]
+	if !ok {
+		t.Fatal("expected pipeline-1 in stats")
+	}
+	if p1.Embedding.TotalTokens != 10 {
+		t.Errorf("expected pipeline-1 embedding total 10, got %d", p1.Embedding.TotalTokens)
+	}
+	if p1.Completion.TotalTokens != 75 {
+		t.Errorf("expected pipeline-1 completion total 75, got %d", p1.Completion.TotalTokens)
+	}
+
+	p2, ok := byName["pipeline-2"]
+	if !ok {
+		t.Fatal("expected pipeline-2 in stats")
+	}
+	if p2.Embedding.TotalTokens != 0 || p2.Completion.TotalTokens != 0 {
+		t.Errorf("expected pipeline-2 usage to be zero (never queried), got %+v", p2)
+	}
+}
+
 func TestManager_Get(t *testing.T) {
 	cfg := testConfig()
 	m := newTestManager(cfg)

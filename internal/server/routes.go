@@ -16,4 +16,5 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /v1/health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/pipelines", s.handleListPipelines)
 	s.mux.HandleFunc("POST /v1/pipelines/{name}", s.handlePipeline)
+	s.mux.HandleFunc("GET /v1/stats", s.handleStats)
 }

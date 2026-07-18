@@ -223,6 +223,19 @@ func (m *Manager) Get(name string) (*Pipeline, error) {
 	return p, nil
 }
 
+// Stats returns cumulative token usage for every pipeline.
+func (m *Manager) Stats() []Usage {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	stats := make([]Usage, 0, len(m.pipelines))
+	for _, p := range m.pipelines {
+		stats = append(stats, p.Usage())
+	}
+
+	return stats
+}
+
 // Execute runs a RAG query on the pipeline.
 func (p *Pipeline) Execute(ctx context.Context, query string) (*QueryResponse, error) {
 	return p.orchestrator.Execute(ctx, QueryRequest{
@@ -267,6 +280,17 @@ func (p *Pipeline) Name() string {
 // Description returns the pipeline description.
 func (p *Pipeline) Description() string {
 	return p.description
+}
+
+// Usage returns this pipeline's cumulative embedding and completion
+// token usage.
+func (p *Pipeline) Usage() Usage {
+	return Usage{
+		Name:        p.name,
+		Description: p.description,
+		Embedding:   p.embeddingProv.Usage(),
+		Completion:  p.completionProv.Usage(),
+	}
 }
 
 // Close releases resources associated with the pipeline.

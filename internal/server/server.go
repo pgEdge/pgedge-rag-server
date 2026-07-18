@@ -27,6 +27,7 @@ import (
 type PipelineManager interface {
 	List() []pipeline.Info
 	Get(name string) (*pipeline.Pipeline, error)
+	Stats() []pipeline.Usage
 	Close() error
 }
 
