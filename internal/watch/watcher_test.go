@@ -183,6 +183,25 @@ func TestWatcher_Debounce(t *testing.T) {
 	}
 }
 
+// mustWriteFile writes content to path, failing the test on error.
+func mustWriteFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitOrFail blocks until ch is received from (or closed) or timeout
+// elapses, failing the test with msg in the latter case.
+func waitOrFail(t *testing.T, ch <-chan struct{}, timeout time.Duration, msg string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(timeout):
+		t.Fatal(msg)
+	}
+}
+
 // TestWatcher_SlowOnChangeDoesNotBlockEventLoop is a regression test for
 // a CodeRabbit finding: onChange used to run inline in Start's select
 // loop, so a slow onChange (e.g. rebuilding pipelines) would prevent
@@ -193,9 +212,7 @@ func TestWatcher_Debounce(t *testing.T) {
 func TestWatcher_SlowOnChangeDoesNotBlockEventLoop(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(path, []byte("v1"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustWriteFile(t, path, "v1")
 
 	var callCount atomic.Int32
 	started := make(chan struct{}, 10)
@@ -223,23 +240,15 @@ func TestWatcher_SlowOnChangeDoesNotBlockEventLoop(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Trigger the first (slow, blocking) reload.
-	if err := os.WriteFile(path, []byte("v2"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("onChange never started")
-	}
+	mustWriteFile(t, path, "v2")
+	waitOrFail(t, started, 2*time.Second, "onChange never started")
 
 	// onChange is now blocked. While it's blocked, fire several more
 	// changes: they must coalesce (thanks to the buffered trigger)
 	// rather than piling up, and the event loop must keep observing
 	// them without waiting for onChange to return.
 	for i := 0; i < 5; i++ {
-		if err := os.WriteFile(path, []byte("v"+string(rune('3'+i))), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		mustWriteFile(t, path, "v"+string(rune('3'+i)))
 		time.Sleep(30 * time.Millisecond)
 	}
 
@@ -248,12 +257,8 @@ func TestWatcher_SlowOnChangeDoesNotBlockEventLoop(t *testing.T) {
 	cancelStart := time.Now()
 	cancel()
 
-	select {
-	case <-startDone:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("Start did not return promptly after ctx cancellation; " +
-			"event loop appears blocked on a slow onChange")
-	}
+	waitOrFail(t, startDone, 500*time.Millisecond, "Start did not return promptly after ctx "+
+		"cancellation; event loop appears blocked on a slow onChange")
 	if elapsed := time.Since(cancelStart); elapsed > 400*time.Millisecond {
 		t.Errorf("Start took %v to return after cancellation; expected a near-immediate return", elapsed)
 	}

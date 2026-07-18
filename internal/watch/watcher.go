@@ -105,9 +105,7 @@ func (w *Watcher) Start(ctx context.Context) {
 	var timerC <-chan time.Time
 
 	resetDebounce := func() {
-		if timer != nil {
-			timer.Stop()
-		}
+		stopTimer(timer)
 		timer = time.NewTimer(w.debounce)
 		timerC = timer.C
 	}
@@ -115,9 +113,7 @@ func (w *Watcher) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			if timer != nil {
-				timer.Stop()
-			}
+			stopTimer(timer)
 			return
 
 		case event, ok := <-w.fsw.Events:
@@ -136,14 +132,27 @@ func (w *Watcher) Start(ctx context.Context) {
 
 		case <-timerC:
 			timerC = nil
-			select {
-			case w.reloadTrigger <- struct{}{}:
-			default:
-				// A reload is already pending or running; it will
-				// observe this change too since reloadWorker only
-				// dequeues once it starts the next onChange call.
-			}
+			w.triggerReload()
 		}
+	}
+}
+
+// stopTimer stops t if it was started. A no-op for a nil timer, which
+// happens the first time Start's debounce case runs.
+func stopTimer(t *time.Timer) {
+	if t != nil {
+		t.Stop()
+	}
+}
+
+// triggerReload hands a debounced change notification to reloadWorker
+// without blocking. If one is already pending or being processed, this
+// is a no-op: reloadWorker only dequeues once it starts the next
+// onChange call, so the pending notification already covers this change.
+func (w *Watcher) triggerReload() {
+	select {
+	case w.reloadTrigger <- struct{}{}:
+	default:
 	}
 }
 
