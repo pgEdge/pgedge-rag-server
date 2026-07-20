@@ -280,6 +280,12 @@ func (o *Orchestrator) search(
 	for _, table := range o.cfg.Tables {
 		if o.dbPool == nil {
 			o.logger.Warn("no database pool configured", "table", table.Table)
+			// A missing pool means this table cannot be searched at all,
+			// which is an infrastructure failure rather than a legitimate
+			// empty result — mark it so a total absence of a usable pool
+			// surfaces as an error instead of a false "no relevant
+			// information" response (issue #25).
+			hadError = true
 			continue
 		}
 
