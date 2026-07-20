@@ -219,6 +219,9 @@ func (l *APIKeyLoader) LoadKeysForPipeline(pipeline Pipeline) (*LoadedKeys, erro
 	// Determine which providers are needed for this pipeline
 	needed[strings.ToLower(pipeline.EmbeddingLLM.Provider)] = true
 	needed[strings.ToLower(pipeline.RAGLLM.Provider)] = true
+	if pipeline.Rerank.Provider != "" {
+		needed[strings.ToLower(pipeline.Rerank.Provider)] = true
+	}
 
 	// Load required keys
 	if needed["anthropic"] {

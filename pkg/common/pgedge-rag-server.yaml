@@ -55,6 +55,14 @@ pipelines:
       # Results below this score are filtered out before reaching the LLM.
       # Helps prevent hallucinated answers for unrelated queries.
       # min_similarity: 0.5
+    # Reranking configuration (optional)
+    # Reorders search results by relevance immediately before context
+    # building. Only Voyage currently supports reranking.
+    # rerank:
+    #   provider: "voyage"
+    #   model: "rerank-2"
+    #   # Optional: keep only the top-K reranked results
+    #   # top_k: 5
     system_prompt: |
       You are Ellie, a friendly pgEdge documentation assistant.
       Always start your response with "Hi! I'm Ellie."

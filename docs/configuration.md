@@ -525,6 +525,65 @@ By default, `min_similarity` is not set (disabled), so all
 results returned by the vector search are used. This preserves
 backward compatibility with existing configurations.
 
+### Reranking
+
+The `rerank` section adds an optional stage that reorders retrieved
+results by relevance to the query, immediately before context
+building. It runs after hybrid search and before the results are
+truncated to fit the token budget, so a good reranker can surface the
+most relevant documents even when the initial vector/BM25 ranking put
+them further down the list.
+
+Reranking is disabled by default. Leaving `rerank.provider` unset (or
+omitting the `rerank` section entirely) skips the stage — the
+pipeline behaves exactly as it did before this section existed.
+
+```yaml
+pipelines:
+  - name: "my-docs"
+    # ... other config ...
+    rerank:
+      provider: "voyage"
+      model: "rerank-2"
+      top_k: 5
+```
+
+| Field                 | Description                                       | Default    |
+|-----------------------|----------------------------------------------------|------------|
+| `provider`            | Rerank provider; currently only `voyage`          | (disabled) |
+| `model`               | Provider's rerank model name                      | (none)     |
+| `top_k`               | Keep only the top-K reranked results              | (all kept) |
+| `base_url`            | Optional custom base URL                          | (none)     |
+| `headers`             | Optional per-request headers                      | (none)     |
+| `request_timeout`     | Overall request timeout (e.g. `"30s"`)            | `120s`     |
+| `per_attempt_timeout` | Per-attempt timeout, so a slow rerank call retries rather than burning the whole request budget | (disabled) |
+
+Only providers that actually implement reranking may be configured.
+At present that is Voyage only — configuring any other provider is
+rejected at startup with a validation error naming the field.
+
+`top_k`, when set, asks the provider to return only its top-K most
+relevant results, so fewer (but higher-quality) documents reach the
+token-budget and context-building step. Leaving it unset reorders all
+retrieved results without dropping any.
+
+If the rerank call itself fails (timeout, provider error), the
+pipeline logs a warning and falls back to the original hybrid-search
+order rather than failing the whole query — a reranking failure only
+degrades result ordering, since retrieval already succeeded.
+
+**Set `request_timeout` (and/or `per_attempt_timeout`) explicitly.**
+Without them, a rerank call that keeps failing is retried by the
+underlying HTTP client (5 attempts by default, with exponential
+backoff) before giving up — which can consume the server's *entire*
+per-query timeout budget. In that case the graceful fallback above
+never gets a chance to run, because the whole query has already timed
+out by the time the rerank call finally gives up. Setting
+`request_timeout` on the `rerank` block to a value well below the
+server's overall request timeout ensures a rerank outage degrades
+quickly (original order, fast response) instead of timing out the
+whole query.
+
 
 ## Multi-Host Connections
 

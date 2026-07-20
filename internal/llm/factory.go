@@ -181,3 +181,37 @@ func NewCompletionClient(
 		return nil, fmt.Errorf("unknown completion provider: %s", provider)
 	}
 }
+
+// NewRerankClient builds an llm.Client for reranking. The factory
+// rejects every provider except Voyage: it is currently the only
+// provider in pgedge-go-llm-lib whose Rerank implementation is not a
+// stub, so rejecting the others at construction time (rather than
+// deferring to their runtime ErrNotSupported) matches how
+// NewEmbeddingClient/NewCompletionClient already reject providers that
+// don't support the capability being requested.
+func NewRerankClient(
+	provider, model, baseURL string,
+	headers map[string]string,
+	keys *config.LoadedKeys,
+	opts ...ClientOption,
+) (llmlib.Client, error) {
+	if keys == nil {
+		keys = &config.LoadedKeys{}
+	}
+	p := strings.ToLower(provider)
+
+	switch p {
+	case ProviderVoyage:
+		if keys.Voyage == "" {
+			return nil, fmt.Errorf("Voyage API key not configured")
+		}
+		return llmlib.NewClient(p, withOptions(llmlib.Options{
+			APIKey:        keys.Voyage,
+			Model:         model,
+			BaseURL:       baseURL,
+			CustomHeaders: headers,
+		}, opts))
+	default:
+		return nil, fmt.Errorf("provider %s does not support reranking", provider)
+	}
+}

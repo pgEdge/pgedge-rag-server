@@ -153,6 +153,26 @@ func (m *Manager) createPipeline(
 		return nil, fmt.Errorf("failed to create completion client: %w", err)
 	}
 
+	// Create rerank client (optional; disabled unless a provider is
+	// configured for this pipeline's rerank stage).
+	var reranker Reranker
+	if pCfg.Rerank.Provider != "" {
+		rerankHeaders := mergeHeaders(pCfg.LLMHeaders, pCfg.Rerank.Headers)
+		reranker, err = ragllm.NewRerankClient(
+			pCfg.Rerank.Provider,
+			pCfg.Rerank.Model,
+			pCfg.Rerank.BaseURL,
+			rerankHeaders,
+			apiKeys,
+			ragllm.WithRequestTimeout(pCfg.Rerank.RequestTimeout.Std()),
+			ragllm.WithPerAttemptTimeout(pCfg.Rerank.PerAttemptTimeout.Std()),
+		)
+		if err != nil {
+			dbPool.Close()
+			return nil, fmt.Errorf("failed to create rerank client: %w", err)
+		}
+	}
+
 	// Determine token budget: pipeline > global defaults > hardcoded default
 	tokenBudget := DefaultTokenBudget
 	if m.config.Defaults.TokenBudget > 0 {
@@ -177,6 +197,8 @@ func (m *Manager) createPipeline(
 		DBPool:         dbPool,
 		EmbeddingProv:  embeddingProv,
 		CompletionProv: completionProv,
+		Reranker:       reranker,
+		RerankTopK:     pCfg.Rerank.TopK,
 		TokenBudget:    tokenBudget,
 		TopN:           topN,
 		Logger:         pipelineLogger,

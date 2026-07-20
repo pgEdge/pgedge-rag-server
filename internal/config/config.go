@@ -110,6 +110,7 @@ type Pipeline struct {
 	TopN         int               `yaml:"top_n"`
 	SystemPrompt string            `yaml:"system_prompt"` // Custom system prompt for LLM
 	Search       SearchConfig      `yaml:"search"`        // Search behavior settings
+	Rerank       RerankConfig      `yaml:"rerank"`        // Optional reranking stage
 	LLMHeaders   map[string]string `yaml:"llm_headers"`   // Pipeline-level headers for LLM calls
 }
 
@@ -154,6 +155,28 @@ type SearchConfig struct {
 	HybridEnabled *bool    `yaml:"hybrid_enabled"` // Enable hybrid search (default: true)
 	VectorWeight  *float64 `yaml:"vector_weight"`  // Weight for vector vs BM25 (default: 0.5)
 	MinSimilarity *float64 `yaml:"min_similarity"` // Minimum cosine similarity threshold (0.0-1.0)
+}
+
+// RerankConfig contains settings for an optional reranking stage that
+// reorders search results by relevance to the query immediately before
+// context building. Leaving Provider empty (the default) disables the
+// stage entirely. Only providers whose llm.Client.Rerank is actually
+// implemented may be configured here (currently Voyage).
+type RerankConfig struct {
+	Provider string            `yaml:"provider"`
+	Model    string            `yaml:"model"`
+	BaseURL  string            `yaml:"base_url"` // Optional custom base URL
+	Headers  map[string]string `yaml:"headers"`  // Per-rerank-call custom headers
+
+	// RequestTimeout / PerAttemptTimeout behave as documented on
+	// LLMConfig's fields of the same name.
+	RequestTimeout    Duration `yaml:"request_timeout"`
+	PerAttemptTimeout Duration `yaml:"per_attempt_timeout"`
+
+	// TopK, when > 0, keeps only the top-K reranked results and
+	// discards the rest before context building. Zero (the default)
+	// reorders all retrieved results without dropping any.
+	TopK int `yaml:"top_k"`
 }
 
 // FilterCondition represents a single filter condition.

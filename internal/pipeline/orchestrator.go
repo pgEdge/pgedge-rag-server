@@ -31,6 +31,8 @@ type Orchestrator struct {
 	dbPool         *database.Pool
 	embeddingProv  Embedder
 	completionProv Completer
+	reranker       Reranker
+	rerankTopK     int
 	bm25Index      *bm25.Index
 	tokenBudget    int
 	topN           int
@@ -43,6 +45,8 @@ type OrchestratorConfig struct {
 	DBPool         *database.Pool
 	EmbeddingProv  Embedder
 	CompletionProv Completer
+	Reranker       Reranker // Optional; nil disables the rerank stage
+	RerankTopK     int
 	TokenBudget    int
 	TopN           int
 	Logger         *slog.Logger
@@ -60,6 +64,8 @@ func NewOrchestrator(cfg OrchestratorConfig) *Orchestrator {
 		dbPool:         cfg.DBPool,
 		embeddingProv:  cfg.EmbeddingProv,
 		completionProv: cfg.CompletionProv,
+		reranker:       cfg.Reranker,
+		rerankTopK:     cfg.RerankTopK,
 		bm25Index:      bm25.NewIndex(),
 		tokenBudget:    cfg.TokenBudget,
 		topN:           cfg.TopN,
@@ -92,6 +98,8 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 			TokensUsed: 0,
 		}, nil
 	}
+
+	results = o.rerank(ctx, req.Query, results)
 
 	contextDocs := o.buildContext(results)
 
@@ -150,6 +158,8 @@ func (o *Orchestrator) ExecuteStream(
 			}
 			return
 		}
+
+		results = o.rerank(ctx, req.Query, results)
 
 		contextDocs := o.buildContext(results)
 		chatReq := o.buildChatRequest(req, contextDocs)
@@ -332,6 +342,60 @@ func (o *Orchestrator) search(
 	}
 
 	return o.deduplicateResults(allResults, topN), nil
+}
+
+// rerank reorders results by relevance to the query using the
+// configured reranking provider, if any (issue #22). A nil reranker or
+// an empty result set is a no-op. A reranking failure only degrades
+// ordering — the underlying retrieval already succeeded — so it is
+// logged and the original results are returned unchanged rather than
+// failing the whole request.
+func (o *Orchestrator) rerank(
+	ctx context.Context,
+	query string,
+	results []database.SearchResult,
+) []database.SearchResult {
+	if o.reranker == nil || len(results) == 0 {
+		return results
+	}
+
+	docs := make([]string, len(results))
+	for i, r := range results {
+		docs[i] = r.Content
+	}
+
+	var topK *int
+	if k := o.rerankTopK; k > 0 && k < len(results) {
+		topK = &k
+	}
+
+	resp, err := o.reranker.Rerank(ctx, llmlib.RerankRequest{
+		Query:     query,
+		Documents: docs,
+		TopK:      topK,
+	})
+	if err != nil {
+		o.logger.Warn("rerank failed, falling back to original order", "error", err)
+		return results
+	}
+
+	reranked := make([]database.SearchResult, 0, len(resp.Results))
+	for _, res := range resp.Results {
+		if res.Index < 0 || res.Index >= len(results) {
+			o.logger.Warn("rerank result index out of range, skipping", "index", res.Index)
+			continue
+		}
+		// Score is documented (OpenAPI) as "relevance score"; once the
+		// reranker has judged relevance, its score is what that field
+		// means going forward. Leaving the original retrieval score in
+		// place would show API consumers a "sources" list that looks
+		// unsorted by its own score field, since order now reflects the
+		// reranker's judgment rather than the original one.
+		promoted := results[res.Index]
+		promoted.Score = res.RelevanceScore
+		reranked = append(reranked, promoted)
+	}
+	return reranked
 }
 
 // buildChatRequest converts the QueryRequest + retrieved context into

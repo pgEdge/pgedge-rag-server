@@ -29,3 +29,10 @@ type Completer interface {
 	Chat(ctx context.Context, req llmlib.ChatRequest) (*llmlib.ChatResponse, error)
 	ChatStream(ctx context.Context, req llmlib.ChatRequest) (*llmlib.Stream, error)
 }
+
+// Reranker is the narrow interface the orchestrator needs from a
+// rerank-capable LLM client. The lib's llm.Client satisfies it
+// structurally; orchestrator tests provide a one-method mock.
+type Reranker interface {
+	Rerank(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error)
+}
