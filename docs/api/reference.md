@@ -42,7 +42,8 @@ request/response schemas, and error formats.
 
 ### Health Check
 
-Check if the server is running and healthy.
+Check if the server is running, and whether each pipeline's embedding
+and completion providers are reachable.
 
 ```
 GET /v1/health
@@ -52,13 +53,51 @@ GET /v1/health
 
 ```json
 {
-  "status": "healthy"
+  "status": "healthy",
+  "pipelines": [
+    {
+      "name": "my-docs",
+      "embedding": { "reachable": true },
+      "completion": { "reachable": true }
+    }
+  ]
 }
 ```
 
-| Status Code | Description        |
-|-------------|--------------------|
-| 200         | Server is healthy  |
+If a provider is unreachable, `status` becomes `"degraded"` and the
+affected provider's entry includes an `error`:
+
+```json
+{
+  "status": "degraded",
+  "pipelines": [
+    {
+      "name": "my-docs",
+      "embedding": { "reachable": true },
+      "completion": {
+        "reachable": false,
+        "error": "connection refused"
+      }
+    }
+  ]
+}
+```
+
+An unreachable provider does not change the HTTP status code — it
+only degrades `status` in the body, so callers that just check for
+HTTP 200 are unaffected.
+
+**Known cost caveat:** connectivity is checked via the underlying
+library's `Ping`, which is a free metadata call for OpenAI, Anthropic,
+Gemini, and Ollama. For **Voyage**, `Ping` makes a real (tiny) embedding
+request instead, since Voyage has no models-list endpoint. If a
+pipeline's `embedding_llm.provider` is `voyage`, each `/v1/health` call
+consumes a small amount of real Voyage API usage — worth accounting
+for if health checks run frequently (e.g. a Kubernetes liveness probe).
+
+| Status Code | Description                             |
+|-------------|------------------------------------------|
+| 200         | Server is running (see `status` in body) |
 
 ---
 

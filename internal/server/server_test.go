@@ -31,6 +31,9 @@ type mockPipelineManager struct {
 type mockPipelineInfo struct {
 	name        string
 	description string
+	// health, when non-nil, is returned verbatim by Health for this
+	// pipeline. Nil means "reachable", matching the default healthy case.
+	health *pipeline.PipelineHealth
 }
 
 func newMockPipelineManager() *mockPipelineManager {
@@ -62,6 +65,22 @@ func (m *mockPipelineManager) Get(name string) (*pipeline.Pipeline, error) {
 	// Return nil pipeline - tests that need a real pipeline should use
 	// a different approach
 	return nil, nil
+}
+
+func (m *mockPipelineManager) Health(ctx context.Context) []pipeline.PipelineHealth {
+	results := make([]pipeline.PipelineHealth, 0, len(m.pipelines))
+	for _, p := range m.pipelines {
+		if p.health != nil {
+			results = append(results, *p.health)
+			continue
+		}
+		results = append(results, pipeline.PipelineHealth{
+			Name:       p.name,
+			Embedding:  pipeline.ProviderHealth{Reachable: true},
+			Completion: pipeline.ProviderHealth{Reachable: true},
+		})
+	}
+	return results
 }
 
 func (m *mockPipelineManager) Close() error {
@@ -108,6 +127,56 @@ func TestHealthEndpoint(t *testing.T) {
 
 	if resp.Status != "healthy" {
 		t.Errorf("expected status 'healthy', got '%s'", resp.Status)
+	}
+
+	if len(resp.Pipelines) != 1 {
+		t.Fatalf("expected 1 pipeline in health response, got %d", len(resp.Pipelines))
+	}
+	got := resp.Pipelines[0]
+	if got.Name != "test-pipeline" {
+		t.Errorf("expected pipeline name 'test-pipeline', got '%s'", got.Name)
+	}
+	if !got.Embedding.Reachable || !got.Completion.Reachable {
+		t.Errorf("expected both providers reachable, got %+v", got)
+	}
+}
+
+// TestHealthEndpoint_DegradedWhenProviderUnreachable is a regression
+// test for issue #23: an unreachable provider must degrade the
+// reported status and surface its error, while still returning HTTP
+// 200 so basic uptime checks aren't broken by a provider outage.
+func TestHealthEndpoint_DegradedWhenProviderUnreachable(t *testing.T) {
+	cfg := testConfig()
+	pm := newMockPipelineManager()
+	pm.pipelines["test-pipeline"].health = &pipeline.PipelineHealth{
+		Name:       "test-pipeline",
+		Embedding:  pipeline.ProviderHealth{Reachable: true},
+		Completion: pipeline.ProviderHealth{Reachable: false, Error: "connection refused"},
+	}
+	srv := New(cfg, pm, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+	w := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d even when a provider is unreachable, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp HealthResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Status != "degraded" {
+		t.Errorf("expected status 'degraded', got '%s'", resp.Status)
+	}
+	if len(resp.Pipelines) != 1 {
+		t.Fatalf("expected 1 pipeline in health response, got %d", len(resp.Pipelines))
+	}
+	if resp.Pipelines[0].Completion.Error != "connection refused" {
+		t.Errorf("expected completion error 'connection refused', got %q", resp.Pipelines[0].Completion.Error)
 	}
 }
 

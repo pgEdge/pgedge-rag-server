@@ -21,7 +21,8 @@ import (
 
 // HealthResponse is the response for the health check endpoint.
 type HealthResponse struct {
-	Status string `json:"status"`
+	Status    string                    `json:"status"`
+	Pipelines []pipeline.PipelineHealth `json:"pipelines,omitempty"`
 }
 
 // PipelinesResponse is the response for the list pipelines endpoint.
@@ -54,9 +55,24 @@ func isRequestTimeout(ctx context.Context) bool {
 	return errors.Is(ctx.Err(), context.DeadlineExceeded)
 }
 
-// handleHealth handles the GET /health endpoint.
+// handleHealth handles the GET /health endpoint. It reports the server
+// process as healthy unconditionally, and additionally pings every
+// pipeline's LLM providers to surface connectivity problems in the
+// response body — see issue #23. A provider being unreachable does
+// not change the status code; it degrades "status" in the body so
+// callers that only check for HTTP 200 keep working.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, HealthResponse{Status: "healthy"})
+	pipelines := s.pipelines.Health(r.Context())
+
+	status := "healthy"
+	for _, p := range pipelines {
+		if !p.Embedding.Reachable || !p.Completion.Reachable {
+			status = "degraded"
+			break
+		}
+	}
+
+	s.respondJSON(w, http.StatusOK, HealthResponse{Status: status, Pipelines: pipelines})
 }
 
 // handleListPipelines handles the GET /pipelines endpoint.

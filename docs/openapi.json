@@ -15,7 +15,7 @@
     "/health": {
       "get": {
         "summary": "Health check",
-        "description": "Check if the server is running and healthy",
+        "description": "Check if the server is running, and whether each pipeline's LLM providers are reachable",
         "operationId": "getHealth",
         "tags": [
           "System"
@@ -229,9 +229,16 @@
       "HealthResponse": {
         "type": "object",
         "properties": {
+          "pipelines": {
+            "type": "array",
+            "description": "Per-pipeline provider connectivity",
+            "items": {
+              "$ref": "#/components/schemas/PipelineHealth"
+            }
+          },
           "status": {
             "type": "string",
-            "description": "Health status"
+            "description": "Overall health status: \"healthy\" or \"degraded\" (one or more providers unreachable). Always HTTP 200"
           }
         },
         "required": [
@@ -253,6 +260,28 @@
         "required": [
           "role",
           "content"
+        ]
+      },
+      "PipelineHealth": {
+        "type": "object",
+        "properties": {
+          "completion": {
+            "description": "Completion provider connectivity",
+            "$ref": "#/components/schemas/ProviderHealth"
+          },
+          "embedding": {
+            "description": "Embedding provider connectivity",
+            "$ref": "#/components/schemas/ProviderHealth"
+          },
+          "name": {
+            "type": "string",
+            "description": "Pipeline name"
+          }
+        },
+        "required": [
+          "name",
+          "embedding",
+          "completion"
         ]
       },
       "PipelineInfo": {
@@ -284,6 +313,22 @@
         },
         "required": [
           "pipelines"
+        ]
+      },
+      "ProviderHealth": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error message if unreachable"
+          },
+          "reachable": {
+            "type": "boolean",
+            "description": "Whether the provider responded to a connectivity check"
+          }
+        },
+        "required": [
+          "reachable"
         ]
       },
       "QueryRequest": {

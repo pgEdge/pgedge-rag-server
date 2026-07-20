@@ -13,7 +13,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"testing"
+	"time"
 
 	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
 
@@ -194,6 +196,115 @@ func TestManager_List(t *testing.T) {
 	}
 	if !names["pipeline-2"] {
 		t.Error("expected pipeline-2 in list")
+	}
+}
+
+// TestManager_Health is a regression test for issue #23: the manager
+// must report per-pipeline provider connectivity, and one pipeline's
+// unreachable provider must not affect another's reported health.
+func TestManager_Health(t *testing.T) {
+	cfg := testConfig()
+	m := newTestManager(cfg)
+	defer func() { _ = m.Close() }()
+
+	m.pipelines["pipeline-1"].completionProv.(*MockCompleter).PingFunc =
+		func(ctx context.Context) error { return errors.New("connection refused") }
+
+	results := m.Health(context.Background())
+	if len(results) != 2 {
+		t.Fatalf("expected 2 pipelines in health results, got %d", len(results))
+	}
+
+	byName := make(map[string]PipelineHealth)
+	for _, r := range results {
+		byName[r.Name] = r
+	}
+
+	p1, ok := byName["pipeline-1"]
+	if !ok {
+		t.Fatal("expected pipeline-1 in health results")
+	}
+	assertProviderHealth(t, "pipeline-1 embedding", p1.Embedding, true, "")
+	assertProviderHealth(t, "pipeline-1 completion", p1.Completion, false, "connection refused")
+
+	p2, ok := byName["pipeline-2"]
+	if !ok {
+		t.Fatal("expected pipeline-2 in health results")
+	}
+	assertProviderHealth(t, "pipeline-2 embedding", p2.Embedding, true, "")
+	assertProviderHealth(t, "pipeline-2 completion", p2.Completion, true, "")
+}
+
+// assertProviderHealth checks a ProviderHealth's reachability and
+// error message against the expected values.
+func assertProviderHealth(t *testing.T, label string, got ProviderHealth, wantReachable bool, wantErr string) {
+	t.Helper()
+
+	if got.Reachable != wantReachable {
+		t.Errorf("%s: expected reachable=%v, got %v", label, wantReachable, got.Reachable)
+	}
+	if got.Error != wantErr {
+		t.Errorf("%s: expected error %q, got %q", label, wantErr, got.Error)
+	}
+}
+
+// TestPipeline_Ping_ChecksProvidersConcurrently is a regression test:
+// Ping used to check the embedding and completion providers
+// sequentially, so two slow/unreachable providers would add their
+// timeouts together instead of overlapping. It proves concurrency
+// directly (both pings must start within a tight window of each
+// other) rather than timing the real DefaultPingTimeout, so it stays
+// fast regardless of that constant's value.
+func TestPipeline_Ping_ChecksProvidersConcurrently(t *testing.T) {
+	var mu sync.Mutex
+	var embedStart, completionStart time.Time
+	release := make(chan struct{})
+
+	p := &Pipeline{
+		name: "test-pipeline",
+		embeddingProv: &MockEmbedder{
+			PingFunc: func(ctx context.Context) error {
+				mu.Lock()
+				embedStart = time.Now()
+				mu.Unlock()
+				<-release
+				return nil
+			},
+		},
+		completionProv: &MockCompleter{
+			PingFunc: func(ctx context.Context) error {
+				mu.Lock()
+				completionStart = time.Now()
+				mu.Unlock()
+				<-release
+				return nil
+			},
+		},
+	}
+
+	done := make(chan PipelineHealth, 1)
+	go func() { done <- p.Ping(context.Background()) }()
+
+	// Give both goroutines a moment to reach PingFunc and record their
+	// start time, then release them together.
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Ping did not return after providers were released")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if embedStart.IsZero() || completionStart.IsZero() {
+		t.Fatal("expected both providers' Ping to have been invoked")
+	}
+	if gap := embedStart.Sub(completionStart).Abs(); gap > 50*time.Millisecond {
+		t.Errorf("expected both provider pings to start concurrently, got a %v gap "+
+			"(sequential pinging would show completion starting only after "+
+			"embedding's ping returns)", gap)
 	}
 }
 

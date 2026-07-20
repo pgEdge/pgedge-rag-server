@@ -17,6 +17,16 @@ and this project adheres to
   a slow upstream (for example a heavy embedding batch) retryable rather
   than consuming the whole request budget in one attempt.
 
+- `GET /v1/health` now pings every pipeline's embedding and completion
+  providers and reports per-pipeline connectivity in the response
+  body. All providers for all pipelines are checked concurrently, so
+  the check takes roughly one provider timeout regardless of how many
+  pipelines are configured. An unreachable provider degrades the
+  reported `status` to `"degraded"` but does not change the HTTP
+  status code, so existing uptime checks that only look at HTTP 200
+  keep working
+  ([#23](https://github.com/pgEdge/pgedge-rag-server/issues/23)).
+
 ### Fixed
 
 - Vector search now selects the configured `id_column`, so vector

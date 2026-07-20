@@ -129,7 +129,7 @@ func BuildOpenAPISpec() OpenAPISpec {
 			"/health": {
 				Get: &OpenAPIOperation{
 					Summary:     "Health check",
-					Description: "Check if the server is running and healthy",
+					Description: "Check if the server is running, and whether each pipeline's LLM providers are reachable",
 					OperationID: "getHealth",
 					Tags:        []string{"System"},
 					Responses: map[string]OpenAPIResponse{
@@ -252,10 +252,49 @@ func BuildOpenAPISpec() OpenAPISpec {
 					Properties: map[string]OpenAPISchema{
 						"status": {
 							Type:        "string",
-							Description: "Health status",
+							Description: "Overall health status: \"healthy\" or \"degraded\" (one or more providers unreachable). Always HTTP 200",
+						},
+						"pipelines": {
+							Type:        "array",
+							Description: "Per-pipeline provider connectivity",
+							Items: &OpenAPISchema{
+								Ref: "#/components/schemas/PipelineHealth",
+							},
 						},
 					},
 					Required: []string{"status"},
+				},
+				"PipelineHealth": {
+					Type: "object",
+					Properties: map[string]OpenAPISchema{
+						"name": {
+							Type:        "string",
+							Description: "Pipeline name",
+						},
+						"embedding": {
+							Ref:         "#/components/schemas/ProviderHealth",
+							Description: "Embedding provider connectivity",
+						},
+						"completion": {
+							Ref:         "#/components/schemas/ProviderHealth",
+							Description: "Completion provider connectivity",
+						},
+					},
+					Required: []string{"name", "embedding", "completion"},
+				},
+				"ProviderHealth": {
+					Type: "object",
+					Properties: map[string]OpenAPISchema{
+						"reachable": {
+							Type:        "boolean",
+							Description: "Whether the provider responded to a connectivity check",
+						},
+						"error": {
+							Type:        "string",
+							Description: "Error message if unreachable",
+						},
+					},
+					Required: []string{"reachable"},
 				},
 				"PipelinesResponse": {
 					Type: "object",

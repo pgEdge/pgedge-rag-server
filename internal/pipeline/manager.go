@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"net/textproto"
 	"sync"
+	"time"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 	"github.com/pgEdge/pgedge-rag-server/internal/database"
@@ -223,6 +224,32 @@ func (m *Manager) Get(name string) (*Pipeline, error) {
 	return p, nil
 }
 
+// Health checks connectivity for every pipeline's providers
+// concurrently, each bounded by DefaultPingTimeout, so the total call
+// takes roughly one ping's worth of time regardless of how many
+// pipelines are configured.
+func (m *Manager) Health(ctx context.Context) []PipelineHealth {
+	m.mu.RLock()
+	pipelines := make([]*Pipeline, 0, len(m.pipelines))
+	for _, p := range m.pipelines {
+		pipelines = append(pipelines, p)
+	}
+	m.mu.RUnlock()
+
+	results := make([]PipelineHealth, len(pipelines))
+	var wg sync.WaitGroup
+	for i, p := range pipelines {
+		wg.Add(1)
+		go func(i int, p *Pipeline) {
+			defer wg.Done()
+			results[i] = p.Ping(ctx)
+		}(i, p)
+	}
+	wg.Wait()
+
+	return results
+}
+
 // Execute runs a RAG query on the pipeline.
 func (p *Pipeline) Execute(ctx context.Context, query string) (*QueryResponse, error) {
 	return p.orchestrator.Execute(ctx, QueryRequest{
@@ -267,6 +294,49 @@ func (p *Pipeline) Name() string {
 // Description returns the pipeline description.
 func (p *Pipeline) Description() string {
 	return p.description
+}
+
+// DefaultPingTimeout bounds how long a single provider's connectivity
+// check is allowed to take before Ping reports it unreachable.
+const DefaultPingTimeout = 3 * time.Second
+
+// Ping checks connectivity for this pipeline's embedding and
+// completion providers concurrently, each bounded by
+// DefaultPingTimeout, so a slow or unreachable provider on one side
+// doesn't add its timeout on top of the other's.
+func (p *Pipeline) Ping(ctx context.Context) PipelineHealth {
+	var embedding, completion ProviderHealth
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		embedding = pingProvider(ctx, p.embeddingProv.Ping)
+	}()
+	go func() {
+		defer wg.Done()
+		completion = pingProvider(ctx, p.completionProv.Ping)
+	}()
+	wg.Wait()
+
+	return PipelineHealth{
+		Name:       p.name,
+		Embedding:  embedding,
+		Completion: completion,
+	}
+}
+
+// pingProvider runs ping with a DefaultPingTimeout deadline and
+// converts the result into a ProviderHealth.
+func pingProvider(ctx context.Context, ping func(context.Context) error) ProviderHealth {
+	pingCtx, cancel := context.WithTimeout(ctx, DefaultPingTimeout)
+	defer cancel()
+
+	if err := ping(pingCtx); err != nil {
+		return ProviderHealth{Reachable: false, Error: err.Error()}
+	}
+
+	return ProviderHealth{Reachable: true}
 }
 
 // Close releases resources associated with the pipeline.
