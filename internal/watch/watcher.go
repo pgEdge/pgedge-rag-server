@@ -99,7 +99,13 @@ func New(paths []string, debounce time.Duration, onChange func(), logger *slog.L
 // Start runs the watch loop until ctx is canceled. Intended to be run in
 // its own goroutine.
 func (w *Watcher) Start(ctx context.Context) {
-	go w.reloadWorker(ctx)
+	// Scope the worker to this Start invocation: cancelling workerCtx
+	// when Start returns (whether from ctx cancellation or the fsnotify
+	// channels closing on Close) guarantees the worker cannot outlive the
+	// event loop and fire a reload during shutdown.
+	workerCtx, stopWorker := context.WithCancel(ctx)
+	defer stopWorker()
+	go w.reloadWorker(workerCtx)
 
 	var timer *time.Timer
 	var timerC <-chan time.Time
@@ -165,6 +171,12 @@ func (w *Watcher) reloadWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-w.reloadTrigger:
+			// A trigger and ctx cancellation can both be ready at once;
+			// select picks at random, so recheck before running onChange
+			// to avoid a reload firing during shutdown.
+			if ctx.Err() != nil {
+				return
+			}
 			w.onChange()
 		}
 	}

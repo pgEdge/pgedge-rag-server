@@ -272,3 +272,40 @@ func TestWatcher_SlowOnChangeDoesNotBlockEventLoop(t *testing.T) {
 		t.Errorf("expected 1 or 2 onChange calls (1 in-flight + at most 1 coalesced), got %d", got)
 	}
 }
+
+// TestWatcher_NoReloadAfterCancel is a regression test for a CodeRabbit
+// finding: a pending reload trigger and context cancellation can both be
+// ready when reloadWorker selects, and select picks at random, so without
+// a cancellation recheck before onChange a reload could fire during
+// shutdown. reloadWorker must never invoke onChange once its context is
+// done, however the race resolves. The loop defeats the random select:
+// with the recheck in place onChange fires zero times, whereas without it
+// a pending trigger would win roughly half the iterations.
+func TestWatcher_NoReloadAfterCancel(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	mustWriteFile(t, path, "v1")
+
+	var callCount atomic.Int32
+	w, err := New([]string{path}, 50*time.Millisecond, func() { callCount.Add(1) }, nil)
+	if err != nil {
+		t.Fatalf("failed to create watcher: %v", err)
+	}
+	defer w.Close()
+
+	for i := 0; i < 200; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // ctx is already done before the worker runs
+
+		// Make a trigger pending too, so both arms of reloadWorker's
+		// select are ready at once.
+		w.triggerReload()
+
+		// Returns promptly because ctx is done; must not call onChange.
+		w.reloadWorker(ctx)
+	}
+
+	if got := callCount.Load(); got != 0 {
+		t.Errorf("expected 0 onChange calls once the context is cancelled, got %d", got)
+	}
+}
