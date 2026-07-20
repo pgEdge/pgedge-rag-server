@@ -31,13 +31,15 @@ type PipelineManager interface {
 	Close() error
 }
 
-// defaultRequestTimeout bounds how long a single pipeline query may run
+// DefaultRequestTimeout bounds how long a single pipeline query may run
 // (embedding + search + LLM call) before the server gives up and returns
 // a structured JSON timeout error. Kept comfortably below WriteTimeout so
 // there's time left to write that response before the connection-level
 // timeout would otherwise kill the connection with no body at all — see
-// issue #31.
-const defaultRequestTimeout = 50 * time.Second
+// issue #31. Exported so callers coordinating with the request lifetime
+// (e.g. how long a swapped-out pipeline manager must stay alive during a
+// hot-reload) can reference it rather than duplicating the value.
+const DefaultRequestTimeout = 50 * time.Second
 
 // Server is the HTTP server for the RAG API.
 type Server struct {
@@ -61,7 +63,7 @@ func New(cfg *config.Config, pm PipelineManager, logger *slog.Logger) *Server {
 		pipelines:      pm,
 		logger:         logger,
 		mux:            http.NewServeMux(),
-		requestTimeout: defaultRequestTimeout,
+		requestTimeout: DefaultRequestTimeout,
 	}
 
 	// Set up routes

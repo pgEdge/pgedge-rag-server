@@ -105,6 +105,15 @@ For more information, visit: https://github.com/pgEdge/pgedge-rag-server
 	}
 }
 
+// pipelineCloseGracePeriod is how long a swapped-out pipeline manager is
+// kept alive after a hot-reload before its database and LLM clients are
+// closed, so requests still using it can finish first. It sits above the
+// server's maximum request lifetime (a request is bounded by
+// server.DefaultRequestTimeout) plus a small margin for the response to
+// flush, so an in-flight request cannot outlive the manager it started
+// on — see issue #30.
+const pipelineCloseGracePeriod = server.DefaultRequestTimeout + 10*time.Second
+
 func run(configPath string, logger *slog.Logger) error {
 	// Resolve the config file path up front so it can also be watched
 	// for changes (config.Load re-resolves it internally too, but that's
@@ -171,9 +180,14 @@ func run(configPath string, logger *slog.Logger) error {
 		logger.Info("configuration reloaded", "pipelines", len(newCfg.Pipelines))
 
 		if oldPM != nil {
-			// Give in-flight requests using the old manager a chance to
-			// finish before closing its DB connections/LLM clients.
-			time.AfterFunc(10*time.Second, func() {
+			// Give in-flight requests using the old manager time to finish
+			// before closing its DB connections/LLM clients. The delay
+			// must exceed the server's maximum request lifetime so a query
+			// that started just before the swap cannot still be using the
+			// old manager when it's closed; deriving it from
+			// server.DefaultRequestTimeout keeps the two in step if that
+			// bound ever changes.
+			time.AfterFunc(pipelineCloseGracePeriod, func() {
 				if err := oldPM.Close(); err != nil {
 					logger.Warn("failed to close previous pipeline manager after reload", "error", err)
 				}

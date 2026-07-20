@@ -33,8 +33,10 @@ When a change is detected:
   changed — a rotated key used by one pipeline still causes every
   pipeline's connections to be recreated, not just that one.
 - Requests already in progress continue to use the previous
-  configuration until they finish; the previous database connections
-  and LLM clients are closed shortly afterward.
+  configuration until they finish. The previous database connections and
+  LLM clients are held open for a grace period that exceeds the maximum
+  request lifetime before being closed, so an in-flight request is not
+  cut off mid-query by a reload.
 - If the new configuration fails to load or validate (invalid YAML, an
   unreachable database, a missing required field), the reload is
   abandoned and an error is logged. The server keeps running on the
@@ -42,9 +44,16 @@ When a change is detected:
   server down.
 
 Only `pipelines` (and the `defaults` they inherit from) are affected.
-Server-level settings — `listen_address`, `port`, `tls`, and `cors` —
-are read once at startup and require a restart to change; the HTTP
-listener isn't rebound as part of a reload.
+Server-level settings, such as `listen_address`, `port`, `tls`, and
+`cors`, are read once at startup and require a restart to change; the
+HTTP listener isn't rebound as part of a reload.
+
+The set of files being watched is also fixed at startup: the
+configuration file plus whichever file-based API keys the initial
+configuration uses. Rotating one of those keys in place is picked up,
+but if a reload changes a pipeline to read its key from a different file
+location, that new location is not watched until the server is
+restarted.
 
 Reloads are debounced by a short interval, so a single logical change
 that produces several rapid filesystem events (as atomic replacement
