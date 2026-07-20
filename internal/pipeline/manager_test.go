@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -305,6 +306,37 @@ func TestPipeline_Ping_ChecksProvidersConcurrently(t *testing.T) {
 		t.Errorf("expected both provider pings to start concurrently, got a %v gap "+
 			"(sequential pinging would show completion starting only after "+
 			"embedding's ping returns)", gap)
+	}
+}
+
+// TestPipeline_Ping_RecoversFromProviderPanic is a regression test: a
+// panic inside a provider's Ping implementation used to crash the
+// whole process, since recoveryMiddleware's recover() only covers the
+// goroutine handling the HTTP request, not the separate goroutines
+// Pipeline.Ping spawns to run pings concurrently. A panicking Ping
+// must now be reported as unreachable instead of taking down the
+// server, and must not affect the other provider's own result.
+func TestPipeline_Ping_RecoversFromProviderPanic(t *testing.T) {
+	p := &Pipeline{
+		name: "test-pipeline",
+		embeddingProv: &MockEmbedder{
+			PingFunc: func(ctx context.Context) error {
+				panic("boom: simulated provider bug")
+			},
+		},
+		completionProv: &MockCompleter{},
+	}
+
+	result := p.Ping(context.Background())
+
+	if result.Embedding.Reachable {
+		t.Error("expected embedding to be unreachable after its Ping panicked")
+	}
+	if !strings.Contains(result.Embedding.Error, "boom: simulated provider bug") {
+		t.Errorf("expected panic message in error, got %q", result.Embedding.Error)
+	}
+	if !result.Completion.Reachable {
+		t.Error("expected completion to still be reachable (its own Ping never panicked)")
 	}
 }
 

@@ -327,8 +327,19 @@ func (p *Pipeline) Ping(ctx context.Context) PipelineHealth {
 }
 
 // pingProvider runs ping with a DefaultPingTimeout deadline and
-// converts the result into a ProviderHealth.
-func pingProvider(ctx context.Context, ping func(context.Context) error) ProviderHealth {
+// converts the result into a ProviderHealth. A panic from ping (e.g. a
+// buggy provider client) is recovered and reported as unreachable
+// rather than crashing the whole process: this runs inside goroutines
+// spawned by Pipeline.Ping/Manager.Health, and Go's panic/recover is
+// per-goroutine, so recoveryMiddleware's recover on the request
+// goroutine can't catch it.
+func pingProvider(ctx context.Context, ping func(context.Context) error) (health ProviderHealth) {
+	defer func() {
+		if r := recover(); r != nil {
+			health = ProviderHealth{Reachable: false, Error: fmt.Sprintf("panic: %v", r)}
+		}
+	}()
+
 	pingCtx, cancel := context.WithTimeout(ctx, DefaultPingTimeout)
 	defer cancel()
 
