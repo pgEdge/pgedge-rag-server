@@ -76,7 +76,7 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the pipeline
-	p, err := s.pipelines.Get(name)
+	p, err := s.pipelines.GetExecutor(name)
 	if err != nil {
 		if errors.Is(err, pipeline.ErrPipelineNotFound) {
 			s.respondError(w, http.StatusNotFound, "PIPELINE_NOT_FOUND",
@@ -146,7 +146,7 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request) {
 
 // handleStreamingQuery handles a streaming RAG query using Server-Sent Events.
 func (s *Server) handleStreamingQuery(w http.ResponseWriter, r *http.Request,
-	p *pipeline.Pipeline, req pipeline.QueryRequest) {
+	p pipeline.QueryExecutor, req pipeline.QueryRequest) {
 	// Check if the response writer supports flushing
 	flusher, ok := w.(http.Flusher)
 	if !ok {

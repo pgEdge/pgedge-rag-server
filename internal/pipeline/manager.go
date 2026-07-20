@@ -223,6 +223,24 @@ func (m *Manager) Get(name string) (*Pipeline, error) {
 	return p, nil
 }
 
+// GetExecutor retrieves a pipeline by name as the narrower QueryExecutor
+// interface, for callers (the HTTP server) that only need to run
+// queries and shouldn't depend on *Pipeline directly — see issue #37.
+//
+// Deliberately does not just `return m.Get(name)`: on the not-found
+// path Get returns a nil *Pipeline, and converting a nil *Pipeline
+// straight into the QueryExecutor interface would produce a non-nil
+// interface wrapping a nil pointer (a classic Go footgun), silently
+// breaking any caller's `if executor == nil` check. Explicitly
+// returning a literal nil on error avoids that.
+func (m *Manager) GetExecutor(name string) (QueryExecutor, error) {
+	p, err := m.Get(name)
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
 // Execute runs a RAG query on the pipeline.
 func (p *Pipeline) Execute(ctx context.Context, query string) (*QueryResponse, error) {
 	return p.orchestrator.Execute(ctx, QueryRequest{

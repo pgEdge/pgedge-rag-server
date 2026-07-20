@@ -28,7 +28,7 @@ import (
 // Orchestrator coordinates the RAG pipeline execution.
 type Orchestrator struct {
 	cfg            *config.Pipeline
-	dbPool         *database.Pool
+	dbPool         SearchBackend
 	embeddingProv  Embedder
 	completionProv Completer
 	bm25Index      *bm25.Index
@@ -40,7 +40,7 @@ type Orchestrator struct {
 // OrchestratorConfig contains the configuration for creating an orchestrator.
 type OrchestratorConfig struct {
 	Pipeline       *config.Pipeline
-	DBPool         *database.Pool
+	DBPool         SearchBackend
 	EmbeddingProv  Embedder
 	CompletionProv Completer
 	TokenBudget    int
