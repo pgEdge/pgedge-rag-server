@@ -12,6 +12,7 @@ package server
 import (
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 )
 
@@ -36,12 +37,71 @@ func (rw *responseWriter) Flush() {
 // applyMiddleware wraps the handler with all middleware.
 func (s *Server) applyMiddleware(handler http.Handler) http.Handler {
 	// Apply in reverse order (last applied runs first)
+	handler = s.routingMiddleware(handler)
 	handler = s.loggingMiddleware(handler)
 	handler = s.recoveryMiddleware(handler)
 	if s.config.Server.CORS.Enabled {
 		handler = s.corsMiddleware(handler)
 	}
 	return handler
+}
+
+// routingMiddleware intercepts requests that don't match any registered
+// route and returns a structured JSON error instead of net/http's default
+// plain-text response. http.ServeMux has no way to customize its built-in
+// "404 page not found" / "405 Method Not Allowed" handlers directly, so
+// this checks the match itself via mux.Handler, which returns an empty
+// pattern both when no route matches the path at all and when the path
+// matches but the method doesn't. Distinguishing those two cases (to
+// return 404 vs 405 with a correct Allow header) requires probing the
+// mux for every candidate method, since ServeMux doesn't expose a way to
+// list which methods a path supports either.
+//
+// This only runs when the mux itself found no match, so it never
+// touches a deliberate application-level response (e.g. handlePipeline's
+// PIPELINE_NOT_FOUND 404) — those only happen after a route has already
+// matched and dispatched to a handler.
+func (s *Server) routingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, pattern := s.mux.Handler(r); pattern == "" {
+			if allowed := s.allowedMethods(r); len(allowed) > 0 {
+				w.Header().Set("Allow", strings.Join(allowed, ", "))
+				s.respondError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED",
+					"method not allowed")
+				return
+			}
+			s.respondError(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// allowedMethods returns which of the server's supported HTTP methods
+// have a registered route matching r's path, by probing the mux directly.
+// ServeMux doesn't expose a public API to list this, so each candidate
+// method is checked by cloning the request with that method substituted.
+func (s *Server) allowedMethods(r *http.Request) []string {
+	methods := []string{
+		http.MethodGet, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete,
+	}
+
+	var allowed []string
+	for _, method := range methods {
+		probe := r.Clone(r.Context())
+		probe.Method = method
+		if _, pattern := s.mux.Handler(probe); pattern != "" {
+			allowed = append(allowed, method)
+			// net/http.ServeMux implicitly serves HEAD for any
+			// GET-registered pattern, so a route supporting GET also
+			// supports HEAD even though only GET is registered.
+			if method == http.MethodGet {
+				allowed = append(allowed, http.MethodHead)
+			}
+		}
+	}
+	return allowed
 }
 
 // loggingMiddleware logs request information.

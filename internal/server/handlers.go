@@ -10,8 +10,10 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/pipeline"
@@ -38,34 +40,33 @@ type ErrorDetail struct {
 	Message string `json:"message"`
 }
 
+// maxRequestBodyBytes caps the size of a query request body. Generous
+// enough for a query plus a long conversation history, small enough to
+// reject clearly-oversized payloads before they reach the LLM/embedding
+// call.
+const maxRequestBodyBytes = 1 << 20 // 1 MiB
+
+// isRequestTimeout reports whether ctx's Done() channel closed because
+// its deadline was exceeded (the server's own request timeout), as
+// opposed to being canceled for another reason such as the client
+// disconnecting.
+func isRequestTimeout(ctx context.Context) bool {
+	return errors.Is(ctx.Err(), context.DeadlineExceeded)
+}
+
 // handleHealth handles the GET /health endpoint.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		s.respondMethodNotAllowed(w, http.MethodGet)
-		return
-	}
-
 	s.respondJSON(w, http.StatusOK, HealthResponse{Status: "healthy"})
 }
 
 // handleListPipelines handles the GET /pipelines endpoint.
 func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		s.respondMethodNotAllowed(w, http.MethodGet)
-		return
-	}
-
 	pipelines := s.pipelines.List()
 	s.respondJSON(w, http.StatusOK, PipelinesResponse{Pipelines: pipelines})
 }
 
 // handlePipeline handles the POST /pipelines/{name} endpoint.
 func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		s.respondMethodNotAllowed(w, http.MethodPost)
-		return
-	}
-
 	// Extract pipeline name from URL path
 	// Path format: /pipelines/{name}
 	name := r.PathValue("name")
@@ -87,8 +88,16 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse request body first to validate input before checking pipeline
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+
 	var req pipeline.QueryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			s.respondError(w, http.StatusRequestEntityTooLarge, "REQUEST_TOO_LARGE",
+				fmt.Sprintf("request body exceeds maximum size of %d bytes", maxBytesErr.Limit))
+			return
+		}
 		s.respondError(w, http.StatusBadRequest, "INVALID_REQUEST",
 			"invalid request body: "+err.Error())
 		return
@@ -112,9 +121,19 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Execute non-streaming query
-	resp, err := p.ExecuteWithOptions(r.Context(), req)
+	// Execute non-streaming query, bounded so a hung upstream call (e.g.
+	// a slow LLM API) gets a structured JSON timeout response instead of
+	// running until the connection-level WriteTimeout kills it silently.
+	ctx, cancel := context.WithTimeout(r.Context(), s.requestTimeout)
+	defer cancel()
+
+	resp, err := p.ExecuteWithOptions(ctx, req)
 	if err != nil {
+		if isRequestTimeout(ctx) {
+			s.respondError(w, http.StatusGatewayTimeout, "REQUEST_TIMEOUT",
+				"request took too long to process")
+			return
+		}
 		s.logger.Error("pipeline execution failed",
 			"pipeline", name,
 			"error", err)
@@ -144,8 +163,16 @@ func (s *Server) handleStreamingQuery(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	// Execute streaming query
-	chunkChan, errChan := p.ExecuteStreamWithOptions(r.Context(), req)
+	// Execute streaming query, bounded the same way as the non-streaming
+	// path: a hung upstream call gets a structured SSE error event
+	// instead of leaving the client waiting indefinitely. The response
+	// status is already committed to 200 by the time streaming starts,
+	// so the timeout can only be conveyed via the SSE stream itself, not
+	// a different HTTP status code.
+	ctx, cancel := context.WithTimeout(r.Context(), s.requestTimeout)
+	defer cancel()
+
+	chunkChan, errChan := p.ExecuteStreamWithOptions(ctx, req)
 
 	// Stream chunks to client
 	for {
@@ -173,7 +200,15 @@ func (s *Server) handleStreamingQuery(w http.ResponseWriter, r *http.Request,
 			}
 			s.sendSSE(w, flusher, event)
 
-		case <-r.Context().Done():
+		case <-ctx.Done():
+			if isRequestTimeout(ctx) {
+				s.sendSSE(w, flusher, pipeline.StreamEvent{
+					Type:  "error",
+					Error: "request took too long to process",
+				})
+				s.sendSSE(w, flusher, pipeline.StreamEvent{Type: "done"})
+				return
+			}
 			// Client disconnected
 			s.logger.Debug("client disconnected during streaming")
 			return
@@ -217,11 +252,4 @@ func (s *Server) respondError(w http.ResponseWriter, status int, code, message s
 			Message: message,
 		},
 	})
-}
-
-// respondMethodNotAllowed sends a 405 Method Not Allowed response.
-func (s *Server) respondMethodNotAllowed(w http.ResponseWriter, allowed string) {
-	w.Header().Set("Allow", allowed)
-	s.respondError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED",
-		"method not allowed")
 }
