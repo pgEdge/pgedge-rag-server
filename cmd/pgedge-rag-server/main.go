@@ -23,6 +23,7 @@ import (
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 	"github.com/pgEdge/pgedge-rag-server/internal/pipeline"
 	"github.com/pgEdge/pgedge-rag-server/internal/server"
+	"github.com/pgEdge/pgedge-rag-server/internal/watch"
 )
 
 // Version information - set via ldflags during build
@@ -104,9 +105,25 @@ For more information, visit: https://github.com/pgEdge/pgedge-rag-server
 	}
 }
 
+// pipelineCloseGracePeriod is how long a swapped-out pipeline manager is
+// kept alive after a hot-reload before its database and LLM clients are
+// closed, so requests still using it can finish first. It sits above the
+// server's maximum request lifetime (a request is bounded by
+// server.DefaultRequestTimeout) plus a small margin for the response to
+// flush, so an in-flight request cannot outlive the manager it started
+// on — see issue #30.
+const pipelineCloseGracePeriod = server.DefaultRequestTimeout + 10*time.Second
+
 func run(configPath string, logger *slog.Logger) error {
-	// Load configuration
-	cfg, err := config.Load(configPath)
+	// Resolve the config file path up front so it can also be watched
+	// for changes (config.Load re-resolves it internally too, but that's
+	// cheap and keeps this function simple).
+	resolvedConfigPath, err := config.FindConfigFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to locate configuration file: %w", err)
+	}
+
+	cfg, err := config.Load(resolvedConfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
@@ -122,14 +139,72 @@ func run(configPath string, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("failed to create pipeline manager: %w", err)
 	}
-	defer func() {
-		if err := pm.Close(); err != nil {
-			logger.Error("failed to close pipeline manager", "error", err)
-		}
-	}()
 
 	// Create and start server
 	srv := server.New(cfg, pm, logger)
+
+	// Close whatever pipeline manager is active at shutdown time, not
+	// necessarily the one created above — a reload may have swapped it
+	// out for a newer one in the meantime.
+	defer func() {
+		if current := srv.SwapPipelineManager(nil); current != nil {
+			if err := current.Close(); err != nil {
+				logger.Error("failed to close pipeline manager", "error", err)
+			}
+		}
+	}()
+
+	// Watch the config file and any file-based API keys it uses (e.g. a
+	// mounted secret) for changes, and reload without a restart when
+	// they change — see issue #30.
+	watchPaths := append([]string{resolvedConfigPath}, config.APIKeyFilePaths(cfg)...)
+	reload := func() {
+		logger.Info("configuration change detected, reloading")
+
+		newCfg, err := config.Load(resolvedConfigPath)
+		if err != nil {
+			logger.Error("config reload failed; keeping previous configuration", "error", err)
+			return
+		}
+
+		newPM, err := pipeline.NewManagerWithLogger(pipeline.ManagerConfig{
+			Config: newCfg,
+			Logger: logger,
+		})
+		if err != nil {
+			logger.Error("pipeline reload failed; keeping previous configuration", "error", err)
+			return
+		}
+
+		oldPM := srv.SwapPipelineManager(newPM)
+		logger.Info("configuration reloaded", "pipelines", len(newCfg.Pipelines))
+
+		if oldPM != nil {
+			// Give in-flight requests using the old manager time to finish
+			// before closing its DB connections/LLM clients. The delay
+			// must exceed the server's maximum request lifetime so a query
+			// that started just before the swap cannot still be using the
+			// old manager when it's closed; deriving it from
+			// server.DefaultRequestTimeout keeps the two in step if that
+			// bound ever changes.
+			time.AfterFunc(pipelineCloseGracePeriod, func() {
+				if err := oldPM.Close(); err != nil {
+					logger.Warn("failed to close previous pipeline manager after reload", "error", err)
+				}
+			})
+		}
+	}
+
+	fileWatcher, err := watch.New(watchPaths, watch.DefaultDebounce, reload, logger)
+	if err != nil {
+		logger.Warn("failed to start configuration watcher; hot-reload disabled", "error", err)
+	} else {
+		watchCtx, cancelWatch := context.WithCancel(context.Background())
+		defer cancelWatch()
+		go fileWatcher.Start(watchCtx)
+		defer fileWatcher.Close()
+		logger.Info("watching for configuration changes", "paths", watchPaths)
+	}
 
 	// Handle graceful shutdown
 	shutdownCh := make(chan os.Signal, 1)

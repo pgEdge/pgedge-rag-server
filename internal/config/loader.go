@@ -33,7 +33,7 @@ const (
 //  2. /etc/pgedge/pgedge-rag-server.yaml
 //  3. pgedge-rag-server.yaml in the binary's directory
 func Load(path string) (*Config, error) {
-	configPath, err := findConfigFile(path)
+	configPath, err := FindConfigFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -41,8 +41,8 @@ func Load(path string) (*Config, error) {
 	return loadFromFile(configPath)
 }
 
-// findConfigFile finds the configuration file using the search order.
-func findConfigFile(explicitPath string) (string, error) {
+// FindConfigFile finds the configuration file using the search order.
+func FindConfigFile(explicitPath string) (string, error) {
 	// If explicit path provided, use it
 	if explicitPath != "" {
 		if _, err := os.Stat(explicitPath); err != nil {

@@ -509,3 +509,45 @@ func TestIsRequestTimeout_StillRunning(t *testing.T) {
 		t.Error("expected isRequestTimeout to be false for a context that hasn't finished")
 	}
 }
+
+// TestSwapPipelineManager is a regression test for issue #30 (config/
+// secret hot-reload): swapping the active PipelineManager must both
+// return the previous one (so the caller can close it) and make
+// subsequent requests observe the new one, with no restart required.
+func TestSwapPipelineManager(t *testing.T) {
+	srv := testServer()
+
+	// Confirm the original manager is in effect.
+	req := httptest.NewRequest(http.MethodGet, "/v1/pipelines", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+	var resp PipelinesResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp.Pipelines) != 1 || resp.Pipelines[0].Name != "test-pipeline" {
+		t.Fatalf("expected the original pipeline before swap, got %+v", resp.Pipelines)
+	}
+
+	newPM := &mockPipelineManager{
+		pipelines: map[string]*mockPipelineInfo{
+			"reloaded-pipeline": {name: "reloaded-pipeline", description: "after reload"},
+		},
+	}
+	oldPM := srv.SwapPipelineManager(newPM)
+	if oldPM == nil {
+		t.Fatal("expected SwapPipelineManager to return the previous manager, got nil")
+	}
+
+	// Subsequent requests must observe the new manager, with no restart.
+	req2 := httptest.NewRequest(http.MethodGet, "/v1/pipelines", nil)
+	w2 := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w2, req2)
+	var resp2 PipelinesResponse
+	if err := json.NewDecoder(w2.Body).Decode(&resp2); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp2.Pipelines) != 1 || resp2.Pipelines[0].Name != "reloaded-pipeline" {
+		t.Fatalf("expected the reloaded pipeline after swap, got %+v", resp2.Pipelines)
+	}
+}
