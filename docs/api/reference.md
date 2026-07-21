@@ -133,6 +133,12 @@ GET /v1/stats
 |-------------|--------------------------------|
 | 200         | Pipeline usage statistics      |
 
+Each `embedding` and `completion` object may also carry
+`cache_creation_input_tokens` and `cache_read_input_tokens` fields.
+These are omitted when zero, so they appear only for providers that
+report prompt-cache usage (for example, an Anthropic completion
+provider); the example above shows a pipeline with no cache activity.
+
 **Known limitation:** `embedding` usage is sourced from the underlying
 `pgedge-go-llm-lib` client, which currently only accumulates embedding
 token usage for the **Voyage** provider. For pipelines whose
