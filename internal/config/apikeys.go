@@ -159,6 +159,53 @@ func expandKeyPath(path string) string {
 	return path
 }
 
+// APIKeyFilePaths returns the resolved paths of every API key file the
+// given config actually reads from — explicitly configured paths, or the
+// default file locations (~/.provider-api-key) when they exist on disk.
+// Keys sourced from environment variables have no backing file and are
+// not included. Used to watch these files for changes (e.g. a mounted
+// secret being rotated) alongside the main config file — see issue #30.
+func APIKeyFilePaths(cfg *Config) []string {
+	seen := make(map[string]bool)
+	var paths []string
+
+	addIfFile := func(configuredPath, defaultFile string) {
+		path := configuredPath
+		if path == "" {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return
+			}
+			path = filepath.Join(homeDir, defaultFile)
+		} else {
+			path = expandKeyPath(path)
+		}
+
+		if seen[path] {
+			return
+		}
+		if _, err := os.Stat(path); err != nil {
+			return
+		}
+		seen[path] = true
+		paths = append(paths, path)
+	}
+
+	addIfFile(cfg.APIKeys.Anthropic, DefaultAnthropicKeyFile)
+	addIfFile(cfg.APIKeys.OpenAI, DefaultOpenAIKeyFile)
+	addIfFile(cfg.APIKeys.Voyage, DefaultVoyageKeyFile)
+	addIfFile(cfg.APIKeys.Gemini, DefaultGeminiKeyFile)
+
+	for _, p := range cfg.Pipelines {
+		addIfFile(p.APIKeys.Anthropic, DefaultAnthropicKeyFile)
+		addIfFile(p.APIKeys.OpenAI, DefaultOpenAIKeyFile)
+		addIfFile(p.APIKeys.Voyage, DefaultVoyageKeyFile)
+		addIfFile(p.APIKeys.Gemini, DefaultGeminiKeyFile)
+	}
+
+	return paths
+}
+
 // LoadRequiredKeys loads only the API keys required by the given pipelines.
 // Deprecated: Use LoadKeysForPipeline for per-pipeline API key loading.
 func (l *APIKeyLoader) LoadRequiredKeys(pipelines []Pipeline) (*LoadedKeys, error) {

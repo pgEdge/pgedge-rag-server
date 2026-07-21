@@ -15,6 +15,64 @@ When you invoke `pgedge-rag-server` you can optionally include the `-config` opt
 2. the directory that contains the `pgedge-rag-server` binary.
 
 
+## Configuration Reloading
+
+`pgedge-rag-server` watches the configuration file, and any file-based
+[API keys](keys.md), for changes and reloads automatically — no restart
+required. This includes changes delivered by container orchestrators
+that update a mounted file by atomically replacing a symlink (for
+example, a Kubernetes `ConfigMap` or `Secret` volume), not just a direct
+edit to the file.
+
+When a change is detected:
+
+- The server loads and validates the new configuration, then rebuilds
+  **all** configured pipelines (new database connections, new LLM
+  provider clients) and switches incoming requests over to them. This
+  happens for every pipeline, even ones unrelated to whatever file
+  changed — a rotated key used by one pipeline still causes every
+  pipeline's connections to be recreated, not just that one.
+- Requests already in progress continue to use the previous
+  configuration until they finish. The previous database connections and
+  LLM clients are held open for a grace period that exceeds the maximum
+  request lifetime before being closed, so an in-flight request is not
+  cut off mid-query by a reload.
+- If the new configuration fails to load or validate (invalid YAML, an
+  unreachable database, a missing required field), the reload is
+  abandoned and an error is logged. The server keeps running on the
+  last-known-good configuration — a broken reload never takes the
+  server down.
+
+Only `pipelines` (and the `defaults` they inherit from) are affected.
+Server-level settings, such as `listen_address`, `port`, `tls`, and
+`cors`, are read once at startup and require a restart to change; the
+HTTP listener isn't rebound as part of a reload.
+
+The set of files being watched is also fixed at startup: the
+configuration file plus whichever file-based API keys the initial
+configuration uses. Rotating one of those keys in place is picked up,
+but if a reload changes a pipeline to read its key from a different file
+location, that new location is not watched until the server is
+restarted.
+
+Reloads are debounced by a short interval, so a single logical change
+that produces several rapid filesystem events (as atomic replacement
+does) triggers one reload, not several.
+
+Detection works at the level of the directory containing each watched
+file, not the file itself; this is what allows atomic symlink
+replacement to be seen at all. A side effect is that any change within
+such a directory triggers a reload, even one unrelated to the watched
+file. This is not a concern for a Kubernetes `ConfigMap` or `Secret`
+volume, whose mounted directory contains only the projected files, but
+it does mean that placing a key file in a busy directory should be
+avoided. In particular, relying on the default `~/.provider-api-key`
+locations causes `$HOME` itself to be watched, so unrelated file
+activity there (a shell writing its history, an editor scratch file,
+and so on) would provoke needless reloads; mounting keys into a
+dedicated directory, as a container deployment does, avoids this.
+
+
 ## Configuration File Structure
 
 The configuration file includes the following top-level sections:

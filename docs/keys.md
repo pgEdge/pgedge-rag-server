@@ -2,6 +2,10 @@
 
 You can provide API keys in different locations; this allows different pipelines to use different API keys or accounts while sharing common defaults.
 
+Key files are watched for changes and reloaded automatically, including
+rotation via a mounted `Secret` — see
+[Configuration Reloading](configuration.md#configuration-reloading).
+
 ## Specifying the Path to API Key Files
 
 You can specify the path to API key files containing API keys in several locations.  The RAG server will search for your API key in the order these locations are listed below.

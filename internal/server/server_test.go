@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
+
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 	"github.com/pgEdge/pgedge-rag-server/internal/pipeline"
 )
@@ -35,7 +37,12 @@ type mockPipelineInfo struct {
 	// pipeline. Nil means GetExecutor returns a nil QueryExecutor,
 	// matching the "nil pipeline" defensive-check tests below — see
 	// issue #37.
-	executor pipeline.QueryExecutor
+	executor   pipeline.QueryExecutor
+	embedding  llmlib.TokenUsage
+	completion llmlib.TokenUsage
+	// health, when non-nil, is returned verbatim by Health for this
+	// pipeline. Nil means "reachable", matching the default healthy case.
+	health *pipeline.PipelineHealth
 }
 
 func newMockPipelineManager() *mockPipelineManager {
@@ -44,6 +51,8 @@ func newMockPipelineManager() *mockPipelineManager {
 			"test-pipeline": {
 				name:        "test-pipeline",
 				description: "A test pipeline",
+				embedding:   llmlib.TokenUsage{PromptTokens: 5, TotalTokens: 5},
+				completion:  llmlib.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 			},
 		},
 	}
@@ -69,6 +78,35 @@ func (m *mockPipelineManager) GetExecutor(name string) (pipeline.QueryExecutor, 
 	// returning it directly (rather than wrapping it) keeps that a
 	// genuine nil interface, not a nil-pointer-in-interface footgun.
 	return info.executor, nil
+}
+
+func (m *mockPipelineManager) Stats() []pipeline.Usage {
+	stats := make([]pipeline.Usage, 0, len(m.pipelines))
+	for _, p := range m.pipelines {
+		stats = append(stats, pipeline.Usage{
+			Name:        p.name,
+			Description: p.description,
+			Embedding:   p.embedding,
+			Completion:  p.completion,
+		})
+	}
+	return stats
+}
+
+func (m *mockPipelineManager) Health(ctx context.Context) []pipeline.PipelineHealth {
+	results := make([]pipeline.PipelineHealth, 0, len(m.pipelines))
+	for _, p := range m.pipelines {
+		if p.health != nil {
+			results = append(results, *p.health)
+			continue
+		}
+		results = append(results, pipeline.PipelineHealth{
+			Name:       p.name,
+			Embedding:  pipeline.ProviderHealth{Reachable: true},
+			Completion: pipeline.ProviderHealth{Reachable: true},
+		})
+	}
+	return results
 }
 
 func (m *mockPipelineManager) Close() error {
@@ -131,6 +169,30 @@ func testServer() *Server {
 	return New(cfg, pm, nil)
 }
 
+// TestLiveEndpoint verifies the liveness endpoint returns HTTP 200 with
+// a simple "ok" status and, unlike /health, does not include any
+// per-pipeline provider information — see issue #23.
+func TestLiveEndpoint(t *testing.T) {
+	srv := testServer()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/live", nil)
+	w := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp LiveResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status != "ok" {
+		t.Errorf("expected status 'ok', got '%s'", resp.Status)
+	}
+}
+
 func TestHealthEndpoint(t *testing.T) {
 	srv := testServer()
 
@@ -150,6 +212,56 @@ func TestHealthEndpoint(t *testing.T) {
 
 	if resp.Status != "healthy" {
 		t.Errorf("expected status 'healthy', got '%s'", resp.Status)
+	}
+
+	if len(resp.Pipelines) != 1 {
+		t.Fatalf("expected 1 pipeline in health response, got %d", len(resp.Pipelines))
+	}
+	got := resp.Pipelines[0]
+	if got.Name != "test-pipeline" {
+		t.Errorf("expected pipeline name 'test-pipeline', got '%s'", got.Name)
+	}
+	if !got.Embedding.Reachable || !got.Completion.Reachable {
+		t.Errorf("expected both providers reachable, got %+v", got)
+	}
+}
+
+// TestHealthEndpoint_DegradedWhenProviderUnreachable is a regression
+// test for issue #23: an unreachable provider must degrade the
+// reported status and surface its error, while still returning HTTP
+// 200 so basic uptime checks aren't broken by a provider outage.
+func TestHealthEndpoint_DegradedWhenProviderUnreachable(t *testing.T) {
+	cfg := testConfig()
+	pm := newMockPipelineManager()
+	pm.pipelines["test-pipeline"].health = &pipeline.PipelineHealth{
+		Name:       "test-pipeline",
+		Embedding:  pipeline.ProviderHealth{Reachable: true},
+		Completion: pipeline.ProviderHealth{Reachable: false, Error: "connection refused"},
+	}
+	srv := New(cfg, pm, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+	w := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d even when a provider is unreachable, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp HealthResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Status != "degraded" {
+		t.Errorf("expected status 'degraded', got '%s'", resp.Status)
+	}
+	if len(resp.Pipelines) != 1 {
+		t.Fatalf("expected 1 pipeline in health response, got %d", len(resp.Pipelines))
+	}
+	if resp.Pipelines[0].Completion.Error != "connection refused" {
+		t.Errorf("expected completion error 'connection refused', got %q", resp.Pipelines[0].Completion.Error)
 	}
 }
 
@@ -190,6 +302,52 @@ func TestListPipelinesEndpoint(t *testing.T) {
 	if resp.Pipelines[0].Name != "test-pipeline" {
 		t.Errorf("expected pipeline name 'test-pipeline', got '%s'",
 			resp.Pipelines[0].Name)
+	}
+}
+
+func TestStatsEndpoint(t *testing.T) {
+	srv := testServer()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/stats", nil)
+	w := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp StatsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.Pipelines) != 1 {
+		t.Fatalf("expected 1 pipeline, got %d", len(resp.Pipelines))
+	}
+
+	got := resp.Pipelines[0]
+	if got.Name != "test-pipeline" {
+		t.Errorf("expected pipeline name 'test-pipeline', got '%s'", got.Name)
+	}
+	if got.Embedding.TotalTokens != 5 {
+		t.Errorf("expected embedding total 5, got %d", got.Embedding.TotalTokens)
+	}
+	if got.Completion.TotalTokens != 15 {
+		t.Errorf("expected completion total 15, got %d", got.Completion.TotalTokens)
+	}
+}
+
+func TestStatsEndpoint_MethodNotAllowed(t *testing.T) {
+	srv := testServer()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/stats", nil)
+	w := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
 	}
 }
 
@@ -572,8 +730,10 @@ func TestRFC8631LinkHeader(t *testing.T) {
 		method string
 		path   string
 	}{
+		{http.MethodGet, "/v1/live"},
 		{http.MethodGet, "/v1/health"},
 		{http.MethodGet, "/v1/pipelines"},
+		{http.MethodGet, "/v1/stats"},
 		{http.MethodGet, "/v1/openapi.json"},
 	}
 
@@ -629,5 +789,47 @@ func TestIsRequestTimeout_StillRunning(t *testing.T) {
 
 	if isRequestTimeout(ctx) {
 		t.Error("expected isRequestTimeout to be false for a context that hasn't finished")
+	}
+}
+
+// TestSwapPipelineManager is a regression test for issue #30 (config/
+// secret hot-reload): swapping the active PipelineManager must both
+// return the previous one (so the caller can close it) and make
+// subsequent requests observe the new one, with no restart required.
+func TestSwapPipelineManager(t *testing.T) {
+	srv := testServer()
+
+	// Confirm the original manager is in effect.
+	req := httptest.NewRequest(http.MethodGet, "/v1/pipelines", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+	var resp PipelinesResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp.Pipelines) != 1 || resp.Pipelines[0].Name != "test-pipeline" {
+		t.Fatalf("expected the original pipeline before swap, got %+v", resp.Pipelines)
+	}
+
+	newPM := &mockPipelineManager{
+		pipelines: map[string]*mockPipelineInfo{
+			"reloaded-pipeline": {name: "reloaded-pipeline", description: "after reload"},
+		},
+	}
+	oldPM := srv.SwapPipelineManager(newPM)
+	if oldPM == nil {
+		t.Fatal("expected SwapPipelineManager to return the previous manager, got nil")
+	}
+
+	// Subsequent requests must observe the new manager, with no restart.
+	req2 := httptest.NewRequest(http.MethodGet, "/v1/pipelines", nil)
+	w2 := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w2, req2)
+	var resp2 PipelinesResponse
+	if err := json.NewDecoder(w2.Body).Decode(&resp2); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp2.Pipelines) != 1 || resp2.Pipelines[0].Name != "reloaded-pipeline" {
+		t.Fatalf("expected the reloaded pipeline after swap, got %+v", resp2.Pipelines)
 	}
 }

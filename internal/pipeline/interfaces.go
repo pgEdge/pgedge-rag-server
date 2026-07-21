@@ -21,16 +21,26 @@ import (
 // Embedder is the narrow interface the orchestrator needs from an
 // embedding-capable LLM client. The lib's llm.Client satisfies it
 // structurally; orchestrator tests provide a one-method mock.
+//
+// Usage exposes the client's cumulative token usage (since creation or
+// its last ResetUsage call) for the /v1/stats endpoint — see issue #21.
+// Ping exposes the client's lightweight connectivity check for the
+// /v1/health endpoint — see issue #23.
 type Embedder interface {
 	Embed(ctx context.Context, text string) ([]float64, error)
+	Usage() llmlib.TokenUsage
+	Ping(ctx context.Context) error
 }
 
 // Completer is the narrow interface the orchestrator needs from a
-// chat-capable LLM client. Two methods only — non-streaming and
-// streaming. The lib's llm.Client satisfies it structurally.
+// chat-capable LLM client — non-streaming, streaming, cumulative
+// usage, and a connectivity check. The lib's llm.Client satisfies it
+// structurally.
 type Completer interface {
 	Chat(ctx context.Context, req llmlib.ChatRequest) (*llmlib.ChatResponse, error)
 	ChatStream(ctx context.Context, req llmlib.ChatRequest) (*llmlib.Stream, error)
+	Usage() llmlib.TokenUsage
+	Ping(ctx context.Context) error
 }
 
 // SearchBackend is the narrow interface the orchestrator's search()
