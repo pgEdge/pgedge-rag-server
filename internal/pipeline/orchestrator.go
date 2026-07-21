@@ -379,8 +379,32 @@ func (o *Orchestrator) rerank(
 		return results
 	}
 
-	reranked := make([]database.SearchResult, 0, len(resp.Results))
-	for _, res := range resp.Results {
+	reranked := o.applyRerankOrder(results, resp.Results)
+
+	// A successful call can still yield nothing usable — an empty
+	// response, or every index out of range. Returning that empty slice
+	// would drop all context and leave the LLM with nothing to ground
+	// on, which is strictly worse than not reranking. A rerank problem
+	// should only degrade ordering, never empty the query, so fall back
+	// to the original order in that case.
+	if len(reranked) == 0 {
+		o.logger.Warn("rerank returned no usable results, falling back to original order")
+		return results
+	}
+	return reranked
+}
+
+// applyRerankOrder maps a provider's rerank results back onto the
+// original retrieval slice: it reorders by the provider's judgment and
+// promotes each surviving result's Score to the reranker's relevance
+// score. Indices outside the original slice (from a malformed or buggy
+// provider response) are logged and skipped rather than panicking.
+func (o *Orchestrator) applyRerankOrder(
+	results []database.SearchResult,
+	rerankResults []llmlib.RerankResult,
+) []database.SearchResult {
+	reranked := make([]database.SearchResult, 0, len(rerankResults))
+	for _, res := range rerankResults {
 		if res.Index < 0 || res.Index >= len(results) {
 			o.logger.Warn("rerank result index out of range, skipping", "index", res.Index)
 			continue

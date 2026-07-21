@@ -948,6 +948,53 @@ func TestRerank_SkipsOutOfRangeIndex(t *testing.T) {
 	}
 }
 
+// TestRerank_AllIndicesInvalidFallsBackToOriginalOrder verifies that a
+// successful rerank response that yields nothing usable (here, every
+// index out of range) falls back to the original results rather than
+// returning an empty slice. Dropping all context would leave the LLM
+// with nothing to ground on, which is worse than not reranking; a
+// rerank problem should only ever degrade ordering.
+func TestRerank_AllIndicesInvalidFallsBackToOriginalOrder(t *testing.T) {
+	results := []database.SearchResult{{ID: "1"}, {ID: "2"}}
+	mock := &MockReranker{
+		RerankFunc: func(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error) {
+			return &llmlib.RerankResponse{Results: []llmlib.RerankResult{
+				{Index: 5},
+				{Index: -1},
+			}}, nil
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{Name: "test"},
+		Reranker: mock,
+	})
+
+	got := orch.rerank(context.Background(), "query", results)
+	if len(got) != 2 || got[0].ID != "1" || got[1].ID != "2" {
+		t.Errorf("expected fallback to original order, got %+v", got)
+	}
+}
+
+// TestRerank_EmptyResponseFallsBackToOriginalOrder verifies the same
+// fallback for a successful call that returns zero results at all.
+func TestRerank_EmptyResponseFallsBackToOriginalOrder(t *testing.T) {
+	results := []database.SearchResult{{ID: "1"}, {ID: "2"}}
+	mock := &MockReranker{
+		RerankFunc: func(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error) {
+			return &llmlib.RerankResponse{Results: []llmlib.RerankResult{}}, nil
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{Name: "test"},
+		Reranker: mock,
+	})
+
+	got := orch.rerank(context.Background(), "query", results)
+	if len(got) != 2 || got[0].ID != "1" || got[1].ID != "2" {
+		t.Errorf("expected fallback to original order, got %+v", got)
+	}
+}
+
 // Verify mock providers implement the interfaces
 var (
 	_ Embedder  = (*MockEmbedder)(nil)
