@@ -25,7 +25,7 @@ and use the API schema.
 
 Get the OpenAPI v3 specification for the API.
 
-```
+```http
 GET /v1/openapi.json
 ```
 
@@ -47,7 +47,7 @@ dependency-free check that returns immediately and never contacts the
 LLM providers, so its latency is unaffected by provider health. It is
 the right endpoint for a Kubernetes liveness probe.
 
-```
+```http
 GET /v1/live
 ```
 
@@ -70,7 +70,7 @@ GET /v1/live
 Check if the server is running, and whether each pipeline's embedding
 and completion providers are reachable.
 
-```
+```http
 GET /v1/health
 ```
 
@@ -136,7 +136,7 @@ immediately without contacting any provider.
 
 Get a list of all available RAG pipelines.
 
-```
+```http
 GET /v1/pipelines
 ```
 
@@ -172,7 +172,7 @@ increasing counter, not a per-request or windowed value. See the
 known limitation below the example: `embedding` usage only
 accumulates for pipelines using the Voyage provider.
 
-```
+```http
 GET /v1/stats
 ```
 
@@ -225,7 +225,7 @@ this endpoint.
 
 Execute a RAG query against a specific pipeline.
 
-```
+```http
 POST /v1/pipelines/{name}
 ```
 
