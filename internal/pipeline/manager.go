@@ -224,6 +224,19 @@ func (m *Manager) Get(name string) (*Pipeline, error) {
 	return p, nil
 }
 
+// Stats returns cumulative token usage for every pipeline.
+func (m *Manager) Stats() []Usage {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	stats := make([]Usage, 0, len(m.pipelines))
+	for _, p := range m.pipelines {
+		stats = append(stats, p.Usage())
+	}
+
+	return stats
+}
+
 // Health checks connectivity for every pipeline's providers
 // concurrently, each bounded by DefaultPingTimeout, so the total call
 // takes roughly one ping's worth of time regardless of how many
@@ -294,6 +307,17 @@ func (p *Pipeline) Name() string {
 // Description returns the pipeline description.
 func (p *Pipeline) Description() string {
 	return p.description
+}
+
+// Usage returns this pipeline's cumulative embedding and completion
+// token usage.
+func (p *Pipeline) Usage() Usage {
+	return Usage{
+		Name:        p.name,
+		Description: p.description,
+		Embedding:   p.embeddingProv.Usage(),
+		Completion:  p.completionProv.Usage(),
+	}
 }
 
 // DefaultPingTimeout bounds how long a single provider's connectivity

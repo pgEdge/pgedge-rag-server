@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
@@ -27,25 +28,29 @@ import (
 type PipelineManager interface {
 	List() []pipeline.Info
 	Get(name string) (*pipeline.Pipeline, error)
+	Stats() []pipeline.Usage
 	Health(ctx context.Context) []pipeline.PipelineHealth
 	Close() error
 }
 
-// defaultRequestTimeout bounds how long a single pipeline query may run
+// DefaultRequestTimeout bounds how long a single pipeline query may run
 // (embedding + search + LLM call) before the server gives up and returns
 // a structured JSON timeout error. Kept comfortably below WriteTimeout so
 // there's time left to write that response before the connection-level
 // timeout would otherwise kill the connection with no body at all — see
-// issue #31.
-const defaultRequestTimeout = 50 * time.Second
+// issue #31. Exported so callers coordinating with the request lifetime
+// (e.g. how long a swapped-out pipeline manager must stay alive during a
+// hot-reload) can reference it rather than duplicating the value.
+const DefaultRequestTimeout = 50 * time.Second
 
 // Server is the HTTP server for the RAG API.
 type Server struct {
 	config         *config.Config
-	pipelines      PipelineManager
 	logger         *slog.Logger
 	server         *http.Server
 	mux            *http.ServeMux
+	pipelinesMu    sync.RWMutex
+	pipelines      PipelineManager // guarded by pipelinesMu; use pipelineManager()/SwapPipelineManager
 	requestTimeout time.Duration
 }
 
@@ -60,13 +65,33 @@ func New(cfg *config.Config, pm PipelineManager, logger *slog.Logger) *Server {
 		pipelines:      pm,
 		logger:         logger,
 		mux:            http.NewServeMux(),
-		requestTimeout: defaultRequestTimeout,
+		requestTimeout: DefaultRequestTimeout,
 	}
 
 	// Set up routes
 	s.setupRoutes()
 
 	return s
+}
+
+// pipelineManager returns the currently active PipelineManager. Safe for
+// concurrent use with SwapPipelineManager.
+func (s *Server) pipelineManager() PipelineManager {
+	s.pipelinesMu.RLock()
+	defer s.pipelinesMu.RUnlock()
+	return s.pipelines
+}
+
+// SwapPipelineManager atomically replaces the active PipelineManager and
+// returns the one it replaced, so the caller can close it once any
+// in-flight requests still using it have had a chance to finish — see
+// issue #30 (config/secret hot-reload).
+func (s *Server) SwapPipelineManager(pm PipelineManager) PipelineManager {
+	s.pipelinesMu.Lock()
+	defer s.pipelinesMu.Unlock()
+	old := s.pipelines
+	s.pipelines = pm
+	return old
 }
 
 // ListenAndServe starts the HTTP server.

@@ -25,9 +25,19 @@ type HealthResponse struct {
 	Pipelines []pipeline.PipelineHealth `json:"pipelines,omitempty"`
 }
 
+// LiveResponse is the response for the liveness endpoint.
+type LiveResponse struct {
+	Status string `json:"status"`
+}
+
 // PipelinesResponse is the response for the list pipelines endpoint.
 type PipelinesResponse struct {
 	Pipelines []pipeline.Info `json:"pipelines"`
+}
+
+// StatsResponse is the response for the stats endpoint.
+type StatsResponse struct {
+	Pipelines []pipeline.Usage `json:"pipelines"`
 }
 
 // ErrorResponse is the standard error response format.
@@ -55,14 +65,25 @@ func isRequestTimeout(ctx context.Context) bool {
 	return errors.Is(ctx.Err(), context.DeadlineExceeded)
 }
 
+// handleLive handles the GET /live endpoint: a cheap, dependency-free
+// liveness check that returns immediately, for use as a Kubernetes
+// liveness probe (or any caller that only needs to know the process is
+// up and serving). Unlike /health it never touches the LLM providers,
+// so it isn't affected by provider latency — see issue #23.
+func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, LiveResponse{Status: "ok"})
+}
+
 // handleHealth handles the GET /health endpoint. It reports the server
 // process as healthy unconditionally, and additionally pings every
 // pipeline's LLM providers to surface connectivity problems in the
 // response body — see issue #23. A provider being unreachable does
 // not change the status code; it degrades "status" in the body so
-// callers that only check for HTTP 200 keep working.
+// callers that only check for HTTP 200 keep working. Because it pings
+// providers, this call can take up to pipeline.DefaultPingTimeout; use
+// /live for a latency-sensitive liveness probe.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	pipelines := s.pipelines.Health(r.Context())
+	pipelines := s.pipelineManager().Health(r.Context())
 
 	status := "healthy"
 	for _, p := range pipelines {
@@ -77,8 +98,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handleListPipelines handles the GET /pipelines endpoint.
 func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
-	pipelines := s.pipelines.List()
+	pipelines := s.pipelineManager().List()
 	s.respondJSON(w, http.StatusOK, PipelinesResponse{Pipelines: pipelines})
+}
+
+// handleStats handles the GET /stats endpoint, reporting cumulative
+// token usage for every configured pipeline. See issue #21.
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	stats := s.pipelineManager().Stats()
+	s.respondJSON(w, http.StatusOK, StatsResponse{Pipelines: stats})
 }
 
 // handlePipeline handles the POST /pipelines/{name} endpoint.
@@ -92,7 +120,7 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the pipeline
-	p, err := s.pipelines.Get(name)
+	p, err := s.pipelineManager().Get(name)
 	if err != nil {
 		if errors.Is(err, pipeline.ErrPipelineNotFound) {
 			s.respondError(w, http.StatusNotFound, "PIPELINE_NOT_FOUND",

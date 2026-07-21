@@ -27,6 +27,13 @@ and this project adheres to
   keep working
   ([#23](https://github.com/pgEdge/pgedge-rag-server/issues/23)).
 
+- `GET /v1/live` liveness endpoint: a cheap, dependency-free check
+  that returns immediately and never contacts the LLM providers, so
+  its latency is unaffected by provider health. Use it for a
+  latency-sensitive Kubernetes liveness probe, and `/v1/health` for a
+  readiness probe or monitoring
+  ([#23](https://github.com/pgEdge/pgedge-rag-server/issues/23)).
+
 ### Fixed
 
 - Vector search now selects the configured `id_column`, so vector
