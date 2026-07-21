@@ -73,3 +73,10 @@ type QueryExecutor interface {
 	ExecuteWithOptions(ctx context.Context, req QueryRequest) (*QueryResponse, error)
 	ExecuteStreamWithOptions(ctx context.Context, req QueryRequest) (<-chan StreamChunk, <-chan error)
 }
+
+// Reranker is the narrow interface the orchestrator needs from a
+// rerank-capable LLM client. The lib's llm.Client satisfies it
+// structurally; orchestrator tests provide a one-method mock.
+type Reranker interface {
+	Rerank(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error)
+}

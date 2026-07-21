@@ -1368,6 +1368,124 @@ func TestValidation_NilMinSimilarity(t *testing.T) {
 	}
 }
 
+// rerankTestPipeline returns a minimal, otherwise-valid pipeline
+// config so rerank-specific tests only vary the Rerank field.
+func rerankTestPipeline(rerank RerankConfig) Pipeline {
+	return Pipeline{
+		Name: "test",
+		Database: DatabaseConfig{
+			Host:     "localhost",
+			Port:     5432,
+			Database: "testdb",
+		},
+		Tables: []TableSource{
+			{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+		},
+		EmbeddingLLM: LLMConfig{Provider: "openai", Model: "text-embedding-3-small"},
+		RAGLLM:       LLMConfig{Provider: "anthropic", Model: "claude-sonnet-4-20250514"},
+		Rerank:       rerank,
+	}
+}
+
+func TestValidation_RerankDisabledByDefault(t *testing.T) {
+	cfg := &Config{
+		Server:    ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{rerankTestPipeline(RerankConfig{})},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("unexpected validation error with no rerank config: %v", err)
+	}
+}
+
+func TestValidation_RerankValidVoyage(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{rerankTestPipeline(RerankConfig{
+			Provider: "voyage",
+			Model:    "rerank-2",
+		})},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("unexpected validation error for valid voyage rerank config: %v", err)
+	}
+}
+
+func TestValidation_RerankInvalidProvider(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{rerankTestPipeline(RerankConfig{
+			Provider: "openai",
+			Model:    "some-model",
+		})},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for non-voyage rerank provider")
+	}
+	if !contains(err.Error(), "rerank.provider") {
+		t.Errorf("expected error about rerank.provider, got: %s", err.Error())
+	}
+}
+
+func TestValidation_RerankMissingModel(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{rerankTestPipeline(RerankConfig{
+			Provider: "voyage",
+		})},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for missing rerank model")
+	}
+	if !contains(err.Error(), "rerank.model") {
+		t.Errorf("expected error about rerank.model, got: %s", err.Error())
+	}
+}
+
+func TestValidation_RerankNegativeTopK(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{rerankTestPipeline(RerankConfig{
+			Provider: "voyage",
+			Model:    "rerank-2",
+			TopK:     -1,
+		})},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for negative rerank top_k")
+	}
+	if !contains(err.Error(), "rerank.top_k") {
+		t.Errorf("expected error about rerank.top_k, got: %s", err.Error())
+	}
+}
+
+func TestValidation_RerankPerAttemptTimeoutExceedsRequestTimeout(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Port: 8080},
+		Pipelines: []Pipeline{rerankTestPipeline(RerankConfig{
+			Provider:          "voyage",
+			Model:             "rerank-2",
+			RequestTimeout:    Duration(30 * time.Second),
+			PerAttemptTimeout: Duration(60 * time.Second),
+		})},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error when rerank per_attempt_timeout exceeds request_timeout")
+	}
+	if !contains(err.Error(), "rerank.per_attempt_timeout") {
+		t.Errorf("expected error about rerank.per_attempt_timeout, got: %s", err.Error())
+	}
+}
+
 func TestLoad_LLMHeaders(t *testing.T) {
 	cfg, err := Load("../../testdata/configs/llm-headers.yaml")
 	if err != nil {
@@ -1416,6 +1534,30 @@ func TestLoad_GeminiProvider(t *testing.T) {
 	if p.RAGLLM.Provider != "gemini" {
 		t.Errorf("expected gemini rag provider, got %s",
 			p.RAGLLM.Provider)
+	}
+}
+
+func TestLoad_RerankConfig(t *testing.T) {
+	cfg, err := Load("../../testdata/configs/rerank.yaml")
+	if err != nil {
+		t.Fatalf("failed to load rerank config: %v", err)
+	}
+
+	p := cfg.Pipelines[0]
+	if p.Rerank.Provider != "voyage" {
+		t.Errorf("expected rerank provider voyage, got %q", p.Rerank.Provider)
+	}
+	if p.Rerank.Model != "rerank-2" {
+		t.Errorf("expected rerank model rerank-2, got %q", p.Rerank.Model)
+	}
+	if p.Rerank.TopK != 5 {
+		t.Errorf("expected rerank top_k 5, got %d", p.Rerank.TopK)
+	}
+	if p.Rerank.RequestTimeout.Std() != 30*time.Second {
+		t.Errorf("expected rerank request_timeout 30s, got %v", p.Rerank.RequestTimeout.Std())
+	}
+	if p.Rerank.PerAttemptTimeout.Std() != 10*time.Second {
+		t.Errorf("expected rerank per_attempt_timeout 10s, got %v", p.Rerank.PerAttemptTimeout.Std())
 	}
 }
 

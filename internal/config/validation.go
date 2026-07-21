@@ -252,6 +252,36 @@ func (c *Config) validatePipeline(index int, p Pipeline) ValidationErrors {
 		}
 	}
 
+	// Rerank config validation (optional; disabled unless provider is set)
+	errs = append(errs, c.validateRerank(prefix+".rerank", p.Rerank)...)
+
+	return errs
+}
+
+// validateRerank validates the optional rerank configuration. Leaving
+// Provider empty disables the stage, so no fields are required in that
+// case. When Provider is set, it reuses validateLLMOptional's
+// provider/model/timeout checks restricted to the providers that
+// actually implement Client.Rerank (currently only Voyage).
+func (c *Config) validateRerank(prefix string, r RerankConfig) ValidationErrors {
+	var errs ValidationErrors
+
+	errs = append(errs, c.validateLLMOptional(prefix, LLMConfig{
+		Provider:          r.Provider,
+		Model:             r.Model,
+		BaseURL:           r.BaseURL,
+		Headers:           r.Headers,
+		RequestTimeout:    r.RequestTimeout,
+		PerAttemptTimeout: r.PerAttemptTimeout,
+	}, []string{"voyage"})...)
+
+	if r.TopK < 0 {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".top_k",
+			Message: "must be non-negative",
+		})
+	}
+
 	return errs
 }
 

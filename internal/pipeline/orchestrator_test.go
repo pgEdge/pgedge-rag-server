@@ -104,6 +104,29 @@ func (m *MockCompleter) ChatStream(
 	return &llmlib.Stream{Chunks: chunks, Err: errs}, nil
 }
 
+// MockReranker implements pipeline.Reranker for orchestrator tests.
+// CalledWith records the last request passed to Rerank, for assertions
+// on what the orchestrator sent (query, documents, TopK).
+type MockReranker struct {
+	RerankFunc func(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error)
+	CalledWith *llmlib.RerankRequest
+}
+
+func (m *MockReranker) Rerank(
+	ctx context.Context,
+	req llmlib.RerankRequest,
+) (*llmlib.RerankResponse, error) {
+	m.CalledWith = &req
+	if m.RerankFunc != nil {
+		return m.RerankFunc(ctx, req)
+	}
+	results := make([]llmlib.RerankResult, len(req.Documents))
+	for i := range req.Documents {
+		results[i] = llmlib.RerankResult{Index: i}
+	}
+	return &llmlib.RerankResponse{Results: results}, nil
+}
+
 func (m *MockCompleter) Usage() llmlib.TokenUsage {
 	return m.UsageVal
 }
@@ -733,6 +756,315 @@ func TestRetrievalFailureError_ResultsPresent(t *testing.T) {
 	}
 }
 
+// TestRerank_NilReranker_ReturnsOriginalResults verifies that a
+// pipeline with no rerank stage configured (issue #22) is a pure
+// no-op, leaving retrieval order untouched.
+func TestRerank_NilReranker_ReturnsOriginalResults(t *testing.T) {
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{Name: "test"},
+	})
+	results := []database.SearchResult{{ID: "1", Content: "a"}, {ID: "2", Content: "b"}}
+
+	got := orch.rerank(context.Background(), "query", results)
+
+	if len(got) != 2 || got[0].ID != "1" || got[1].ID != "2" {
+		t.Errorf("expected unchanged results with nil reranker, got %+v", got)
+	}
+}
+
+func TestRerank_EmptyResults_NoOp(t *testing.T) {
+	mock := &MockReranker{}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{Name: "test"},
+		Reranker: mock,
+	})
+
+	got := orch.rerank(context.Background(), "query", nil)
+
+	if len(got) != 0 {
+		t.Errorf("expected empty results, got %+v", got)
+	}
+	if mock.CalledWith != nil {
+		t.Error("reranker should not be called for an empty result set")
+	}
+}
+
+// TestRerank_ReordersByProviderResponse verifies that the orchestrator
+// maps RerankResponse.Results[i].Index back into the original
+// database.SearchResult slice, so the final order matches what the
+// provider decided rather than the retrieval order.
+func TestRerank_ReordersByProviderResponse(t *testing.T) {
+	results := []database.SearchResult{
+		{ID: "1", Content: "first"},
+		{ID: "2", Content: "second"},
+		{ID: "3", Content: "third"},
+	}
+	mock := &MockReranker{
+		RerankFunc: func(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error) {
+			return &llmlib.RerankResponse{Results: []llmlib.RerankResult{
+				{Index: 2, RelevanceScore: 0.9},
+				{Index: 0, RelevanceScore: 0.5},
+				{Index: 1, RelevanceScore: 0.1},
+			}}, nil
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{Name: "test"},
+		Reranker: mock,
+	})
+
+	got := orch.rerank(context.Background(), "query", results)
+
+	want := []string{"3", "1", "2"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d results, got %d", len(want), len(got))
+	}
+	for i, id := range want {
+		if got[i].ID != id {
+			t.Errorf("position %d: got ID %q, want %q", i, got[i].ID, id)
+		}
+	}
+
+	if mock.CalledWith == nil {
+		t.Fatal("expected reranker to be called")
+	}
+	if mock.CalledWith.Query != "query" {
+		t.Errorf("query = %q, want %q", mock.CalledWith.Query, "query")
+	}
+	if len(mock.CalledWith.Documents) != 3 || mock.CalledWith.Documents[0] != "first" {
+		t.Errorf("unexpected documents passed to reranker: %+v", mock.CalledWith.Documents)
+	}
+}
+
+// TestRerank_UpdatesScoreToRelevanceScore verifies that reranked
+// results carry the reranker's RelevanceScore, not the stale
+// vector/hybrid search score. The API's "score" field is documented as
+// "relevance score" (see openapi.go), so once a reranker has judged
+// relevance, its score is what that field should mean — otherwise
+// clients see a "sources" list that looks unsorted by its own score.
+func TestRerank_UpdatesScoreToRelevanceScore(t *testing.T) {
+	results := []database.SearchResult{
+		{ID: "1", Content: "first", Score: 0.9},
+		{ID: "2", Content: "second", Score: 0.1},
+	}
+	mock := &MockReranker{
+		RerankFunc: func(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error) {
+			// Reverses relevance relative to the original vector score:
+			// "second" (originally lowest) is now judged most relevant.
+			return &llmlib.RerankResponse{Results: []llmlib.RerankResult{
+				{Index: 1, RelevanceScore: 0.99},
+				{Index: 0, RelevanceScore: 0.05},
+			}}, nil
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{Name: "test"},
+		Reranker: mock,
+	})
+
+	got := orch.rerank(context.Background(), "query", results)
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(got))
+	}
+	if got[0].ID != "2" || got[0].Score != 0.99 {
+		t.Errorf("position 0: got ID=%q Score=%v, want ID=2 Score=0.99", got[0].ID, got[0].Score)
+	}
+	if got[1].ID != "1" || got[1].Score != 0.05 {
+		t.Errorf("position 1: got ID=%q Score=%v, want ID=1 Score=0.05", got[1].ID, got[1].Score)
+	}
+}
+
+// TestRerank_ProviderReturnsFewerResults verifies that a provider
+// returning fewer results than it was given (e.g. it applied its own
+// filtering) is passed through as-is: the orchestrator does not try to
+// pad the list back out or treat this as an error.
+func TestRerank_ProviderReturnsFewerResults(t *testing.T) {
+	results := []database.SearchResult{{ID: "1"}, {ID: "2"}, {ID: "3"}}
+	mock := &MockReranker{
+		RerankFunc: func(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error) {
+			return &llmlib.RerankResponse{Results: []llmlib.RerankResult{{Index: 1}}}, nil
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{Name: "test"},
+		Reranker: mock,
+	})
+
+	got := orch.rerank(context.Background(), "query", results)
+
+	if len(got) != 1 || got[0].ID != "2" {
+		t.Errorf("expected exactly [ID=2], got %+v", got)
+	}
+}
+
+// TestRerank_NegativeIndexSkipped mirrors
+// TestRerank_SkipsOutOfRangeIndex for the other bound: a negative
+// index from a malformed/buggy provider response must not panic.
+func TestRerank_NegativeIndexSkipped(t *testing.T) {
+	results := []database.SearchResult{{ID: "1"}, {ID: "2"}}
+	mock := &MockReranker{
+		RerankFunc: func(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error) {
+			return &llmlib.RerankResponse{Results: []llmlib.RerankResult{
+				{Index: -1},
+				{Index: 1},
+			}}, nil
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{Name: "test"},
+		Reranker: mock,
+	})
+
+	got := orch.rerank(context.Background(), "query", results)
+	if len(got) != 1 || got[0].ID != "2" {
+		t.Errorf("expected only the valid index to survive, got %+v", got)
+	}
+}
+
+func TestRerank_TopKPassedWhenSmallerThanResultCount(t *testing.T) {
+	results := []database.SearchResult{
+		{ID: "1"}, {ID: "2"}, {ID: "3"},
+	}
+	mock := &MockReranker{
+		RerankFunc: func(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error) {
+			if req.TopK == nil {
+				t.Fatal("expected TopK to be set")
+			}
+			if *req.TopK != 2 {
+				t.Errorf("TopK = %d, want 2", *req.TopK)
+			}
+			return &llmlib.RerankResponse{Results: []llmlib.RerankResult{
+				{Index: 0}, {Index: 1},
+			}}, nil
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline:   &config.Pipeline{Name: "test"},
+		Reranker:   mock,
+		RerankTopK: 2,
+	})
+
+	got := orch.rerank(context.Background(), "query", results)
+	if len(got) != 2 {
+		t.Errorf("expected 2 results, got %d", len(got))
+	}
+}
+
+// TestRerank_TopKOmittedWhenNotSmallerThanResultCount verifies the
+// boundary case rerankTopK == len(results): there is nothing to trim,
+// so no TopK should be sent to the provider.
+func TestRerank_TopKOmittedWhenNotSmallerThanResultCount(t *testing.T) {
+	results := []database.SearchResult{{ID: "1"}, {ID: "2"}}
+	mock := &MockReranker{
+		RerankFunc: func(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error) {
+			if req.TopK != nil {
+				t.Errorf("expected nil TopK, got %d", *req.TopK)
+			}
+			return &llmlib.RerankResponse{Results: []llmlib.RerankResult{
+				{Index: 0}, {Index: 1},
+			}}, nil
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline:   &config.Pipeline{Name: "test"},
+		Reranker:   mock,
+		RerankTopK: 2,
+	})
+
+	orch.rerank(context.Background(), "query", results)
+}
+
+// TestRerank_ProviderErrorFallsBackToOriginalOrder verifies that a
+// rerank failure degrades gracefully: the underlying retrieval already
+// succeeded, so the original order is kept rather than failing the
+// whole request.
+func TestRerank_ProviderErrorFallsBackToOriginalOrder(t *testing.T) {
+	results := []database.SearchResult{{ID: "1"}, {ID: "2"}}
+	mock := &MockReranker{
+		RerankFunc: func(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error) {
+			return nil, errors.New("provider unavailable")
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{Name: "test"},
+		Reranker: mock,
+	})
+
+	got := orch.rerank(context.Background(), "query", results)
+	if len(got) != 2 || got[0].ID != "1" || got[1].ID != "2" {
+		t.Errorf("expected fallback to original order, got %+v", got)
+	}
+}
+
+func TestRerank_SkipsOutOfRangeIndex(t *testing.T) {
+	results := []database.SearchResult{{ID: "1"}, {ID: "2"}}
+	mock := &MockReranker{
+		RerankFunc: func(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error) {
+			return &llmlib.RerankResponse{Results: []llmlib.RerankResult{
+				{Index: 5},
+				{Index: 0},
+			}}, nil
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{Name: "test"},
+		Reranker: mock,
+	})
+
+	got := orch.rerank(context.Background(), "query", results)
+	if len(got) != 1 || got[0].ID != "1" {
+		t.Errorf("expected only the valid index to survive, got %+v", got)
+	}
+}
+
+// TestRerank_AllIndicesInvalidFallsBackToOriginalOrder verifies that a
+// successful rerank response that yields nothing usable (here, every
+// index out of range) falls back to the original results rather than
+// returning an empty slice. Dropping all context would leave the LLM
+// with nothing to ground on, which is worse than not reranking; a
+// rerank problem should only ever degrade ordering.
+func TestRerank_AllIndicesInvalidFallsBackToOriginalOrder(t *testing.T) {
+	results := []database.SearchResult{{ID: "1"}, {ID: "2"}}
+	mock := &MockReranker{
+		RerankFunc: func(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error) {
+			return &llmlib.RerankResponse{Results: []llmlib.RerankResult{
+				{Index: 5},
+				{Index: -1},
+			}}, nil
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{Name: "test"},
+		Reranker: mock,
+	})
+
+	got := orch.rerank(context.Background(), "query", results)
+	if len(got) != 2 || got[0].ID != "1" || got[1].ID != "2" {
+		t.Errorf("expected fallback to original order, got %+v", got)
+	}
+}
+
+// TestRerank_EmptyResponseFallsBackToOriginalOrder verifies the same
+// fallback for a successful call that returns zero results at all.
+func TestRerank_EmptyResponseFallsBackToOriginalOrder(t *testing.T) {
+	results := []database.SearchResult{{ID: "1"}, {ID: "2"}}
+	mock := &MockReranker{
+		RerankFunc: func(ctx context.Context, req llmlib.RerankRequest) (*llmlib.RerankResponse, error) {
+			return &llmlib.RerankResponse{Results: []llmlib.RerankResult{}}, nil
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{Name: "test"},
+		Reranker: mock,
+	})
+
+	got := orch.rerank(context.Background(), "query", results)
+	if len(got) != 2 || got[0].ID != "1" || got[1].ID != "2" {
+		t.Errorf("expected fallback to original order, got %+v", got)
+	}
+}
+
 // TestOrchestrator_Execute_TotalRetrievalFailureSurfacesError is a
 // regression test for issue #37: it drives the real search() loop
 // (via a fake SearchBackend) rather than calling retrievalFailureError
@@ -818,5 +1150,6 @@ func TestOrchestrator_Execute_PartialRetrievalFailureFallsThroughToEmptyResult(t
 var (
 	_ Embedder      = (*MockEmbedder)(nil)
 	_ Completer     = (*MockCompleter)(nil)
+	_ Reranker      = (*MockReranker)(nil)
 	_ SearchBackend = (*MockSearchBackend)(nil)
 )

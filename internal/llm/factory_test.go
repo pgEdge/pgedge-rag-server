@@ -237,6 +237,81 @@ func TestNewCompletionClient_NilKeys(t *testing.T) {
 	}
 }
 
+func TestNewRerankClient_Voyage(t *testing.T) {
+	keys := &config.LoadedKeys{Voyage: "vk-test"}
+	c, err := NewRerankClient("voyage", "rerank-2", "", nil, keys)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c == nil {
+		t.Fatal("expected non-nil client")
+	}
+	if c.Provider() != "voyage" {
+		t.Errorf("Provider()=%q, want voyage", c.Provider())
+	}
+	if c.Model() != "rerank-2" {
+		t.Errorf("Model()=%q, want rerank-2", c.Model())
+	}
+}
+
+func TestNewRerankClient_VoyageMissingKey(t *testing.T) {
+	keys := &config.LoadedKeys{}
+	_, err := NewRerankClient("voyage", "rerank-2", "", nil, keys)
+	if err == nil || !strings.Contains(err.Error(), "Voyage") {
+		t.Errorf("expected Voyage key error, got %v", err)
+	}
+}
+
+func TestNewRerankClient_LowerCasesProviderName(t *testing.T) {
+	keys := &config.LoadedKeys{Voyage: "vk-test"}
+	c, err := NewRerankClient("Voyage", "rerank-2", "", nil, keys)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c.Provider() != "voyage" {
+		t.Errorf("provider should be lower-cased; got %q", c.Provider())
+	}
+}
+
+func TestNewRerankClient_RejectsNonVoyageProviders(t *testing.T) {
+	rejected := []string{"anthropic", "openai", "gemini", "ollama"}
+	for _, p := range rejected {
+		t.Run(p, func(t *testing.T) {
+			keys := &config.LoadedKeys{
+				Anthropic: "sk-test", OpenAI: "sk-test", Gemini: "sk-test",
+			}
+			_, err := NewRerankClient(p, "some-model", "", nil, keys)
+			if err == nil || !strings.Contains(strings.ToLower(err.Error()), "reranking") {
+				t.Errorf("%s should be rejected for reranking, got: %v", p, err)
+			}
+		})
+	}
+}
+
+func TestNewRerankClient_UnknownProvider(t *testing.T) {
+	keys := &config.LoadedKeys{}
+	_, err := NewRerankClient("nonesuch", "", "", nil, keys)
+	if err == nil || !strings.Contains(err.Error(), "reranking") {
+		t.Errorf("expected error naming reranking as unsupported, got %v", err)
+	}
+}
+
+func TestNewRerankClient_CustomHeadersAccepted(t *testing.T) {
+	keys := &config.LoadedKeys{Voyage: "vk-test"}
+	headers := map[string]string{"X-Trace-Id": "abc123"}
+	_, err := NewRerankClient("voyage", "rerank-2", "", headers, keys)
+	if err != nil {
+		t.Fatalf("custom headers should not cause an error: %v", err)
+	}
+}
+
+func TestNewRerankClient_NilKeys(t *testing.T) {
+	_, err := NewRerankClient("voyage", "rerank-2", "", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "Voyage") {
+		t.Errorf("expected Voyage key error, got %v", err)
+	}
+}
+
 func TestWithOptions_AppliesTimeouts(t *testing.T) {
 	got := withOptions(llmlib.Options{Model: "x"}, []ClientOption{
 		WithRequestTimeout(90 * time.Second),
