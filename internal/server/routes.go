@@ -13,7 +13,9 @@ package server
 func (s *Server) setupRoutes() {
 	// API v1 routes
 	s.mux.HandleFunc("GET /v1/openapi.json", s.handleOpenAPI)
+	s.mux.HandleFunc("GET /v1/live", s.handleLive)
 	s.mux.HandleFunc("GET /v1/health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/pipelines", s.handleListPipelines)
 	s.mux.HandleFunc("POST /v1/pipelines/{name}", s.handlePipeline)
+	s.mux.HandleFunc("GET /v1/stats", s.handleStats)
 }

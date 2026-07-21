@@ -26,6 +26,8 @@ import (
 // MockEmbedder implements pipeline.Embedder for orchestrator tests.
 type MockEmbedder struct {
 	EmbedFunc func(ctx context.Context, text string) ([]float64, error)
+	PingFunc  func(ctx context.Context) error
+	UsageVal  llmlib.TokenUsage
 }
 
 func (m *MockEmbedder) Embed(ctx context.Context, text string) ([]float64, error) {
@@ -35,10 +37,30 @@ func (m *MockEmbedder) Embed(ctx context.Context, text string) ([]float64, error
 	return []float64{0.1, 0.2, 0.3}, nil
 }
 
+func (m *MockEmbedder) Ping(ctx context.Context) error {
+	if m.PingFunc != nil {
+		return m.PingFunc(ctx)
+	}
+	return nil
+}
+
+func (m *MockEmbedder) Usage() llmlib.TokenUsage {
+	return m.UsageVal
+}
+
 // MockCompleter implements pipeline.Completer for orchestrator tests.
 type MockCompleter struct {
 	ChatFunc       func(ctx context.Context, req llmlib.ChatRequest) (*llmlib.ChatResponse, error)
 	ChatStreamFunc func(ctx context.Context, req llmlib.ChatRequest) (*llmlib.Stream, error)
+	PingFunc       func(ctx context.Context) error
+	UsageVal       llmlib.TokenUsage
+}
+
+func (m *MockCompleter) Ping(ctx context.Context) error {
+	if m.PingFunc != nil {
+		return m.PingFunc(ctx)
+	}
+	return nil
 }
 
 func (m *MockCompleter) Chat(
@@ -103,6 +125,54 @@ func (m *MockReranker) Rerank(
 		results[i] = llmlib.RerankResult{Index: i}
 	}
 	return &llmlib.RerankResponse{Results: results}, nil
+}
+
+func (m *MockCompleter) Usage() llmlib.TokenUsage {
+	return m.UsageVal
+}
+
+// MockSearchBackend implements pipeline.SearchBackend for orchestrator
+// tests that need to drive search() to fail (or partially fail) on
+// demand, without a real database — see issue #37.
+type MockSearchBackend struct {
+	VectorSearchFunc func(
+		ctx context.Context,
+		embedding []float32,
+		table config.TableSource,
+		topN int,
+		filter *config.Filter,
+		minSimilarity *float64,
+	) ([]database.SearchResult, error)
+	FetchDocumentsFunc func(
+		ctx context.Context,
+		table config.TableSource,
+		filter *config.Filter,
+	) (map[string]string, error)
+}
+
+func (m *MockSearchBackend) VectorSearch(
+	ctx context.Context,
+	embedding []float32,
+	table config.TableSource,
+	topN int,
+	filter *config.Filter,
+	minSimilarity *float64,
+) ([]database.SearchResult, error) {
+	if m.VectorSearchFunc != nil {
+		return m.VectorSearchFunc(ctx, embedding, table, topN, filter, minSimilarity)
+	}
+	return nil, nil
+}
+
+func (m *MockSearchBackend) FetchDocuments(
+	ctx context.Context,
+	table config.TableSource,
+	filter *config.Filter,
+) (map[string]string, error) {
+	if m.FetchDocumentsFunc != nil {
+		return m.FetchDocumentsFunc(ctx, table, filter)
+	}
+	return nil, nil
 }
 
 func TestNewOrchestrator(t *testing.T) {
@@ -995,9 +1065,91 @@ func TestRerank_EmptyResponseFallsBackToOriginalOrder(t *testing.T) {
 	}
 }
 
+// TestOrchestrator_Execute_TotalRetrievalFailureSurfacesError is a
+// regression test for issue #37: it drives the real search() loop
+// (via a fake SearchBackend) rather than calling retrievalFailureError
+// directly, proving the wiring that sets hadError/hadSuccessfulLookup
+// actually surfaces a real error when every configured table fails.
+func TestOrchestrator_Execute_TotalRetrievalFailureSurfacesError(t *testing.T) {
+	backend := &MockSearchBackend{
+		VectorSearchFunc: func(
+			ctx context.Context, embedding []float32, table config.TableSource,
+			topN int, filter *config.Filter, minSimilarity *float64,
+		) ([]database.SearchResult, error) {
+			return nil, errors.New("connection refused")
+		},
+	}
+	pCfg := config.Pipeline{
+		Name: "test-pipeline",
+		Tables: []config.TableSource{
+			{Table: "documents", TextColumn: "content", VectorColumn: "embedding"},
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline:       &pCfg,
+		DBPool:         backend,
+		EmbeddingProv:  &MockEmbedder{},
+		CompletionProv: &MockCompleter{},
+		TokenBudget:    DefaultTokenBudget,
+		TopN:           DefaultTopN,
+	})
+
+	_, err := orch.Execute(context.Background(), QueryRequest{Query: "test query"})
+	if err == nil {
+		t.Fatal("expected an error when every configured table's search fails")
+	}
+}
+
+// TestOrchestrator_Execute_PartialRetrievalFailureFallsThroughToEmptyResult
+// is a regression test for issue #37: with two tables where the first
+// fails and the second succeeds (with zero matches), the real search()
+// loop must still fall through to the legitimate "no relevant
+// information" response, not surface an error.
+func TestOrchestrator_Execute_PartialRetrievalFailureFallsThroughToEmptyResult(t *testing.T) {
+	var calls int
+	backend := &MockSearchBackend{
+		VectorSearchFunc: func(
+			ctx context.Context, embedding []float32, table config.TableSource,
+			topN int, filter *config.Filter, minSimilarity *float64,
+		) ([]database.SearchResult, error) {
+			calls++
+			if calls == 1 {
+				return nil, errors.New("table 1 unreachable")
+			}
+			return nil, nil // table 2 succeeds, with zero matches
+		},
+	}
+	pCfg := config.Pipeline{
+		Name: "test-pipeline",
+		Tables: []config.TableSource{
+			{Table: "docs1", TextColumn: "content", VectorColumn: "embedding"},
+			{Table: "docs2", TextColumn: "content", VectorColumn: "embedding"},
+		},
+	}
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline:       &pCfg,
+		DBPool:         backend,
+		EmbeddingProv:  &MockEmbedder{},
+		CompletionProv: &MockCompleter{},
+		TokenBudget:    DefaultTokenBudget,
+		TopN:           DefaultTopN,
+	})
+
+	resp, err := orch.Execute(context.Background(), QueryRequest{Query: "test query"})
+	if err != nil {
+		t.Fatalf("expected no error when at least one table's search succeeded, got %v", err)
+	}
+
+	expected := "No relevant information found in the available documents."
+	if resp.Answer != expected {
+		t.Errorf("expected answer %q, got %q", expected, resp.Answer)
+	}
+}
+
 // Verify mock providers implement the interfaces
 var (
-	_ Embedder  = (*MockEmbedder)(nil)
-	_ Completer = (*MockCompleter)(nil)
-	_ Reranker  = (*MockReranker)(nil)
+	_ Embedder      = (*MockEmbedder)(nil)
+	_ Completer     = (*MockCompleter)(nil)
+	_ Reranker      = (*MockReranker)(nil)
+	_ SearchBackend = (*MockSearchBackend)(nil)
 )

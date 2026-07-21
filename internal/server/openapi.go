@@ -126,10 +126,30 @@ func BuildOpenAPISpec() OpenAPISpec {
 			},
 		},
 		Paths: map[string]OpenAPIPath{
+			"/live": {
+				Get: &OpenAPIOperation{
+					Summary:     "Liveness check",
+					Description: "Cheap, dependency-free check that the server process is up and serving; does not ping providers. Suitable for a latency-sensitive liveness probe",
+					OperationID: "getLive",
+					Tags:        []string{"System"},
+					Responses: map[string]OpenAPIResponse{
+						"200": {
+							Description: "Server process is up",
+							Content: map[string]OpenAPIMediaType{
+								"application/json": {
+									Schema: OpenAPISchema{
+										Ref: "#/components/schemas/LiveResponse",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 			"/health": {
 				Get: &OpenAPIOperation{
 					Summary:     "Health check",
-					Description: "Check if the server is running and healthy",
+					Description: "Check if the server is running, and whether each pipeline's LLM providers are reachable",
 					OperationID: "getHealth",
 					Tags:        []string{"System"},
 					Responses: map[string]OpenAPIResponse{
@@ -159,6 +179,26 @@ func BuildOpenAPISpec() OpenAPISpec {
 								"application/json": {
 									Schema: OpenAPISchema{
 										Ref: "#/components/schemas/PipelinesResponse",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			"/stats": {
+				Get: &OpenAPIOperation{
+					Summary:     "Pipeline usage stats",
+					Description: "Get cumulative LLM token usage for every pipeline",
+					OperationID: "getStats",
+					Tags:        []string{"System"},
+					Responses: map[string]OpenAPIResponse{
+						"200": {
+							Description: "Pipeline usage statistics",
+							Content: map[string]OpenAPIMediaType{
+								"application/json": {
+									Schema: OpenAPISchema{
+										Ref: "#/components/schemas/StatsResponse",
 									},
 								},
 							},
@@ -247,15 +287,64 @@ func BuildOpenAPISpec() OpenAPISpec {
 		},
 		Components: OpenAPIComponents{
 			Schemas: map[string]OpenAPISchema{
+				"LiveResponse": {
+					Type: "object",
+					Properties: map[string]OpenAPISchema{
+						"status": {
+							Type:        "string",
+							Description: "Liveness status; always \"ok\" when the process is serving",
+						},
+					},
+					Required: []string{"status"},
+				},
 				"HealthResponse": {
 					Type: "object",
 					Properties: map[string]OpenAPISchema{
 						"status": {
 							Type:        "string",
-							Description: "Health status",
+							Description: "Overall health status: \"healthy\" or \"degraded\" (one or more providers unreachable). Always HTTP 200",
+						},
+						"pipelines": {
+							Type:        "array",
+							Description: "Per-pipeline provider connectivity",
+							Items: &OpenAPISchema{
+								Ref: "#/components/schemas/PipelineHealth",
+							},
 						},
 					},
 					Required: []string{"status"},
+				},
+				"PipelineHealth": {
+					Type: "object",
+					Properties: map[string]OpenAPISchema{
+						"name": {
+							Type:        "string",
+							Description: "Pipeline name",
+						},
+						"embedding": {
+							Ref:         "#/components/schemas/ProviderHealth",
+							Description: "Embedding provider connectivity",
+						},
+						"completion": {
+							Ref:         "#/components/schemas/ProviderHealth",
+							Description: "Completion provider connectivity",
+						},
+					},
+					Required: []string{"name", "embedding", "completion"},
+				},
+				"ProviderHealth": {
+					Type: "object",
+					Properties: map[string]OpenAPISchema{
+						"reachable": {
+							Type:        "boolean",
+							Description: "Whether the provider responded to a connectivity check",
+						},
+						"error": {
+							Type:        "string",
+							Description: "Error message if unreachable",
+						},
+					},
+					Required: []string{"reachable"},
 				},
 				"PipelinesResponse": {
 					Type: "object",
@@ -283,6 +372,68 @@ func BuildOpenAPISpec() OpenAPISpec {
 						},
 					},
 					Required: []string{"name"},
+				},
+				"StatsResponse": {
+					Type: "object",
+					Properties: map[string]OpenAPISchema{
+						"pipelines": {
+							Type:        "array",
+							Description: "Per-pipeline cumulative token usage",
+							Items: &OpenAPISchema{
+								Ref: "#/components/schemas/PipelineUsage",
+							},
+						},
+					},
+					Required: []string{"pipelines"},
+				},
+				"PipelineUsage": {
+					Type: "object",
+					Properties: map[string]OpenAPISchema{
+						"name": {
+							Type:        "string",
+							Description: "Pipeline name",
+						},
+						"description": {
+							Type:        "string",
+							Description: "Pipeline description",
+						},
+						"embedding": {
+							Ref:         "#/components/schemas/TokenUsage",
+							Description: "Cumulative embedding token usage",
+						},
+						"completion": {
+							Ref:         "#/components/schemas/TokenUsage",
+							Description: "Cumulative completion token usage",
+						},
+					},
+					Required: []string{"name", "embedding", "completion"},
+				},
+				"TokenUsage": {
+					Type:        "object",
+					Description: "Cumulative token usage since client creation or last reset",
+					Properties: map[string]OpenAPISchema{
+						"prompt_tokens": {
+							Type:        "integer",
+							Description: "Cumulative prompt/input tokens",
+						},
+						"completion_tokens": {
+							Type:        "integer",
+							Description: "Cumulative completion/output tokens",
+						},
+						"total_tokens": {
+							Type:        "integer",
+							Description: "Cumulative total tokens (prompt + completion)",
+						},
+						"cache_creation_input_tokens": {
+							Type:        "integer",
+							Description: "Cumulative tokens used to write to the prompt cache",
+						},
+						"cache_read_input_tokens": {
+							Type:        "integer",
+							Description: "Cumulative tokens read from the prompt cache",
+						},
+					},
+					Required: []string{"prompt_tokens", "completion_tokens", "total_tokens"},
 				},
 				"Message": {
 					Type: "object",

@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"net/textproto"
 	"sync"
+	"time"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 	"github.com/pgEdge/pgedge-rag-server/internal/database"
@@ -245,6 +246,63 @@ func (m *Manager) Get(name string) (*Pipeline, error) {
 	return p, nil
 }
 
+// GetExecutor retrieves a pipeline by name as the narrower QueryExecutor
+// interface, for callers (the HTTP server) that only need to run
+// queries and shouldn't depend on *Pipeline directly — see issue #37.
+//
+// Deliberately does not just `return m.Get(name)`: on the not-found
+// path Get returns a nil *Pipeline, and converting a nil *Pipeline
+// straight into the QueryExecutor interface would produce a non-nil
+// interface wrapping a nil pointer (a classic Go footgun), silently
+// breaking any caller's `if executor == nil` check. Explicitly
+// returning a literal nil on error avoids that.
+func (m *Manager) GetExecutor(name string) (QueryExecutor, error) {
+	p, err := m.Get(name)
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// Stats returns cumulative token usage for every pipeline.
+func (m *Manager) Stats() []Usage {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	stats := make([]Usage, 0, len(m.pipelines))
+	for _, p := range m.pipelines {
+		stats = append(stats, p.Usage())
+	}
+
+	return stats
+}
+
+// Health checks connectivity for every pipeline's providers
+// concurrently, each bounded by DefaultPingTimeout, so the total call
+// takes roughly one ping's worth of time regardless of how many
+// pipelines are configured.
+func (m *Manager) Health(ctx context.Context) []PipelineHealth {
+	m.mu.RLock()
+	pipelines := make([]*Pipeline, 0, len(m.pipelines))
+	for _, p := range m.pipelines {
+		pipelines = append(pipelines, p)
+	}
+	m.mu.RUnlock()
+
+	results := make([]PipelineHealth, len(pipelines))
+	var wg sync.WaitGroup
+	for i, p := range pipelines {
+		wg.Add(1)
+		go func(i int, p *Pipeline) {
+			defer wg.Done()
+			results[i] = p.Ping(ctx)
+		}(i, p)
+	}
+	wg.Wait()
+
+	return results
+}
+
 // Execute runs a RAG query on the pipeline.
 func (p *Pipeline) Execute(ctx context.Context, query string) (*QueryResponse, error) {
 	return p.orchestrator.Execute(ctx, QueryRequest{
@@ -289,6 +347,71 @@ func (p *Pipeline) Name() string {
 // Description returns the pipeline description.
 func (p *Pipeline) Description() string {
 	return p.description
+}
+
+// Usage returns this pipeline's cumulative embedding and completion
+// token usage.
+func (p *Pipeline) Usage() Usage {
+	return Usage{
+		Name:        p.name,
+		Description: p.description,
+		Embedding:   p.embeddingProv.Usage(),
+		Completion:  p.completionProv.Usage(),
+	}
+}
+
+// DefaultPingTimeout bounds how long a single provider's connectivity
+// check is allowed to take before Ping reports it unreachable.
+const DefaultPingTimeout = 3 * time.Second
+
+// Ping checks connectivity for this pipeline's embedding and
+// completion providers concurrently, each bounded by
+// DefaultPingTimeout, so a slow or unreachable provider on one side
+// doesn't add its timeout on top of the other's.
+func (p *Pipeline) Ping(ctx context.Context) PipelineHealth {
+	var embedding, completion ProviderHealth
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		embedding = pingProvider(ctx, p.embeddingProv.Ping)
+	}()
+	go func() {
+		defer wg.Done()
+		completion = pingProvider(ctx, p.completionProv.Ping)
+	}()
+	wg.Wait()
+
+	return PipelineHealth{
+		Name:       p.name,
+		Embedding:  embedding,
+		Completion: completion,
+	}
+}
+
+// pingProvider runs ping with a DefaultPingTimeout deadline and
+// converts the result into a ProviderHealth. A panic from ping (e.g. a
+// buggy provider client) is recovered and reported as unreachable
+// rather than crashing the whole process: this runs inside goroutines
+// spawned by Pipeline.Ping/Manager.Health, and Go's panic/recover is
+// per-goroutine, so recoveryMiddleware's recover on the request
+// goroutine can't catch it.
+func pingProvider(ctx context.Context, ping func(context.Context) error) (health ProviderHealth) {
+	defer func() {
+		if r := recover(); r != nil {
+			health = ProviderHealth{Reachable: false, Error: fmt.Sprintf("panic: %v", r)}
+		}
+	}()
+
+	pingCtx, cancel := context.WithTimeout(ctx, DefaultPingTimeout)
+	defer cancel()
+
+	if err := ping(pingCtx); err != nil {
+		return ProviderHealth{Reachable: false, Error: err.Error()}
+	}
+
+	return ProviderHealth{Reachable: true}
 }
 
 // Close releases resources associated with the pipeline.

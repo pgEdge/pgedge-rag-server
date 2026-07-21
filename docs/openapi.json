@@ -15,7 +15,7 @@
     "/health": {
       "get": {
         "summary": "Health check",
-        "description": "Check if the server is running and healthy",
+        "description": "Check if the server is running, and whether each pipeline's LLM providers are reachable",
         "operationId": "getHealth",
         "tags": [
           "System"
@@ -27,6 +27,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/live": {
+      "get": {
+        "summary": "Liveness check",
+        "description": "Cheap, dependency-free check that the server process is up and serving; does not ping providers. Suitable for a latency-sensitive liveness probe",
+        "operationId": "getLive",
+        "tags": [
+          "System"
+        ],
+        "responses": {
+          "200": {
+            "description": "Server process is up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveResponse"
                 }
               }
             }
@@ -135,6 +157,28 @@
           }
         }
       }
+    },
+    "/stats": {
+      "get": {
+        "summary": "Pipeline usage stats",
+        "description": "Get cumulative LLM token usage for every pipeline",
+        "operationId": "getStats",
+        "tags": [
+          "System"
+        ],
+        "responses": {
+          "200": {
+            "description": "Pipeline usage statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -229,9 +273,28 @@
       "HealthResponse": {
         "type": "object",
         "properties": {
+          "pipelines": {
+            "type": "array",
+            "description": "Per-pipeline provider connectivity",
+            "items": {
+              "$ref": "#/components/schemas/PipelineHealth"
+            }
+          },
           "status": {
             "type": "string",
-            "description": "Health status"
+            "description": "Overall health status: \"healthy\" or \"degraded\" (one or more providers unreachable). Always HTTP 200"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "LiveResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Liveness status; always \"ok\" when the process is serving"
           }
         },
         "required": [
@@ -255,6 +318,28 @@
           "content"
         ]
       },
+      "PipelineHealth": {
+        "type": "object",
+        "properties": {
+          "completion": {
+            "description": "Completion provider connectivity",
+            "$ref": "#/components/schemas/ProviderHealth"
+          },
+          "embedding": {
+            "description": "Embedding provider connectivity",
+            "$ref": "#/components/schemas/ProviderHealth"
+          },
+          "name": {
+            "type": "string",
+            "description": "Pipeline name"
+          }
+        },
+        "required": [
+          "name",
+          "embedding",
+          "completion"
+        ]
+      },
       "PipelineInfo": {
         "type": "object",
         "properties": {
@@ -271,6 +356,32 @@
           "name"
         ]
       },
+      "PipelineUsage": {
+        "type": "object",
+        "properties": {
+          "completion": {
+            "description": "Cumulative completion token usage",
+            "$ref": "#/components/schemas/TokenUsage"
+          },
+          "description": {
+            "type": "string",
+            "description": "Pipeline description"
+          },
+          "embedding": {
+            "description": "Cumulative embedding token usage",
+            "$ref": "#/components/schemas/TokenUsage"
+          },
+          "name": {
+            "type": "string",
+            "description": "Pipeline name"
+          }
+        },
+        "required": [
+          "name",
+          "embedding",
+          "completion"
+        ]
+      },
       "PipelinesResponse": {
         "type": "object",
         "properties": {
@@ -284,6 +395,22 @@
         },
         "required": [
           "pipelines"
+        ]
+      },
+      "ProviderHealth": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error message if unreachable"
+          },
+          "reachable": {
+            "type": "boolean",
+            "description": "Whether the provider responded to a connectivity check"
+          }
+        },
+        "required": [
+          "reachable"
         ]
       },
       "QueryRequest": {
@@ -367,6 +494,52 @@
         "required": [
           "content",
           "score"
+        ]
+      },
+      "StatsResponse": {
+        "type": "object",
+        "properties": {
+          "pipelines": {
+            "type": "array",
+            "description": "Per-pipeline cumulative token usage",
+            "items": {
+              "$ref": "#/components/schemas/PipelineUsage"
+            }
+          }
+        },
+        "required": [
+          "pipelines"
+        ]
+      },
+      "TokenUsage": {
+        "type": "object",
+        "description": "Cumulative token usage since client creation or last reset",
+        "properties": {
+          "cache_creation_input_tokens": {
+            "type": "integer",
+            "description": "Cumulative tokens used to write to the prompt cache"
+          },
+          "cache_read_input_tokens": {
+            "type": "integer",
+            "description": "Cumulative tokens read from the prompt cache"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "description": "Cumulative completion/output tokens"
+          },
+          "prompt_tokens": {
+            "type": "integer",
+            "description": "Cumulative prompt/input tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "description": "Cumulative total tokens (prompt + completion)"
+          }
+        },
+        "required": [
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens"
         ]
       }
     }

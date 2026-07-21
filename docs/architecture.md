@@ -37,6 +37,7 @@ endpoints (all under the `/v1` API version prefix):
 - `GET /v1/health` - Health check
 - `GET /v1/pipelines` - List available pipelines
 - `POST /v1/pipelines/{name}` - Execute a RAG query
+- `GET /v1/stats` - Cumulative per-pipeline LLM token usage
 
 All JSON responses include an RFC 8631 `Link` header pointing to the OpenAPI
 specification for API discovery by tools like restish.
