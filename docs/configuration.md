@@ -59,6 +59,19 @@ Reloads are debounced by a short interval, so a single logical change
 that produces several rapid filesystem events (as atomic replacement
 does) triggers one reload, not several.
 
+Detection works at the level of the directory containing each watched
+file, not the file itself; this is what allows atomic symlink
+replacement to be seen at all. A side effect is that any change within
+such a directory triggers a reload, even one unrelated to the watched
+file. This is not a concern for a Kubernetes `ConfigMap` or `Secret`
+volume, whose mounted directory contains only the projected files, but
+it does mean that placing a key file in a busy directory should be
+avoided. In particular, relying on the default `~/.provider-api-key`
+locations causes `$HOME` itself to be watched, so unrelated file
+activity there (a shell writing its history, an editor scratch file,
+and so on) would provoke needless reloads; mounting keys into a
+dedicated directory, as a container deployment does, avoids this.
+
 
 ## Configuration File Structure
 
