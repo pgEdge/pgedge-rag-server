@@ -27,7 +27,14 @@ import (
 // PipelineManager defines the interface for pipeline management.
 type PipelineManager interface {
 	List() []pipeline.Info
-	Get(name string) (*pipeline.Pipeline, error)
+
+	// GetExecutor retrieves a pipeline by name as the narrow
+	// QueryExecutor interface, so the server depends only on the
+	// ability to run a query, not on *pipeline.Pipeline directly —
+	// this is what lets tests inject a fake that hangs, errors, or
+	// returns a controlled result. See issue #37.
+	GetExecutor(name string) (pipeline.QueryExecutor, error)
+
 	Stats() []pipeline.Usage
 	Health(ctx context.Context) []pipeline.PipelineHealth
 	Close() error
