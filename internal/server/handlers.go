@@ -21,6 +21,12 @@ import (
 
 // HealthResponse is the response for the health check endpoint.
 type HealthResponse struct {
+	Status    string                    `json:"status"`
+	Pipelines []pipeline.PipelineHealth `json:"pipelines,omitempty"`
+}
+
+// LiveResponse is the response for the liveness endpoint.
+type LiveResponse struct {
 	Status string `json:"status"`
 }
 
@@ -59,9 +65,35 @@ func isRequestTimeout(ctx context.Context) bool {
 	return errors.Is(ctx.Err(), context.DeadlineExceeded)
 }
 
-// handleHealth handles the GET /health endpoint.
+// handleLive handles the GET /live endpoint: a cheap, dependency-free
+// liveness check that returns immediately, for use as a Kubernetes
+// liveness probe (or any caller that only needs to know the process is
+// up and serving). Unlike /health it never touches the LLM providers,
+// so it isn't affected by provider latency — see issue #23.
+func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
+	s.respondJSON(w, http.StatusOK, LiveResponse{Status: "ok"})
+}
+
+// handleHealth handles the GET /health endpoint. It reports the server
+// process as healthy unconditionally, and additionally pings every
+// pipeline's LLM providers to surface connectivity problems in the
+// response body — see issue #23. A provider being unreachable does
+// not change the status code; it degrades "status" in the body so
+// callers that only check for HTTP 200 keep working. Because it pings
+// providers, this call can take up to pipeline.DefaultPingTimeout; use
+// /live for a latency-sensitive liveness probe.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	s.respondJSON(w, http.StatusOK, HealthResponse{Status: "healthy"})
+	pipelines := s.pipelineManager().Health(r.Context())
+
+	status := "healthy"
+	for _, p := range pipelines {
+		if !p.Embedding.Reachable || !p.Completion.Reachable {
+			status = "degraded"
+			break
+		}
+	}
+
+	s.respondJSON(w, http.StatusOK, HealthResponse{Status: status, Pipelines: pipelines})
 }
 
 // handleListPipelines handles the GET /pipelines endpoint.

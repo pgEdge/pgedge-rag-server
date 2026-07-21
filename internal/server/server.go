@@ -29,6 +29,7 @@ type PipelineManager interface {
 	List() []pipeline.Info
 	Get(name string) (*pipeline.Pipeline, error)
 	Stats() []pipeline.Usage
+	Health(ctx context.Context) []pipeline.PipelineHealth
 	Close() error
 }
 

@@ -126,10 +126,30 @@ func BuildOpenAPISpec() OpenAPISpec {
 			},
 		},
 		Paths: map[string]OpenAPIPath{
+			"/live": {
+				Get: &OpenAPIOperation{
+					Summary:     "Liveness check",
+					Description: "Cheap, dependency-free check that the server process is up and serving; does not ping providers. Suitable for a latency-sensitive liveness probe",
+					OperationID: "getLive",
+					Tags:        []string{"System"},
+					Responses: map[string]OpenAPIResponse{
+						"200": {
+							Description: "Server process is up",
+							Content: map[string]OpenAPIMediaType{
+								"application/json": {
+									Schema: OpenAPISchema{
+										Ref: "#/components/schemas/LiveResponse",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 			"/health": {
 				Get: &OpenAPIOperation{
 					Summary:     "Health check",
-					Description: "Check if the server is running and healthy",
+					Description: "Check if the server is running, and whether each pipeline's LLM providers are reachable",
 					OperationID: "getHealth",
 					Tags:        []string{"System"},
 					Responses: map[string]OpenAPIResponse{
@@ -267,15 +287,64 @@ func BuildOpenAPISpec() OpenAPISpec {
 		},
 		Components: OpenAPIComponents{
 			Schemas: map[string]OpenAPISchema{
+				"LiveResponse": {
+					Type: "object",
+					Properties: map[string]OpenAPISchema{
+						"status": {
+							Type:        "string",
+							Description: "Liveness status; always \"ok\" when the process is serving",
+						},
+					},
+					Required: []string{"status"},
+				},
 				"HealthResponse": {
 					Type: "object",
 					Properties: map[string]OpenAPISchema{
 						"status": {
 							Type:        "string",
-							Description: "Health status",
+							Description: "Overall health status: \"healthy\" or \"degraded\" (one or more providers unreachable). Always HTTP 200",
+						},
+						"pipelines": {
+							Type:        "array",
+							Description: "Per-pipeline provider connectivity",
+							Items: &OpenAPISchema{
+								Ref: "#/components/schemas/PipelineHealth",
+							},
 						},
 					},
 					Required: []string{"status"},
+				},
+				"PipelineHealth": {
+					Type: "object",
+					Properties: map[string]OpenAPISchema{
+						"name": {
+							Type:        "string",
+							Description: "Pipeline name",
+						},
+						"embedding": {
+							Ref:         "#/components/schemas/ProviderHealth",
+							Description: "Embedding provider connectivity",
+						},
+						"completion": {
+							Ref:         "#/components/schemas/ProviderHealth",
+							Description: "Completion provider connectivity",
+						},
+					},
+					Required: []string{"name", "embedding", "completion"},
+				},
+				"ProviderHealth": {
+					Type: "object",
+					Properties: map[string]OpenAPISchema{
+						"reachable": {
+							Type:        "boolean",
+							Description: "Whether the provider responded to a connectivity check",
+						},
+						"error": {
+							Type:        "string",
+							Description: "Error message if unreachable",
+						},
+					},
+					Required: []string{"reachable"},
 				},
 				"PipelinesResponse": {
 					Type: "object",

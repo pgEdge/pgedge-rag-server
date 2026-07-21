@@ -25,7 +25,7 @@ and use the API schema.
 
 Get the OpenAPI v3 specification for the API.
 
-```
+```http
 GET /v1/openapi.json
 ```
 
@@ -40,11 +40,37 @@ request/response schemas, and error formats.
 
 ---
 
+### Liveness Check
+
+Check that the server process is up and serving. This is a cheap,
+dependency-free check that returns immediately and never contacts the
+LLM providers, so its latency is unaffected by provider health. It is
+the right endpoint for a Kubernetes liveness probe.
+
+```http
+GET /v1/live
+```
+
+#### Response
+
+```json
+{
+  "status": "ok"
+}
+```
+
+| Status Code | Description          |
+|-------------|----------------------|
+| 200         | Server process is up |
+
+---
+
 ### Health Check
 
-Check if the server is running and healthy.
+Check if the server is running, and whether each pipeline's embedding
+and completion providers are reachable.
 
-```
+```http
 GET /v1/health
 ```
 
@@ -52,13 +78,57 @@ GET /v1/health
 
 ```json
 {
-  "status": "healthy"
+  "status": "healthy",
+  "pipelines": [
+    {
+      "name": "my-docs",
+      "embedding": { "reachable": true },
+      "completion": { "reachable": true }
+    }
+  ]
 }
 ```
 
-| Status Code | Description        |
-|-------------|--------------------|
-| 200         | Server is healthy  |
+If a provider is unreachable, `status` becomes `"degraded"` and the
+affected provider's entry includes an `error`:
+
+```json
+{
+  "status": "degraded",
+  "pipelines": [
+    {
+      "name": "my-docs",
+      "embedding": { "reachable": true },
+      "completion": {
+        "reachable": false,
+        "error": "connection refused"
+      }
+    }
+  ]
+}
+```
+
+An unreachable provider does not change the HTTP status code — it
+only degrades `status` in the body, so callers that just check for
+HTTP 200 are unaffected.
+
+**Known cost caveat:** connectivity is checked via the underlying
+library's `Ping`, which is a free metadata call for OpenAI, Anthropic,
+Gemini, and Ollama. For **Voyage**, `Ping` makes a real (tiny) embedding
+request instead, since Voyage has no models-list endpoint. If a
+pipeline's `embedding_llm.provider` is `voyage`, each `/v1/health` call
+consumes a small amount of real Voyage API usage — worth accounting
+for if health checks run frequently (e.g. a frequently polled probe).
+
+Because it pings providers, `/v1/health` can take up to the provider
+ping timeout (a few seconds) to respond, so it is better suited to a
+readiness probe or to monitoring than to a latency-sensitive liveness
+probe. For liveness, use [`/v1/live`](#liveness-check), which returns
+immediately without contacting any provider.
+
+| Status Code | Description                             |
+|-------------|------------------------------------------|
+| 200         | Server is running (see `status` in body) |
 
 ---
 
@@ -66,7 +136,7 @@ GET /v1/health
 
 Get a list of all available RAG pipelines.
 
-```
+```http
 GET /v1/pipelines
 ```
 
@@ -102,7 +172,7 @@ increasing counter, not a per-request or windowed value. See the
 known limitation below the example: `embedding` usage only
 accumulates for pipelines using the Voyage provider.
 
-```
+```http
 GET /v1/stats
 ```
 
@@ -155,7 +225,7 @@ this endpoint.
 
 Execute a RAG query against a specific pipeline.
 
-```
+```http
 POST /v1/pipelines/{name}
 ```
 

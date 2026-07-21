@@ -35,6 +35,9 @@ type mockPipelineInfo struct {
 	description string
 	embedding   llmlib.TokenUsage
 	completion  llmlib.TokenUsage
+	// health, when non-nil, is returned verbatim by Health for this
+	// pipeline. Nil means "reachable", matching the default healthy case.
+	health *pipeline.PipelineHealth
 }
 
 func newMockPipelineManager() *mockPipelineManager {
@@ -83,6 +86,22 @@ func (m *mockPipelineManager) Stats() []pipeline.Usage {
 	return stats
 }
 
+func (m *mockPipelineManager) Health(ctx context.Context) []pipeline.PipelineHealth {
+	results := make([]pipeline.PipelineHealth, 0, len(m.pipelines))
+	for _, p := range m.pipelines {
+		if p.health != nil {
+			results = append(results, *p.health)
+			continue
+		}
+		results = append(results, pipeline.PipelineHealth{
+			Name:       p.name,
+			Embedding:  pipeline.ProviderHealth{Reachable: true},
+			Completion: pipeline.ProviderHealth{Reachable: true},
+		})
+	}
+	return results
+}
+
 func (m *mockPipelineManager) Close() error {
 	return nil
 }
@@ -108,6 +127,30 @@ func testServer() *Server {
 	return New(cfg, pm, nil)
 }
 
+// TestLiveEndpoint verifies the liveness endpoint returns HTTP 200 with
+// a simple "ok" status and, unlike /health, does not include any
+// per-pipeline provider information — see issue #23.
+func TestLiveEndpoint(t *testing.T) {
+	srv := testServer()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/live", nil)
+	w := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp LiveResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status != "ok" {
+		t.Errorf("expected status 'ok', got '%s'", resp.Status)
+	}
+}
+
 func TestHealthEndpoint(t *testing.T) {
 	srv := testServer()
 
@@ -127,6 +170,56 @@ func TestHealthEndpoint(t *testing.T) {
 
 	if resp.Status != "healthy" {
 		t.Errorf("expected status 'healthy', got '%s'", resp.Status)
+	}
+
+	if len(resp.Pipelines) != 1 {
+		t.Fatalf("expected 1 pipeline in health response, got %d", len(resp.Pipelines))
+	}
+	got := resp.Pipelines[0]
+	if got.Name != "test-pipeline" {
+		t.Errorf("expected pipeline name 'test-pipeline', got '%s'", got.Name)
+	}
+	if !got.Embedding.Reachable || !got.Completion.Reachable {
+		t.Errorf("expected both providers reachable, got %+v", got)
+	}
+}
+
+// TestHealthEndpoint_DegradedWhenProviderUnreachable is a regression
+// test for issue #23: an unreachable provider must degrade the
+// reported status and surface its error, while still returning HTTP
+// 200 so basic uptime checks aren't broken by a provider outage.
+func TestHealthEndpoint_DegradedWhenProviderUnreachable(t *testing.T) {
+	cfg := testConfig()
+	pm := newMockPipelineManager()
+	pm.pipelines["test-pipeline"].health = &pipeline.PipelineHealth{
+		Name:       "test-pipeline",
+		Embedding:  pipeline.ProviderHealth{Reachable: true},
+		Completion: pipeline.ProviderHealth{Reachable: false, Error: "connection refused"},
+	}
+	srv := New(cfg, pm, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+	w := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d even when a provider is unreachable, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp HealthResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Status != "degraded" {
+		t.Errorf("expected status 'degraded', got '%s'", resp.Status)
+	}
+	if len(resp.Pipelines) != 1 {
+		t.Fatalf("expected 1 pipeline in health response, got %d", len(resp.Pipelines))
+	}
+	if resp.Pipelines[0].Completion.Error != "connection refused" {
+		t.Errorf("expected completion error 'connection refused', got %q", resp.Pipelines[0].Completion.Error)
 	}
 }
 
@@ -515,6 +608,7 @@ func TestRFC8631LinkHeader(t *testing.T) {
 		method string
 		path   string
 	}{
+		{http.MethodGet, "/v1/live"},
 		{http.MethodGet, "/v1/health"},
 		{http.MethodGet, "/v1/pipelines"},
 		{http.MethodGet, "/v1/stats"},

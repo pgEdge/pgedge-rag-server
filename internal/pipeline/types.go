@@ -34,6 +34,21 @@ type Usage struct {
 	Completion  llmlib.TokenUsage `json:"completion"`
 }
 
+// ProviderHealth reports whether a single LLM provider was reachable
+// during a health check. See issue #23.
+type ProviderHealth struct {
+	Reachable bool   `json:"reachable"`
+	Error     string `json:"error,omitempty"`
+}
+
+// PipelineHealth reports connectivity for a single pipeline's
+// embedding and completion providers.
+type PipelineHealth struct {
+	Name       string         `json:"name"`
+	Embedding  ProviderHealth `json:"embedding"`
+	Completion ProviderHealth `json:"completion"`
+}
+
 // Message represents a message in the conversation history.
 type Message struct {
 	Role    string `json:"role"` // "user" or "assistant"
