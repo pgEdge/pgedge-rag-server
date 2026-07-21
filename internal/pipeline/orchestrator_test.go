@@ -26,6 +26,7 @@ import (
 // MockEmbedder implements pipeline.Embedder for orchestrator tests.
 type MockEmbedder struct {
 	EmbedFunc func(ctx context.Context, text string) ([]float64, error)
+	UsageVal  llmlib.TokenUsage
 }
 
 func (m *MockEmbedder) Embed(ctx context.Context, text string) ([]float64, error) {
@@ -35,10 +36,15 @@ func (m *MockEmbedder) Embed(ctx context.Context, text string) ([]float64, error
 	return []float64{0.1, 0.2, 0.3}, nil
 }
 
+func (m *MockEmbedder) Usage() llmlib.TokenUsage {
+	return m.UsageVal
+}
+
 // MockCompleter implements pipeline.Completer for orchestrator tests.
 type MockCompleter struct {
 	ChatFunc       func(ctx context.Context, req llmlib.ChatRequest) (*llmlib.ChatResponse, error)
 	ChatStreamFunc func(ctx context.Context, req llmlib.ChatRequest) (*llmlib.Stream, error)
+	UsageVal       llmlib.TokenUsage
 }
 
 func (m *MockCompleter) Chat(
@@ -80,6 +86,10 @@ func (m *MockCompleter) ChatStream(
 	}()
 
 	return &llmlib.Stream{Chunks: chunks, Err: errs}, nil
+}
+
+func (m *MockCompleter) Usage() llmlib.TokenUsage {
+	return m.UsageVal
 }
 
 func TestNewOrchestrator(t *testing.T) {

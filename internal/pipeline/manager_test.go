@@ -197,6 +197,54 @@ func TestManager_List(t *testing.T) {
 	}
 }
 
+// TestManager_Stats is a regression test for issue #21: the manager
+// must report cumulative token usage for every pipeline.
+func TestManager_Stats(t *testing.T) {
+	cfg := testConfig()
+	m := newTestManager(cfg)
+	defer func() { _ = m.Close() }()
+
+	m.pipelines["pipeline-1"].embeddingProv.(*MockEmbedder).UsageVal =
+		llmlib.TokenUsage{PromptTokens: 10, TotalTokens: 10}
+	m.pipelines["pipeline-1"].completionProv.(*MockCompleter).UsageVal =
+		llmlib.TokenUsage{PromptTokens: 50, CompletionTokens: 25, TotalTokens: 75}
+
+	stats := m.Stats()
+	if len(stats) != 2 {
+		t.Fatalf("expected 2 pipelines in stats, got %d", len(stats))
+	}
+
+	byName := make(map[string]Usage)
+	for _, s := range stats {
+		byName[s.Name] = s
+	}
+
+	assertPipelineUsage(t, byName, "pipeline-1", 10, 75)
+	assertPipelineUsage(t, byName, "pipeline-2", 0, 0)
+}
+
+// assertPipelineUsage checks that stats for the named pipeline exist and
+// report the expected cumulative embedding/completion token totals.
+func assertPipelineUsage(
+	t *testing.T,
+	byName map[string]Usage,
+	name string,
+	wantEmbeddingTotal, wantCompletionTotal int,
+) {
+	t.Helper()
+
+	p, ok := byName[name]
+	if !ok {
+		t.Fatalf("expected %s in stats", name)
+	}
+	if p.Embedding.TotalTokens != wantEmbeddingTotal {
+		t.Errorf("expected %s embedding total %d, got %d", name, wantEmbeddingTotal, p.Embedding.TotalTokens)
+	}
+	if p.Completion.TotalTokens != wantCompletionTotal {
+		t.Errorf("expected %s completion total %d, got %d", name, wantCompletionTotal, p.Completion.TotalTokens)
+	}
+}
+
 func TestManager_Get(t *testing.T) {
 	cfg := testConfig()
 	m := newTestManager(cfg)

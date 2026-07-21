@@ -93,6 +93,64 @@ GET /v1/pipelines
 
 ---
 
+### Pipeline Stats
+
+Get cumulative LLM token usage for every configured pipeline, broken
+down by embedding and completion provider. Each figure is cumulative
+since the underlying LLM client was created — a monotonically
+increasing counter, not a per-request or windowed value. See the
+known limitation below the example: `embedding` usage only
+accumulates for pipelines using the Voyage provider.
+
+```
+GET /v1/stats
+```
+
+#### Response
+
+```json
+{
+  "pipelines": [
+    {
+      "name": "my-docs",
+      "description": "Search my documentation",
+      "embedding": {
+        "prompt_tokens": 1024,
+        "completion_tokens": 0,
+        "total_tokens": 1024
+      },
+      "completion": {
+        "prompt_tokens": 4096,
+        "completion_tokens": 512,
+        "total_tokens": 4608
+      }
+    }
+  ]
+}
+```
+
+| Status Code | Description                    |
+|-------------|--------------------------------|
+| 200         | Pipeline usage statistics      |
+
+Each `embedding` and `completion` object may also carry
+`cache_creation_input_tokens` and `cache_read_input_tokens` fields.
+These are omitted when zero, so they appear only for providers that
+report prompt-cache usage (for example, an Anthropic completion
+provider); the example above shows a pipeline with no cache activity.
+
+**Known limitation:** `embedding` usage is sourced from the underlying
+`pgedge-go-llm-lib` client, which currently only accumulates embedding
+token usage for the **Voyage** provider. For pipelines whose
+`embedding_llm.provider` is `openai`, `gemini`, or `ollama`, the
+`embedding` field will always read zero, even though real embedding
+calls are made and consume real tokens. `completion` usage is tracked
+correctly for all providers. This was confirmed empirically against a
+live HTTP round-trip and is a limitation in the shared library, not in
+this endpoint.
+
+---
+
 ### Query Pipeline
 
 Execute a RAG query against a specific pipeline.
