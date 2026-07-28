@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt all clean openapi docs
+.PHONY: build test lint fmt all clean openapi docs vulncheck
 
 # Build the binary
 build:
@@ -27,6 +27,15 @@ fmt:
 		gofmt -l .; \
 		exit 1; \
 	fi
+
+# Check dependencies and the standard library for known vulnerabilities.
+#
+# Unlike a container image scan, this uses call-graph analysis and so
+# reports whether a vulnerable symbol is actually reachable from our
+# code, which catches issues in Go module dependencies that image
+# scanners miss entirely.
+vulncheck:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 # Run all checks: format, lint, test, and build
 all: fmt lint test build

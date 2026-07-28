@@ -47,7 +47,48 @@ and this project adheres to
   never populated, leaving the model nothing to reason about when
   deciding what a claim rests on.
 
+- Updated `github.com/jackc/pgx/v5` from 5.9.1 to 5.9.2, which fixes
+  CVE-2026-41889 (GO-2026-5004), a SQL injection in the query sanitiser
+  arising from placeholder confusion with dollar-quoted string
+  literals. `govulncheck` reports the affected symbol as reachable from
+  `database.Pool.FetchDocumentsByIDs`, although that reachability is
+  static: the sanitiser is only invoked on pgx's simple protocol path,
+  and this server leaves the query execution mode at pgx's default of
+  `cache_statement`, which sends arguments as bind parameters instead.
+  The upgrade is worth taking regardless, since the analysis rests on a
+  default we do not pin and a later change to the simple protocol would
+  silently reintroduce the exposure.
+
+- Updated `golang.org/x/text` from 0.35.0 to 0.39.0, fixing GO-2026-5970,
+  an infinite loop on invalid input. This one is reachable from
+  `database.NewPool` by way of `pgxpool.NewWithConfig`, so it sits on
+  the startup path of every pipeline rather than on a rare branch.
+  Container image scanning does not surface it, since it is a Go module
+  dependency compiled into the binary rather than an operating system
+  package.
+
+- Raised the minimum Go version in `go.mod` from 1.26.1 to 1.26.5, which
+  addresses four standard library advisories that `govulncheck` reported
+  as reachable or imported: GO-2026-5856 (Encrypted Client Hello privacy
+  leak in `crypto/tls`), GO-2026-5039 (unescaped input in `net/textproto`
+  errors), GO-2026-5037 (inefficient candidate hostname parsing in
+  `crypto/x509`), and GO-2026-5038 (`mime`). The build already floated
+  on the latest 1.26 patch release, so this sets a floor that prevents a
+  stale local toolchain producing a binary with a vulnerable standard
+  library.
+
+- Updated `golang.org/x/sys` from 0.26.0 to 0.44.0 for GO-2026-5024.
+  That advisory affects Windows only and so did not apply to any
+  supported deployment target, but the upgrade is free.
+
 ### Added
+
+- `make vulncheck` runs `govulncheck` over the module, reporting
+  vulnerabilities in dependencies and the standard library whose
+  affected symbols are actually reachable from this codebase. This
+  complements container image scanning rather than replacing it: an
+  image scan looks at operating system packages and will not see a
+  vulnerable Go module compiled into the binary.
 
 - Configurable `request_timeout` and `per_attempt_timeout` for LLM
   providers. Both accept a duration string such as `90s` or `2m` and
