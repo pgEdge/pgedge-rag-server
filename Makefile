@@ -30,12 +30,14 @@ fmt:
 
 # Check dependencies and the standard library for known vulnerabilities.
 #
-# Unlike a container image scan, this uses call-graph analysis and so
-# reports whether a vulnerable symbol is actually reachable from our
-# code, which catches issues in Go module dependencies that image
-# scanners miss entirely.
+# This uses call-graph analysis, so it reports whether a vulnerable
+# symbol is actually reachable from our code. A container image scan
+# may or may not detect a vulnerable Go module version at all,
+# depending on whether it inspects binary buildinfo; none can tell you
+# whether the vulnerable code path is reachable, which is what this
+# adds.
 vulncheck:
-	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 
 # Run all checks: format, lint, test, and build
 all: fmt lint test build

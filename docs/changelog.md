@@ -62,10 +62,11 @@ and this project adheres to
 - Updated `golang.org/x/text` from 0.35.0 to 0.39.0, fixing GO-2026-5970,
   an infinite loop on invalid input. This one is reachable from
   `database.NewPool` by way of `pgxpool.NewWithConfig`, so it sits on
-  the startup path of every pipeline rather than on a rare branch.
-  Container image scanning does not surface it, since it is a Go module
-  dependency compiled into the binary rather than an operating system
-  package.
+  the startup path of every pipeline rather than on a rare branch. A
+  container image scan may or may not detect the vulnerable module
+  version at all, depending on whether it inspects binary buildinfo,
+  but none can tell you whether the vulnerable code path is reachable,
+  which is what `govulncheck`'s call-graph analysis adds.
 
 - Raised the minimum Go version in `go.mod` from 1.26.1 to 1.26.5, which
   addresses four standard library advisories that `govulncheck` reported
@@ -87,8 +88,9 @@ and this project adheres to
   vulnerabilities in dependencies and the standard library whose
   affected symbols are actually reachable from this codebase. This
   complements container image scanning rather than replacing it: an
-  image scan looks at operating system packages and will not see a
-  vulnerable Go module compiled into the binary.
+  image scan may or may not detect a vulnerable Go module version,
+  depending on whether it inspects binary buildinfo, but none can tell
+  you whether the vulnerable code path is reachable.
 
 - Configurable `request_timeout` and `per_attempt_timeout` for LLM
   providers. Both accept a duration string such as `90s` or `2m` and
