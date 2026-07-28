@@ -422,7 +422,7 @@
           },
           "include_sources": {
             "type": "boolean",
-            "description": "Include source documents in response",
+            "description": "Request the source documents used to produce the answer. Honoured only if the pipeline is configured with allow_include_sources: true; otherwise the answer is returned without sources and the request still succeeds.",
             "default": false
           },
           "messages": {
@@ -459,7 +459,7 @@
           },
           "sources": {
             "type": "array",
-            "description": "Source documents (only if include_sources=true)",
+            "description": "Source documents. Present only when the request set include_sources=true and the pipeline permits it via allow_include_sources.",
             "items": {
               "$ref": "#/components/schemas/Source"
             }

@@ -71,6 +71,13 @@ pipelines:
       # Number of results to retrieve
       top_n: 10
 
+      # Permit clients to request the raw content of retrieved documents
+      # via "include_sources": true (default: false). Leave this off
+      # unless the corpus is intended to be publicly readable: with it
+      # on, anyone able to reach the query endpoint can retrieve the
+      # stored content of matching rows verbatim.
+      # allow_include_sources: false
+
       # Search configuration (optional)
       search:
           # Enable hybrid search combining vector + BM25 (default: true)

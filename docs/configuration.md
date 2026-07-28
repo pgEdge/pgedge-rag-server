@@ -223,6 +223,7 @@ pipelines:
 | `token_budget`  | Maximum tokens for context documents                         | No (uses defaults) |
 | `top_n`         | Maximum number of results to retrieve                        | No (uses defaults) |
 | `system_prompt` | Custom system prompt for the LLM                             | No (uses default) |
+| `allow_include_sources` | Permit clients to request source documents            | No (defaults to `false`) |
 
 ### System Prompt
 
@@ -247,6 +248,41 @@ pipelines:
       If you cannot find the answer in the context, suggest contacting support.
       Use a friendly, professional tone.
 ```
+
+### Returning Source Documents
+
+Clients may ask for the documents behind an answer by setting
+`include_sources: true` on a query, but that request is only honoured
+when the pipeline also sets `allow_include_sources: true`. Both gates
+must be open: the operator permits it in configuration, and the client
+asks for it per request. When the configuration does not permit it, the
+query still succeeds and the answer is returned as normal, simply
+without the `sources` array, so enabling or withdrawing permission never
+breaks a client that sets the flag unconditionally.
+
+```yaml
+pipelines:
+  - name: "public-docs"
+    allow_include_sources: true
+```
+
+The option defaults to `false`, and it cannot be set under `defaults`,
+because exposing a corpus should be an explicit decision for each
+pipeline rather than something inherited by pipelines that were never
+reviewed for it.
+
+!!! warning "Any row in a configured table is effectively public"
+
+    The RAG server ships without client authentication, on the
+    assumption that a reverse proxy such as nginx handles that where it
+    is needed; a common deployment has unauthenticated web clients
+    querying the service directly. Where that is the case, and where a
+    pipeline sets `allow_include_sources: true`, anyone able to reach
+    the query endpoint can retrieve the stored content of matching rows
+    verbatim, without the LLM being involved in the decision. Treat
+    every row in a table configured for a pipeline as publicly readable,
+    and never point a pipeline at a table that also holds sensitive
+    records or that receives writes from another system.
 
 ### Database Properties
 

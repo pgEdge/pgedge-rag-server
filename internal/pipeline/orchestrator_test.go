@@ -1146,6 +1146,132 @@ func TestOrchestrator_Execute_PartialRetrievalFailureFallsThroughToEmptyResult(t
 	}
 }
 
+// newSourcesTestOrchestrator builds an orchestrator whose search always
+// returns one matching document, so that Execute reaches the point where
+// it decides whether to attach sources. pCfg is passed through as-is
+// (including nil) to exercise the closed-by-default behaviour.
+func newSourcesTestOrchestrator(pCfg *config.Pipeline) *Orchestrator {
+	backend := &MockSearchBackend{
+		VectorSearchFunc: func(
+			ctx context.Context, embedding []float32, table config.TableSource,
+			topN int, filter *config.Filter, minSimilarity *float64,
+		) ([]database.SearchResult, error) {
+			return []database.SearchResult{
+				{ID: "doc-1", Content: "Refunds are issued within 14 days.", Score: 0.9},
+			}, nil
+		},
+	}
+	return NewOrchestrator(OrchestratorConfig{
+		Pipeline:       pCfg,
+		DBPool:         backend,
+		EmbeddingProv:  &MockEmbedder{},
+		CompletionProv: &MockCompleter{},
+		TokenBudget:    DefaultTokenBudget,
+		TopN:           DefaultTopN,
+	})
+}
+
+func sourcesTestPipeline(allow bool) *config.Pipeline {
+	return &config.Pipeline{
+		Name: "test-pipeline",
+		Tables: []config.TableSource{
+			{Table: "documents", TextColumn: "content", VectorColumn: "embedding"},
+		},
+		AllowIncludeSources: allow,
+	}
+}
+
+// TestOrchestrator_Execute_SourcesRequireConfigPermission is the core
+// guard: a client asking for sources must not receive raw document
+// content unless the pipeline configuration also permits it. Retrieved
+// content is untrusted and may hold data the operator never intended to
+// expose through the query endpoint, so the caller's request alone is
+// not sufficient authority to echo it back.
+func TestOrchestrator_Execute_SourcesRequireConfigPermission(t *testing.T) {
+	orch := newSourcesTestOrchestrator(sourcesTestPipeline(false))
+
+	resp, err := orch.Execute(context.Background(), QueryRequest{
+		Query:          "refund policy",
+		IncludeSources: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Sources) != 0 {
+		t.Errorf("expected no sources when allow_include_sources is false, got %d: %+v",
+			len(resp.Sources), resp.Sources)
+	}
+	if resp.Answer == "" {
+		t.Error("expected the answer to still be returned when sources are suppressed")
+	}
+}
+
+// TestOrchestrator_Execute_SourcesReturnedWhenAllowedAndRequested checks
+// that both gates open together.
+func TestOrchestrator_Execute_SourcesReturnedWhenAllowedAndRequested(t *testing.T) {
+	orch := newSourcesTestOrchestrator(sourcesTestPipeline(true))
+
+	resp, err := orch.Execute(context.Background(), QueryRequest{
+		Query:          "refund policy",
+		IncludeSources: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Sources) != 1 {
+		t.Fatalf("expected 1 source when config allows and client requests, got %d",
+			len(resp.Sources))
+	}
+	if resp.Sources[0].ID != "doc-1" {
+		t.Errorf("expected source ID %q, got %q", "doc-1", resp.Sources[0].ID)
+	}
+}
+
+// TestOrchestrator_Execute_SourcesOmittedWhenNotRequested confirms the
+// config option only permits sources; it does not force them on clients
+// that did not ask.
+func TestOrchestrator_Execute_SourcesOmittedWhenNotRequested(t *testing.T) {
+	orch := newSourcesTestOrchestrator(sourcesTestPipeline(true))
+
+	resp, err := orch.Execute(context.Background(), QueryRequest{
+		Query:          "refund policy",
+		IncludeSources: false,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Sources) != 0 {
+		t.Errorf("expected no sources when the client did not request them, got %d",
+			len(resp.Sources))
+	}
+}
+
+// TestSourcesAllowed pins the fail-closed direction of the permission
+// check itself. The nil-config case is tested here rather than through
+// Execute because search() dereferences o.cfg unconditionally, so a nil
+// config never reaches the sources decision in a real query.
+func TestSourcesAllowed(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *config.Pipeline
+		want bool
+	}{
+		{"nil config fails closed", nil, false},
+		{"unset option fails closed", &config.Pipeline{Name: "p"}, false},
+		{"explicitly disallowed", sourcesTestPipeline(false), false},
+		{"explicitly allowed", sourcesTestPipeline(true), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orch := NewOrchestrator(OrchestratorConfig{Pipeline: tt.cfg})
+			if got := orch.sourcesAllowed(); got != tt.want {
+				t.Errorf("sourcesAllowed() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // Verify mock providers implement the interfaces
 var (
 	_ Embedder      = (*MockEmbedder)(nil)

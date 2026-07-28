@@ -1,0 +1,34 @@
+# Two pipelines exercising the allow_include_sources option: one that
+# explicitly permits clients to request source documents, and one that
+# omits the key entirely so the safe default can be asserted.
+pipelines:
+  - name: "sources-allowed"
+    database:
+      host: "localhost"
+      database: "testdb"
+    tables:
+      - table: "public_docs"
+        text_column: "content"
+        vector_column: "embedding"
+    allow_include_sources: true
+    embedding_llm:
+      provider: "openai"
+      model: "text-embedding-3-small"
+    rag_llm:
+      provider: "anthropic"
+      model: "claude-sonnet-4-20250514"
+
+  - name: "sources-default"
+    database:
+      host: "localhost"
+      database: "testdb"
+    tables:
+      - table: "internal_docs"
+        text_column: "content"
+        vector_column: "embedding"
+    embedding_llm:
+      provider: "openai"
+      model: "text-embedding-3-small"
+    rag_llm:
+      provider: "anthropic"
+      model: "claude-sonnet-4-20250514"

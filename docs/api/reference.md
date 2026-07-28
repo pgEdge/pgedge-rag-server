@@ -263,7 +263,7 @@ POST /v1/pipelines/{name}
 | `stream`          | boolean | No       | Enable streaming response (SSE)           |
 | `top_n`           | integer | No       | Override default result limit             |
 | `filter`          | object  | No       | Structured filter to apply to results     |
-| `include_sources` | boolean | No       | Include source documents (default: false) |
+| `include_sources` | boolean | No       | Request source documents (default: false); requires `allow_include_sources` on the pipeline |
 | `messages`        | array   | No       | Previous conversation history for context |
 
 The `filter` parameter accepts a structured filter object with conditions
@@ -329,7 +329,9 @@ Filter examples:
 }
 ```
 
-When `include_sources: true`:
+When `include_sources: true` and the pipeline sets
+`allow_include_sources: true` (see
+[Returning Source Documents](../configuration.md#returning-source-documents)):
 
 ```json
 {
@@ -350,10 +352,15 @@ When `include_sources: true`:
 }
 ```
 
+If the pipeline does not permit source documents, the request still
+succeeds and the response is returned exactly as in the first example
+above, without a `sources` array; the omission is logged by the server
+rather than reported as an error.
+
 | Field        | Type   | Description                              |
 |--------------|--------|------------------------------------------|
 | `answer`     | string | The generated answer                     |
-| `sources`    | array  | Source documents (only if requested)     |
+| `sources`    | array  | Source documents (only if requested and permitted) |
 | `tokens_used`| integer| Total tokens consumed by the request     |
 
 ##### Source Object
