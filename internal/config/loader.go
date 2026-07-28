@@ -23,6 +23,16 @@ const (
 
 	// SystemConfigPath is the system-wide configuration path.
 	SystemConfigPath = "/etc/pgedge/" + ConfigFileName
+
+	// DefaultBM25MaxDocuments caps the rows the keyword-search arm reads
+	// per request when a pipeline does not set bm25_max_documents.
+	//
+	// Chosen to leave existing small and medium corpora ranking over
+	// their whole table as before, whilst bounding the work a single
+	// request can impose on a large one. Deployments with a bigger
+	// corpus that genuinely need wider keyword coverage should raise it
+	// deliberately, having considered the per-request cost.
+	DefaultBM25MaxDocuments = 10000
 )
 
 // Load loads the configuration from the specified path, or searches
@@ -222,6 +232,10 @@ func applyDefaults(cfg *Config) {
 		if p.Search.VectorWeight == nil {
 			defaultWeight := 0.5
 			p.Search.VectorWeight = &defaultWeight
+		}
+		if p.Search.BM25MaxDocuments == nil {
+			defaultMax := DefaultBM25MaxDocuments
+			p.Search.BM25MaxDocuments = &defaultMax
 		}
 	}
 }

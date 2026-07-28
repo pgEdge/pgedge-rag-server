@@ -165,6 +165,18 @@ type SearchConfig struct {
 	HybridEnabled *bool    `yaml:"hybrid_enabled"` // Enable hybrid search (default: true)
 	VectorWeight  *float64 `yaml:"vector_weight"`  // Weight for vector vs BM25 (default: 0.5)
 	MinSimilarity *float64 `yaml:"min_similarity"` // Minimum cosine similarity threshold (0.0-1.0)
+
+	// BM25MaxDocuments caps how many rows the keyword-search arm reads
+	// from a table per request (default: DefaultBM25MaxDocuments).
+	//
+	// The BM25 arm has no server-side ranking to push down, so it reads
+	// rows matching the filter and ranks them in memory. Without a cap
+	// that is an unbounded read of the whole table on every request,
+	// which lets any caller who can reach the query endpoint impose work
+	// proportional to table size rather than to request count. There is
+	// no "unlimited" value: raise the number if you need a wider corpus,
+	// accepting the cost that implies.
+	BM25MaxDocuments *int `yaml:"bm25_max_documents"`
 }
 
 // RerankConfig contains settings for an optional reranking stage that

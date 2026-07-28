@@ -1796,3 +1796,68 @@ func searchSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+// TestApplyDefaults_BM25MaxDocuments checks that a pipeline which does
+// not set the cap still gets one. The whole point of the option is that
+// the keyword corpus read is never unbounded, so an absent value must
+// become the default rather than staying nil.
+func TestApplyDefaults_BM25MaxDocuments(t *testing.T) {
+	cfg := &Config{
+		Pipelines: []Pipeline{
+			{Name: "no-cap-set"},
+			{Name: "explicit-cap", Search: SearchConfig{BM25MaxDocuments: ptrTo(250)}},
+		},
+	}
+
+	applyDefaults(cfg)
+
+	if cfg.Pipelines[0].Search.BM25MaxDocuments == nil {
+		t.Fatal("expected an unset bm25_max_documents to be defaulted, got nil")
+	}
+	if got := *cfg.Pipelines[0].Search.BM25MaxDocuments; got != DefaultBM25MaxDocuments {
+		t.Errorf("expected default %d, got %d", DefaultBM25MaxDocuments, got)
+	}
+
+	if got := *cfg.Pipelines[1].Search.BM25MaxDocuments; got != 250 {
+		t.Errorf("expected an explicit cap of 250 to be preserved, got %d", got)
+	}
+}
+
+// TestLoad_BM25MaxDocumentsMustBePositive confirms a non-positive cap is
+// rejected at load time rather than quietly treated as unlimited, which
+// would reinstate the unbounded read whilst looking configured.
+func TestLoad_BM25MaxDocumentsMustBePositive(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	contents := `pipelines:
+  - name: "bad-cap"
+    database:
+      host: "localhost"
+      database: "testdb"
+    tables:
+      - table: "documents"
+        text_column: "content"
+        vector_column: "embedding"
+    search:
+      bm25_max_documents: 0
+    embedding_llm:
+      provider: "openai"
+      model: "text-embedding-3-small"
+    rag_llm:
+      provider: "anthropic"
+      model: "claude-sonnet-4-20250514"
+`
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected loading a config with bm25_max_documents: 0 to fail")
+	}
+	if !strings.Contains(err.Error(), "bm25_max_documents") {
+		t.Errorf("expected the error to name the offending field, got: %v", err)
+	}
+}
+
+func ptrTo[T any](v T) *T { return &v }

@@ -20,7 +20,6 @@ import (
 
 	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
 
-	"github.com/pgEdge/pgedge-rag-server/internal/bm25"
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 )
 
@@ -91,7 +90,6 @@ func newTestPipeline(name, description string) *Pipeline {
 		cfg:            &pCfg,
 		embeddingProv:  embeddingProv,
 		completionProv: completionProv,
-		bm25Index:      bm25.NewIndex(),
 		tokenBudget:    DefaultTokenBudget,
 		topN:           DefaultTopN,
 		logger:         slog.Default(),
@@ -462,7 +460,6 @@ func TestPipeline_ExecuteStream_NoDocuments(t *testing.T) {
 		cfg:            &pCfg,
 		embeddingProv:  embeddingProv,
 		completionProv: completionProv,
-		bm25Index:      bm25.NewIndex(),
 		tokenBudget:    DefaultTokenBudget,
 		topN:           DefaultTopN,
 		logger:         slog.Default(),

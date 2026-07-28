@@ -14,6 +14,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 
 	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
@@ -148,6 +149,7 @@ type MockSearchBackend struct {
 		ctx context.Context,
 		table config.TableSource,
 		filter *config.Filter,
+		maxDocuments int,
 	) (map[string]string, error)
 }
 
@@ -169,9 +171,10 @@ func (m *MockSearchBackend) FetchDocuments(
 	ctx context.Context,
 	table config.TableSource,
 	filter *config.Filter,
+	maxDocuments int,
 ) (map[string]string, error) {
 	if m.FetchDocumentsFunc != nil {
-		return m.FetchDocumentsFunc(ctx, table, filter)
+		return m.FetchDocumentsFunc(ctx, table, filter, maxDocuments)
 	}
 	return nil, nil
 }
@@ -198,18 +201,13 @@ func TestNewOrchestrator(t *testing.T) {
 	if orch.topN != 5 {
 		t.Errorf("expected topN 5, got %d", orch.topN)
 	}
-	if orch.bm25Index == nil {
-		t.Error("bm25Index should not be nil")
-	}
 	if orch.logger == nil {
 		t.Error("logger should not be nil")
 	}
 }
 
 func TestDeduplicateResults(t *testing.T) {
-	orch := &Orchestrator{
-		bm25Index: bm25.NewIndex(),
-	}
+	orch := &Orchestrator{}
 
 	tests := []struct {
 		name     string
@@ -322,7 +320,6 @@ func TestBuildContext(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			orch := &Orchestrator{
 				tokenBudget: tt.tokenBudget,
-				bm25Index:   bm25.NewIndex(),
 			}
 
 			contextDocs := orch.buildContext(tt.results)
@@ -342,9 +339,7 @@ func TestBuildContext(t *testing.T) {
 }
 
 func TestBuildSystemPrompt(t *testing.T) {
-	orch := &Orchestrator{
-		bm25Index: bm25.NewIndex(),
-	}
+	orch := &Orchestrator{}
 
 	prompt := orch.buildSystemPrompt()
 
@@ -374,7 +369,6 @@ func TestBuildSystemPrompt_CustomPrompt(t *testing.T) {
 			Name:         "test-pipeline",
 			SystemPrompt: customPrompt,
 		},
-		bm25Index: bm25.NewIndex(),
 	}
 
 	prompt := orch.buildSystemPrompt()
@@ -391,7 +385,6 @@ func TestBuildSystemPrompt_EmptyConfigPrompt(t *testing.T) {
 			Name:         "test-pipeline",
 			SystemPrompt: "", // Empty
 		},
-		bm25Index: bm25.NewIndex(),
 	}
 
 	prompt := orch.buildSystemPrompt()
@@ -432,9 +425,7 @@ func containsPhrase(s, phrase string) bool {
 }
 
 func TestBuildSources(t *testing.T) {
-	orch := &Orchestrator{
-		bm25Index: bm25.NewIndex(),
-	}
+	orch := &Orchestrator{}
 
 	results := []database.SearchResult{
 		{ID: "doc1", Content: "Content 1", Score: 0.95},
@@ -468,8 +459,7 @@ func TestBuildSources(t *testing.T) {
 func TestQueryRequestTopNOverride(t *testing.T) {
 	// Test that request-level TopN overrides orchestrator default
 	orch := &Orchestrator{
-		topN:      10, // Default
-		bm25Index: bm25.NewIndex(),
+		topN: 10, // Default
 	}
 
 	// Simulate getting topN from request
@@ -588,9 +578,7 @@ func TestMockEmbedder_CustomErrorFunc(t *testing.T) {
 }
 
 func TestBuildSystemPrompt_DefaultContainsAntiHallucination(t *testing.T) {
-	orch := &Orchestrator{
-		bm25Index: bm25.NewIndex(),
-	}
+	orch := &Orchestrator{}
 
 	prompt := orch.buildSystemPrompt()
 
@@ -704,7 +692,7 @@ func TestBM25ToSearchResults_FusesWithVectorArmWhenNoIDColumn(t *testing.T) {
 // temperature parameter outright (observed live against claude-sonnet-5:
 // "400: `temperature` is deprecated for this model").
 func TestBuildChatRequest_OmitsTemperature(t *testing.T) {
-	orch := &Orchestrator{bm25Index: bm25.NewIndex()}
+	orch := &Orchestrator{}
 
 	req := orch.buildChatRequest(QueryRequest{Query: "hello"}, nil)
 
@@ -1449,3 +1437,276 @@ var (
 	_ Reranker      = (*MockReranker)(nil)
 	_ SearchBackend = (*MockSearchBackend)(nil)
 )
+
+// hybridPipeline builds a pipeline config with the keyword arm enabled.
+// Tests construct config.Pipeline directly rather than going through the
+// loader, so HybridEnabled would otherwise be nil and the keyword arm
+// would never run.
+func hybridPipeline(maxDocs *int) *config.Pipeline {
+	enabled := true
+	return &config.Pipeline{
+		Name: "test-pipeline",
+		Tables: []config.TableSource{
+			{Table: "documents", TextColumn: "content", VectorColumn: "embedding", IDColumn: "id"},
+		},
+		Search: config.SearchConfig{
+			HybridEnabled:    &enabled,
+			BM25MaxDocuments: maxDocs,
+		},
+	}
+}
+
+// TestSearch_PassesConfiguredBM25LimitToBackend checks the cap actually
+// reaches the query. A limit that is configured but not plumbed through
+// would leave the unbounded read in place whilst looking fixed.
+func TestSearch_PassesConfiguredBM25LimitToBackend(t *testing.T) {
+	limit := 37
+	var gotLimit int
+
+	backend := &MockSearchBackend{
+		FetchDocumentsFunc: func(
+			ctx context.Context, table config.TableSource,
+			filter *config.Filter, maxDocuments int,
+		) (map[string]string, error) {
+			gotLimit = maxDocuments
+			return map[string]string{"d1": "widget documentation"}, nil
+		},
+	}
+
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline:    hybridPipeline(&limit),
+		DBPool:      backend,
+		TokenBudget: DefaultTokenBudget,
+		TopN:        DefaultTopN,
+	})
+
+	if _, err := orch.search(
+		context.Background(), QueryRequest{Query: "widget"}, []float32{0.1}, 5,
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotLimit != limit {
+		t.Errorf("expected the configured limit %d to reach the backend, got %d", limit, gotLimit)
+	}
+}
+
+// TestSearch_FallsBackToDefaultBM25Limit covers a pipeline whose config
+// never went through the loader, or which set a nonsensical value: the
+// read must still be bounded rather than silently unlimited.
+func TestSearch_FallsBackToDefaultBM25Limit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value *int
+	}{
+		{"unset", nil},
+		{"zero", ptrInt(0)},
+		{"negative", ptrInt(-1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotLimit int
+			backend := &MockSearchBackend{
+				FetchDocumentsFunc: func(
+					ctx context.Context, table config.TableSource,
+					filter *config.Filter, maxDocuments int,
+				) (map[string]string, error) {
+					gotLimit = maxDocuments
+					return nil, nil
+				},
+			}
+
+			orch := NewOrchestrator(OrchestratorConfig{
+				Pipeline:    hybridPipeline(tc.value),
+				DBPool:      backend,
+				TokenBudget: DefaultTokenBudget,
+				TopN:        DefaultTopN,
+			})
+
+			if _, err := orch.search(
+				context.Background(), QueryRequest{Query: "widget"}, []float32{0.1}, 5,
+			); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if gotLimit != config.DefaultBM25MaxDocuments {
+				t.Errorf("expected the default limit %d, got %d",
+					config.DefaultBM25MaxDocuments, gotLimit)
+			}
+		})
+	}
+}
+
+func ptrInt(v int) *int { return &v }
+
+// TestSearch_DisableHybridSkipsKeywordArm confirms a client can opt out
+// of the expensive half of a query entirely.
+func TestSearch_DisableHybridSkipsKeywordArm(t *testing.T) {
+	var fetched bool
+	backend := &MockSearchBackend{
+		FetchDocumentsFunc: func(
+			ctx context.Context, table config.TableSource,
+			filter *config.Filter, maxDocuments int,
+		) (map[string]string, error) {
+			fetched = true
+			return nil, nil
+		},
+	}
+
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline:    hybridPipeline(nil),
+		DBPool:      backend,
+		TokenBudget: DefaultTokenBudget,
+		TopN:        DefaultTopN,
+	})
+
+	if _, err := orch.search(
+		context.Background(),
+		QueryRequest{Query: "widget", DisableHybrid: true},
+		[]float32{0.1}, 5,
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if fetched {
+		t.Error("expected the keyword corpus read to be skipped when disable_hybrid is set")
+	}
+}
+
+// TestSearch_RequestCannotEnableHybrid pins the asymmetry: the request
+// flag may only turn the keyword arm off. Allowing a request to turn it
+// on would let any caller opt into work the operator declined, which is
+// the cost lever this change exists to remove.
+func TestSearch_RequestCannotEnableHybrid(t *testing.T) {
+	disabled := false
+	cfg := hybridPipeline(nil)
+	cfg.Search.HybridEnabled = &disabled
+
+	var fetched bool
+	backend := &MockSearchBackend{
+		FetchDocumentsFunc: func(
+			ctx context.Context, table config.TableSource,
+			filter *config.Filter, maxDocuments int,
+		) (map[string]string, error) {
+			fetched = true
+			return nil, nil
+		},
+	}
+
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline:    cfg,
+		DBPool:      backend,
+		TokenBudget: DefaultTokenBudget,
+		TopN:        DefaultTopN,
+	})
+
+	// DisableHybrid false is the only "enable"-shaped input available,
+	// and it must not re-enable an arm config has turned off.
+	if _, err := orch.search(
+		context.Background(),
+		QueryRequest{Query: "widget", DisableHybrid: false},
+		[]float32{0.1}, 5,
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if fetched {
+		t.Error("a request must not be able to enable the keyword arm when config disables it")
+	}
+}
+
+// TestSearch_ConcurrentRequestsDoNotShareKeywordIndex is the regression
+// test for the shared-index bug.
+//
+// The keyword index used to be one per-pipeline object that each request
+// cleared, refilled from its own filtered documents, and then searched.
+// Those three steps were individually locked but not locked as a unit, so
+// concurrent requests interleaved: one request's search could run against
+// a corpus another request's filter had populated. Where an application
+// uses the filter to scope results to a tenant, that defeats the scoping
+// under ordinary concurrent traffic, with no injection involved.
+//
+// Here two tenants query concurrently with disjoint corpora. Every result
+// must carry the calling request's own tenant prefix. Run with -race,
+// which the Makefile's test target does.
+func TestSearch_ConcurrentRequestsDoNotShareKeywordIndex(t *testing.T) {
+	// The filter value selects the tenant's corpus, exactly as a
+	// multi-tenant application would scope it.
+	corpus := func(tenant string) map[string]string {
+		docs := make(map[string]string, 32)
+		for i := 0; i < 32; i++ {
+			id := tenant + "-" + string(rune('a'+i%26))
+			docs[id] = "widget documentation for tenant " + tenant
+		}
+		return docs
+	}
+
+	backend := &MockSearchBackend{
+		FetchDocumentsFunc: func(
+			ctx context.Context, table config.TableSource,
+			filter *config.Filter, maxDocuments int,
+		) (map[string]string, error) {
+			if filter == nil || len(filter.Conditions) == 0 {
+				return nil, errors.New("test bug: expected a tenant filter")
+			}
+			tenant, ok := filter.Conditions[0].Value.(string)
+			if !ok {
+				return nil, errors.New("test bug: tenant filter value was not a string")
+			}
+			return corpus(tenant), nil
+		},
+	}
+
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline:    hybridPipeline(nil),
+		DBPool:      backend,
+		TokenBudget: DefaultTokenBudget,
+		TopN:        DefaultTopN,
+	})
+
+	const iterations = 40
+	var wg sync.WaitGroup
+	errCh := make(chan error, iterations*2)
+
+	for _, tenant := range []string{"alpha", "beta"} {
+		for i := 0; i < iterations; i++ {
+			wg.Add(1)
+			go func(tenant string) {
+				defer wg.Done()
+
+				req := QueryRequest{
+					Query: "widget",
+					Filter: &config.Filter{
+						Conditions: []config.FilterCondition{
+							{Column: "tenant", Operator: "=", Value: tenant},
+						},
+					},
+				}
+
+				results, err := orch.search(context.Background(), req, []float32{0.1}, 5)
+				if err != nil {
+					errCh <- err
+					return
+				}
+				if len(results) == 0 {
+					errCh <- errors.New("expected keyword results for tenant " + tenant)
+					return
+				}
+				for _, r := range results {
+					if !strings.HasPrefix(r.ID, tenant+"-") {
+						errCh <- errors.New(
+							"tenant " + tenant + " received a result belonging to another " +
+								"request's filter: " + r.ID)
+						return
+					}
+				}
+			}(tenant)
+		}
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Error(err)
+	}
+}

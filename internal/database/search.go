@@ -163,19 +163,23 @@ func (p *Pool) VectorSearch(
 	return results, nil
 }
 
-// FetchDocuments fetches all documents from a table for BM25 indexing.
-// Returns a map of document ID to content.
-// The filter parameter allows additional WHERE conditions from the API request.
-func (p *Pool) FetchDocuments(
-	ctx context.Context,
+// buildFetchDocumentsQuery constructs the SQL and argument list for the
+// BM25 corpus read. Extracted from FetchDocuments for testability, in
+// the same way as buildVectorSearchQuery.
+//
+// Arg ordering: filter arguments occupy $1..$n and the LIMIT takes
+// $(n+1), so the placeholder index depends on how many arguments the
+// filter contributed.
+func buildFetchDocumentsQuery(
 	table config.TableSource,
 	filter *config.Filter,
-) (map[string]string, error) {
+	maxDocuments int,
+) (string, []interface{}, error) {
 	// Build filter clause combining config and request filters
 	// Start at param index 1 (no initial params in this query)
-	filterClause, filterArgs, err := buildFilterClause(table.Filter, filter, 1)
+	filterClause, args, err := buildFilterClause(table.Filter, filter, 1)
 	if err != nil {
-		return nil, fmt.Errorf("invalid filter: %w", err)
+		return "", nil, fmt.Errorf("invalid filter: %w", err)
 	}
 
 	// Build base WHERE clause for non-null content
@@ -189,6 +193,9 @@ func (p *Pool) FetchDocuments(
 		filterClause = filterClause + " AND " + baseCondition
 	}
 
+	limitPlaceholder := fmt.Sprintf("$%d", len(args)+1)
+	args = append(args, maxDocuments)
+
 	// Determine ID expression: use configured id_column, or ROW_NUMBER() fallback
 	var query string
 	if table.IDColumn != "" {
@@ -197,11 +204,13 @@ func (p *Pool) FetchDocuments(
 		SELECT
 			%s::text AS id,
 			%s AS content
-		FROM %s%s`,
+		FROM %s%s
+		LIMIT %s`,
 			pgx.Identifier{table.IDColumn}.Sanitize(),
 			pgx.Identifier{table.TextColumn}.Sanitize(),
 			parseTableIdentifier(table.Table).Sanitize(),
 			filterClause,
+			limitPlaceholder,
 		)
 	} else {
 		// Fallback to ROW_NUMBER() for views or tables without explicit ID
@@ -209,14 +218,51 @@ func (p *Pool) FetchDocuments(
 		SELECT
 			ROW_NUMBER() OVER()::text AS id,
 			%s AS content
-		FROM %s%s`,
+		FROM %s%s
+		LIMIT %s`,
 			pgx.Identifier{table.TextColumn}.Sanitize(),
 			parseTableIdentifier(table.Table).Sanitize(),
 			filterClause,
+			limitPlaceholder,
 		)
 	}
 
-	rows, err := p.pool.Query(ctx, query, filterArgs...)
+	return query, args, nil
+}
+
+// FetchDocuments fetches documents from a table for BM25 indexing,
+// returning a map of document ID to content.
+//
+// maxDocuments bounds the read with a LIMIT. This arm has no
+// server-side ranking to push down, so it necessarily reads rows and
+// ranks them in memory; without the bound that is an unbounded read of
+// the whole table on every request, and any caller able to reach the
+// query endpoint can impose work proportional to table size rather
+// than to request count.
+//
+// The LIMIT is deliberately not paired with an ORDER BY. Ordering would
+// force the database to scan and sort the entire matching set before
+// discarding all but the first n rows, which is the very cost being
+// avoided; an unordered LIMIT lets it stop as soon as it has enough.
+// The consequence is that when a table has more matching rows than the
+// cap, the subset ranked by BM25 is an arbitrary one and may differ
+// between requests. Callers should treat a returned count equal to
+// maxDocuments as "possibly truncated" and say so, since keyword
+// coverage is then partial.
+//
+// The filter parameter allows additional WHERE conditions from the API request.
+func (p *Pool) FetchDocuments(
+	ctx context.Context,
+	table config.TableSource,
+	filter *config.Filter,
+	maxDocuments int,
+) (map[string]string, error) {
+	query, args, err := buildFetchDocumentsQuery(table, filter, maxDocuments)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := p.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch documents: %w", err)
 	}

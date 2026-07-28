@@ -61,6 +61,7 @@ type SearchBackend interface {
 		ctx context.Context,
 		table config.TableSource,
 		filter *config.Filter,
+		maxDocuments int,
 	) (map[string]string, error)
 }
 

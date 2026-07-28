@@ -252,6 +252,16 @@ func (c *Config) validatePipeline(index int, p Pipeline) ValidationErrors {
 		}
 	}
 
+	// A non-positive cap would be meaningless rather than "unlimited",
+	// so reject it explicitly instead of silently substituting a
+	// default and leaving the operator believing the value took effect.
+	if p.Search.BM25MaxDocuments != nil && *p.Search.BM25MaxDocuments < 1 {
+		errs = append(errs, ValidationError{
+			Field:   prefix + ".search.bm25_max_documents",
+			Message: "must be at least 1",
+		})
+	}
+
 	// Rerank config validation (optional; disabled unless provider is set)
 	errs = append(errs, c.validateRerank(prefix+".rerank", p.Rerank)...)
 
