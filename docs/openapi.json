@@ -192,7 +192,7 @@
           },
           "message": {
             "type": "string",
-            "description": "Error message"
+            "description": "Human-readable description of the failure class. Deliberately coarse: upstream provider error text is never relayed here, because providers echo a truncated form of the submitted API key on an authentication failure. Full detail is written to the server log instead."
           }
         },
         "required": [
@@ -402,7 +402,7 @@
         "properties": {
           "error": {
             "type": "string",
-            "description": "Error message if unreachable"
+            "description": "Failure class if unreachable, drawn from a fixed set. Never contains upstream provider error text, since that can include part of the configured API key; see the server log for detail."
           },
           "reachable": {
             "type": "boolean",

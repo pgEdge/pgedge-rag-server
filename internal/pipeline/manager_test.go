@@ -21,6 +21,7 @@ import (
 	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
+	"github.com/pgEdge/pgedge-rag-server/internal/safeerr"
 )
 
 // newTestManager creates a Manager with mock pipelines for testing.
@@ -272,7 +273,12 @@ func TestManager_Health(t *testing.T) {
 		t.Fatal("expected pipeline-1 in health results")
 	}
 	assertProviderHealth(t, "pipeline-1 embedding", p1.Embedding, true, "")
-	assertProviderHealth(t, "pipeline-1 completion", p1.Completion, false, "connection refused")
+	// The reported error is now a classified description rather than the
+	// underlying error's text, so that a provider's response body (which
+	// can contain a truncated API key) never reaches this unauthenticated
+	// endpoint. A bare errors.New is not a recognised class, so it
+	// reports as internal.
+	assertProviderHealth(t, "pipeline-1 completion", p1.Completion, false, safeerr.MsgInternal)
 
 	p2, ok := byName["pipeline-2"]
 	if !ok {
@@ -378,8 +384,15 @@ func TestPipeline_Ping_RecoversFromProviderPanic(t *testing.T) {
 	if result.Embedding.Reachable {
 		t.Error("expected embedding to be unreachable after its Ping panicked")
 	}
-	if !strings.Contains(result.Embedding.Error, "boom: simulated provider bug") {
-		t.Errorf("expected panic message in error, got %q", result.Embedding.Error)
+	// The panic value is no longer reported to the caller. A panic can
+	// carry arbitrary content, including a request or a credential, and
+	// GET /v1/health serialises this field to an unauthenticated caller,
+	// so the detail is logged and a fixed description is published.
+	if strings.Contains(result.Embedding.Error, "boom: simulated provider bug") {
+		t.Errorf("panic value must not be published to callers, got %q", result.Embedding.Error)
+	}
+	if result.Embedding.Error != safeerr.MsgInternal {
+		t.Errorf("expected %q, got %q", safeerr.MsgInternal, result.Embedding.Error)
 	}
 	if !result.Completion.Reachable {
 		t.Error("expected completion to still be reachable (its own Ping never panicked)")
@@ -510,5 +523,71 @@ func TestManager_Close(t *testing.T) {
 	// Verify pipelines are nil after close
 	if m.pipelines != nil {
 		t.Error("expected pipelines to be nil after close")
+	}
+}
+
+// TestPipeline_Ping_DoesNotLeakCredentialInHealth is the regression test
+// for the health-endpoint half of the credential leak. pingProvider used
+// to put err.Error() straight into ProviderHealth.Error, which
+// handleHealth serialises to the caller. Because a ping exercises the
+// real configured key, an authentication failure meant an unauthenticated
+// GET /v1/health published part of that key, needing no query at all.
+func TestPipeline_Ping_DoesNotLeakCredentialInHealth(t *testing.T) {
+	const leakedKey = "sk-proj-AAAABBBBCCCCDDDDEEEEFFFF0123"
+
+	p := newTestPipeline("leaky", "provider echoes the key back")
+	p.completionProv.(*MockCompleter).PingFunc = func(ctx context.Context) error {
+		return &llmlib.ProviderError{
+			Err:        llmlib.ErrAuthentication,
+			StatusCode: 401,
+			Provider:   "openai",
+			Message: `{"error":{"message":"Incorrect API key provided: ` +
+				leakedKey + `."}}`,
+		}
+	}
+
+	health := p.Ping(context.Background())
+
+	if health.Completion.Reachable {
+		t.Error("expected the completion provider to be reported unreachable")
+	}
+	if strings.Contains(health.Completion.Error, leakedKey) {
+		t.Errorf("health response leaked the API key: %q", health.Completion.Error)
+	}
+	if strings.Contains(health.Completion.Error, "sk-") {
+		t.Errorf("health response leaked a credential-shaped string: %q",
+			health.Completion.Error)
+	}
+	if strings.Contains(health.Completion.Error, "Incorrect API key provided") {
+		t.Errorf("health response relayed the provider's error body: %q",
+			health.Completion.Error)
+	}
+	if health.Completion.Error != safeerr.MsgAuthentication {
+		t.Errorf("expected the classified message %q, got %q",
+			safeerr.MsgAuthentication, health.Completion.Error)
+	}
+}
+
+// TestPipeline_Ping_PanicDoesNotLeak covers the recover path, since a
+// panic value can carry anything, including a request or credential.
+func TestPipeline_Ping_PanicDoesNotLeak(t *testing.T) {
+	const leakedKey = "sk-proj-AAAABBBBCCCCDDDDEEEEFFFF0123"
+
+	p := newTestPipeline("panicky", "provider client panics")
+	p.completionProv.(*MockCompleter).PingFunc = func(ctx context.Context) error {
+		panic("boom with " + leakedKey)
+	}
+
+	health := p.Ping(context.Background())
+
+	if health.Completion.Reachable {
+		t.Error("expected the completion provider to be reported unreachable")
+	}
+	if strings.Contains(health.Completion.Error, leakedKey) {
+		t.Errorf("health response leaked the API key via a panic: %q",
+			health.Completion.Error)
+	}
+	if health.Completion.Error != safeerr.MsgInternal {
+		t.Errorf("expected %q, got %q", safeerr.MsgInternal, health.Completion.Error)
 	}
 }

@@ -95,6 +95,32 @@ and this project adheres to
   Vector search is unaffected and continues to rank across the whole
   table via its index.
 
+- API error responses no longer relay upstream provider error text, which
+  could disclose part of the configured provider API key. The query
+  handler sent the raw Go error string to the client for both ordinary
+  and streaming requests, and `GET /v1/health` did the same for each
+  provider's reachability error. Those errors originate in
+  pgedge-go-llm-lib, which relays the provider's own JSON error body
+  verbatim, and providers characteristically echo a truncated form of the
+  submitted key in that body when they reject a credential. Since none
+  of these endpoints is authenticated, any caller could obtain it, and in
+  the health case a single unauthenticated `GET` was enough, with no
+  query required.
+
+  Client-facing messages are now a short description of the failure class
+  drawn from a fixed set, produced by classifying the error rather than
+  by scrubbing it: nothing derived from the provider's response body
+  reaches the caller, whatever a provider chose to put there. Full detail
+  is written to the server log instead, with credential-shaped strings
+  removed as defence in depth. Recovered panics from a provider client
+  are likewise logged rather than reported, since a panic value can carry
+  anything.
+
+  This reduces the diagnostic detail available to API clients, which is
+  the point; operators should consult the server log. The `error` field
+  of a health response and the `error` event of a streaming response are
+  affected in the same way.
+
 ### Added
 
 - `make vulncheck` runs `govulncheck` over the module, reporting
