@@ -26,6 +26,27 @@ and this project adheres to
   set. Pipelines that legitimately serve a public corpus should add
   `allow_include_sources: true`.
 
+- Retrieved documents are now framed as untrusted data rather than
+  concatenated into the system prompt. Content previously went into the
+  system prompt behind a fixed `--- Document N ---` header, with no
+  escaping and no language distinguishing reference material from
+  instructions, which put text an attacker could control in the
+  highest-authority position the provider offers. Documents now travel
+  in the user turn between `BEGIN`/`END` markers carrying a nonce that
+  is random per request, so content cannot forge a closing marker, and
+  the system prompt carries a matching block of security rules that is
+  appended beneath any custom `system_prompt` and cannot be overridden
+  from configuration. The rules forbid acting on instructions found in
+  retrieved text, soliciting credentials, asserting that an account is
+  locked, and directing users somewhere to log in or pay. Prompt
+  injection has no complete fix, so this reduces risk rather than
+  removing it, and keeping the corpus trustworthy still matters.
+
+- Context documents now carry their source id, so the rendered block
+  attributes each document. The attribution header existed but was
+  never populated, leaving the model nothing to reason about when
+  deciding what a claim rests on.
+
 ### Added
 
 - Configurable `request_timeout` and `per_attempt_timeout` for LLM

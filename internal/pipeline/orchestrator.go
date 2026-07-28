@@ -452,10 +452,22 @@ func (o *Orchestrator) applyRerankOrder(
 }
 
 // buildChatRequest converts the QueryRequest + retrieved context into
-// an llmlib.ChatRequest with the system prompt carrying the context
-// block. Standardising on system-prompt-carries-context matches the
-// pre-migration Anthropic/Gemini behaviour and is functionally
-// equivalent for OpenAI/Ollama.
+// an llmlib.ChatRequest.
+//
+// Retrieved content is placed in the final user turn, delimited by a
+// per-request nonce, and never in the system prompt. Every provider
+// treats the system prompt as the top of its instruction hierarchy, so
+// it is the worst available position for bytes an attacker may control:
+// a poisoned document concatenated there is presented to the model with
+// operator authority. The system prompt instead carries only trusted
+// text, including the BoundaryRules that name this request's markers.
+//
+// This reverses an earlier decision to standardise on
+// system-prompt-carries-context. That standardisation was about
+// cross-provider consistency rather than security, and it is preserved
+// here: the placement changes uniformly for every provider, so
+// Anthropic, Gemini, OpenAI and Ollama all continue to receive the same
+// structure as each other.
 //
 // Temperature is intentionally left unset here: pgedge-go-llm-lib's
 // Options.WithDefaults() always fills an unset per-request Temperature
@@ -472,9 +484,6 @@ func (o *Orchestrator) buildChatRequest(
 	contextDocs []ragllm.ContextDoc,
 ) llmlib.ChatRequest {
 	system := o.buildSystemPrompt()
-	if len(contextDocs) > 0 {
-		system = system + "\n\n" + ragllm.FormatContext(contextDocs)
-	}
 
 	messages := make([]llmlib.Message, 0, len(req.Messages)+1)
 	for _, m := range req.Messages {
@@ -485,7 +494,19 @@ func (o *Orchestrator) buildChatRequest(
 			},
 		})
 	}
-	messages = append(messages, llmlib.UserText(req.Query))
+
+	if len(contextDocs) > 0 {
+		block := ragllm.FormatContext(contextDocs)
+		system = system + "\n\n" + ragllm.BoundaryRules(block.Nonce)
+		// Context and question share one user turn rather than being
+		// sent as two, because consecutive same-role messages are
+		// rejected or silently merged by some providers.
+		messages = append(messages, llmlib.UserText(
+			block.Text+"\n\nQuestion: "+req.Query,
+		))
+	} else {
+		messages = append(messages, llmlib.UserText(req.Query))
+	}
 
 	return llmlib.ChatRequest{
 		SystemPrompt: system,
@@ -548,6 +569,7 @@ func (o *Orchestrator) buildContext(results []database.SearchResult) []ragllm.Co
 				}
 				contextDocs = append(contextDocs, ragllm.ContextDoc{
 					Content: truncated + "...",
+					Source:  r.ID,
 					Score:   r.Score,
 				})
 			}
@@ -556,6 +578,7 @@ func (o *Orchestrator) buildContext(results []database.SearchResult) []ragllm.Co
 
 		contextDocs = append(contextDocs, ragllm.ContextDoc{
 			Content: r.Content,
+			Source:  r.ID,
 			Score:   r.Score,
 		})
 		totalTokens += estimatedTokens
@@ -571,7 +594,17 @@ If the context does not contain relevant information to answer the question, you
 Do NOT use your general knowledge to answer. Only use facts from the provided context.
 Be concise and accurate in your responses.`
 
-// buildSystemPrompt returns the system prompt for RAG.
+// buildSystemPrompt returns the operator-controlled part of the system
+// prompt: a persona and answering style, either the configured
+// system_prompt or DefaultSystemPrompt.
+//
+// This is only part of what the model receives. buildChatRequest
+// appends ragllm.BoundaryRules beneath whatever this returns whenever
+// there is retrieved content, so a custom system_prompt replaces the
+// persona but cannot displace the trust boundary. Note that the
+// anti-hallucination wording in DefaultSystemPrompt is topicality
+// guidance, not a security control: it constrains where facts come
+// from and does nothing to stop a document issuing instructions.
 func (o *Orchestrator) buildSystemPrompt() string {
 	if o.cfg != nil && o.cfg.SystemPrompt != "" {
 		return o.cfg.SystemPrompt
