@@ -112,6 +112,16 @@ type Pipeline struct {
 	Search       SearchConfig      `yaml:"search"`        // Search behavior settings
 	Rerank       RerankConfig      `yaml:"rerank"`        // Optional reranking stage
 	LLMHeaders   map[string]string `yaml:"llm_headers"`   // Pipeline-level headers for LLM calls
+
+	// AllowIncludeSources permits clients of this pipeline to request
+	// the raw content of retrieved documents via include_sources.
+	// Defaults to false: a request alone is not sufficient authority to
+	// echo stored document content back to the caller, since anything
+	// reachable in a configured table becomes directly retrievable by
+	// whoever can reach the query endpoint. Deliberately not settable
+	// under `defaults`, so that exposing a corpus is always an explicit
+	// per-pipeline decision rather than something inherited.
+	AllowIncludeSources bool `yaml:"allow_include_sources"`
 }
 
 // HostEntry represents a single host in a multi-host database configuration.

@@ -470,9 +470,13 @@ func BuildOpenAPISpec() OpenAPISpec {
 							Description: "Structured filter to apply to search results",
 						},
 						"include_sources": {
-							Type:        "boolean",
-							Description: "Include source documents in response",
-							Default:     false,
+							Type: "boolean",
+							Description: "Request the source documents used to " +
+								"produce the answer. Honoured only if the pipeline " +
+								"is configured with allow_include_sources: true; " +
+								"otherwise the answer is returned without sources " +
+								"and the request still succeeds.",
+							Default: false,
 						},
 						"messages": {
 							Type:        "array",
@@ -492,8 +496,10 @@ func BuildOpenAPISpec() OpenAPISpec {
 							Description: "The generated answer",
 						},
 						"sources": {
-							Type:        "array",
-							Description: "Source documents (only if include_sources=true)",
+							Type: "array",
+							Description: "Source documents. Present only when the " +
+								"request set include_sources=true and the pipeline " +
+								"permits it via allow_include_sources.",
 							Items: &OpenAPISchema{
 								Ref: "#/components/schemas/Source",
 							},

@@ -9,6 +9,23 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Security
+
+- **Breaking:** `include_sources` on a query is now honoured only when
+  the pipeline sets the new `allow_include_sources: true` option, which
+  defaults to `false`. Previously any client could ask for the raw
+  stored content of matching rows and receive it, which made every row
+  in a configured table directly retrievable by anyone able to reach
+  the query endpoint, independently of anything the LLM decided to
+  say. The two gates are deliberately separate, so permitting sources
+  does not force them on clients that do not want them, and an
+  operator can withdraw permission without a client deploy. Requests
+  that ask for sources from a pipeline that does not permit them still
+  succeed and return the answer without a `sources` array, so nothing
+  breaks beyond the sources themselves disappearing until the option is
+  set. Pipelines that legitimately serve a public corpus should add
+  `allow_include_sources: true`.
+
 ### Added
 
 - Configurable `request_timeout` and `per_attempt_timeout` for LLM

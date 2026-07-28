@@ -577,6 +577,42 @@ func TestLoad_SystemPrompt(t *testing.T) {
 	}
 }
 
+// TestLoad_AllowIncludeSources checks that the option parses when set
+// and, more importantly, that a pipeline which omits it ends up closed
+// rather than open. The option is deliberately not inheritable from
+// `defaults`, so absence must always mean "not permitted".
+func TestLoad_AllowIncludeSources(t *testing.T) {
+	cfg, err := Load("../../testdata/configs/allow-include-sources.yaml")
+	if err != nil {
+		t.Fatalf("failed to load allow-include-sources config: %v", err)
+	}
+
+	if len(cfg.Pipelines) != 2 {
+		t.Fatalf("expected 2 pipelines, got %d", len(cfg.Pipelines))
+	}
+
+	byName := make(map[string]Pipeline, len(cfg.Pipelines))
+	for _, p := range cfg.Pipelines {
+		byName[p.Name] = p
+	}
+
+	allowed, ok := byName["sources-allowed"]
+	if !ok {
+		t.Fatal("expected a pipeline named 'sources-allowed'")
+	}
+	if !allowed.AllowIncludeSources {
+		t.Error("expected AllowIncludeSources to be true when set to true in YAML")
+	}
+
+	defaulted, ok := byName["sources-default"]
+	if !ok {
+		t.Fatal("expected a pipeline named 'sources-default'")
+	}
+	if defaulted.AllowIncludeSources {
+		t.Error("expected AllowIncludeSources to default to false when the key is absent")
+	}
+}
+
 func TestApplyDefaults_BaseURLCascade(t *testing.T) {
 	cfg := &Config{
 		Server: ServerConfig{Port: 8080},

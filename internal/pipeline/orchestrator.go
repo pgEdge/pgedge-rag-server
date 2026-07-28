@@ -117,9 +117,38 @@ func (o *Orchestrator) Execute(ctx context.Context, req QueryRequest) (*QueryRes
 		TokensUsed: resp.Usage.TotalTokens,
 	}
 	if req.IncludeSources {
-		out.Sources = o.buildSources(results)
+		if o.sourcesAllowed() {
+			out.Sources = o.buildSources(results)
+		} else {
+			o.logger.Warn(
+				"include_sources requested but not permitted by pipeline "+
+					"configuration; omitting sources",
+				"pipeline", o.pipelineName(),
+			)
+		}
 	}
 	return out, nil
+}
+
+// sourcesAllowed reports whether this pipeline may return the raw
+// content of retrieved documents to a client.
+//
+// Two independent gates must both open before sources are returned: the
+// operator permits it here, and the client asks for it via
+// include_sources. Keeping them separate means enabling the safety
+// control does not force payload on clients that do not want sources,
+// and an operator can withdraw permission without waiting on a client
+// deploy. A missing config fails closed.
+func (o *Orchestrator) sourcesAllowed() bool {
+	return o.cfg != nil && o.cfg.AllowIncludeSources
+}
+
+// pipelineName is a nil-safe accessor for log messages.
+func (o *Orchestrator) pipelineName() string {
+	if o.cfg == nil {
+		return ""
+	}
+	return o.cfg.Name
 }
 
 // ExecuteStream runs the RAG pipeline and returns a streaming response.

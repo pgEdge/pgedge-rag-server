@@ -57,12 +57,16 @@ type Message struct {
 
 // QueryRequest represents a RAG query request.
 type QueryRequest struct {
-	Query          string         `json:"query"`
-	Stream         bool           `json:"stream"`
-	TopN           int            `json:"top_n,omitempty"`    // Override default top-N results
-	Filter         *config.Filter `json:"filter,omitempty"`   // Structured filter to filter results
-	IncludeSources bool           `json:"include_sources"`    // Include source documents (default: false)
-	Messages       []Message      `json:"messages,omitempty"` // Previous conversation history
+	Query  string         `json:"query"`
+	Stream bool           `json:"stream"`
+	TopN   int            `json:"top_n,omitempty"`  // Override default top-N results
+	Filter *config.Filter `json:"filter,omitempty"` // Structured filter to filter results
+	// IncludeSources asks for the raw content of retrieved documents
+	// (default: false). It is honoured only when the pipeline's
+	// allow_include_sources config option is also true; otherwise the
+	// answer is returned without sources. See Orchestrator.sourcesAllowed.
+	IncludeSources bool      `json:"include_sources"`
+	Messages       []Message `json:"messages,omitempty"` // Previous conversation history
 }
 
 // QueryResponse represents a non-streaming RAG query response.
@@ -81,8 +85,13 @@ type Source struct {
 
 // StreamEvent represents a streaming response event.
 type StreamEvent struct {
-	Type    string   `json:"type"`              // "chunk", "sources", "done", "error"
-	Content string   `json:"content,omitempty"` // For "chunk" type
+	Type    string `json:"type"`              // "chunk", "sources", "done", "error"
+	Content string `json:"content,omitempty"` // For "chunk" type
+	// Sources is declared for a "sources" event but nothing currently
+	// emits one; the streaming path returns no source content at all.
+	// Anything that starts populating it MUST first check
+	// Orchestrator.sourcesAllowed, or it will reopen the exposure that
+	// allow_include_sources exists to close.
 	Sources []Source `json:"sources,omitempty"` // For "sources" type
 	Error   string   `json:"error,omitempty"`   // For "error" type
 }
