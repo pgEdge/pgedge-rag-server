@@ -130,3 +130,116 @@ func TestBuildVectorSearchQuery_IDColumnWithFilterAndMinSimilarity(t *testing.T)
 		t.Errorf("unexpected args: %v", args)
 	}
 }
+
+// TestBuildFetchDocumentsQuery_AppliesLimit is the regression test for
+// the unbounded BM25 corpus read. Without a LIMIT, this query returned
+// every row matching the filter, so a single request cost work
+// proportional to the table's size rather than to the result set, and
+// any caller able to reach the query endpoint could impose it at will.
+func TestBuildFetchDocumentsQuery_AppliesLimit(t *testing.T) {
+	table := config.TableSource{
+		Table:        "public.chunks",
+		TextColumn:   "content",
+		VectorColumn: "embedding",
+		IDColumn:     "id",
+	}
+
+	query, args, err := buildFetchDocumentsQuery(table, nil, 250)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(query, "LIMIT $1") {
+		t.Errorf("expected a parameterised LIMIT in the query\n--- got ---\n%s", query)
+	}
+	if len(args) != 1 {
+		t.Fatalf("expected exactly the limit argument, got %d: %v", len(args), args)
+	}
+	if args[0] != 250 {
+		t.Errorf("expected limit argument 250, got %v", args[0])
+	}
+}
+
+// TestBuildFetchDocumentsQuery_LimitFollowsFilterArgs pins the
+// placeholder arithmetic. The LIMIT has to take the index after however
+// many arguments the filter contributed; getting that wrong produces a
+// query that fails at execution time rather than at compile time.
+func TestBuildFetchDocumentsQuery_LimitFollowsFilterArgs(t *testing.T) {
+	table := config.TableSource{
+		Table:        "public.chunks",
+		TextColumn:   "content",
+		VectorColumn: "embedding",
+		IDColumn:     "id",
+	}
+	filter := &config.Filter{
+		Conditions: []config.FilterCondition{
+			{Column: "product", Operator: "=", Value: "pgEdge"},
+			{Column: "version", Operator: "=", Value: "1.0"},
+		},
+	}
+
+	query, args, err := buildFetchDocumentsQuery(table, filter, 99)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Two filter arguments occupy $1 and $2, so the limit must be $3.
+	if !strings.Contains(query, "LIMIT $3") {
+		t.Errorf("expected LIMIT $3 after two filter args\n--- got ---\n%s", query)
+	}
+	if len(args) != 3 {
+		t.Fatalf("expected 3 args (2 filter + limit), got %d: %v", len(args), args)
+	}
+	if args[2] != 99 {
+		t.Errorf("expected the limit to be the last argument, got %v", args[2])
+	}
+}
+
+// TestBuildFetchDocumentsQuery_NoOrderBy documents a deliberate choice.
+// An ORDER BY would force the database to scan and sort the whole
+// matching set before discarding all but the first n rows, which is the
+// cost the LIMIT exists to avoid. The trade-off is that the subset is
+// arbitrary when the table has more matching rows than the cap.
+func TestBuildFetchDocumentsQuery_NoOrderBy(t *testing.T) {
+	table := config.TableSource{
+		Table:        "public.chunks",
+		TextColumn:   "content",
+		VectorColumn: "embedding",
+		IDColumn:     "id",
+	}
+
+	query, _, err := buildFetchDocumentsQuery(table, nil, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.Contains(query, "ORDER BY") {
+		t.Errorf("did not expect an ORDER BY in the BM25 corpus read\n--- got ---\n%s", query)
+	}
+}
+
+// TestBuildFetchDocumentsQuery_LimitAppliesWithoutIDColumn covers the
+// ROW_NUMBER() fallback branch, which builds a separate query string and
+// so could lose the LIMIT independently of the id_column branch.
+func TestBuildFetchDocumentsQuery_LimitAppliesWithoutIDColumn(t *testing.T) {
+	table := config.TableSource{
+		Table:        "public.chunks",
+		TextColumn:   "content",
+		VectorColumn: "embedding",
+	}
+
+	query, args, err := buildFetchDocumentsQuery(table, nil, 42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(query, "ROW_NUMBER()") {
+		t.Fatalf("expected the ROW_NUMBER fallback branch\n--- got ---\n%s", query)
+	}
+	if !strings.Contains(query, "LIMIT $1") {
+		t.Errorf("expected a LIMIT in the fallback branch too\n--- got ---\n%s", query)
+	}
+	if len(args) != 1 || args[0] != 42 {
+		t.Errorf("expected the limit argument, got %v", args)
+	}
+}

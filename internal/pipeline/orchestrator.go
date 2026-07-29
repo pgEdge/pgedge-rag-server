@@ -33,7 +33,6 @@ type Orchestrator struct {
 	completionProv Completer
 	reranker       Reranker
 	rerankTopK     int
-	bm25Index      *bm25.Index
 	tokenBudget    int
 	topN           int
 	logger         *slog.Logger
@@ -66,7 +65,6 @@ func NewOrchestrator(cfg OrchestratorConfig) *Orchestrator {
 		completionProv: cfg.CompletionProv,
 		reranker:       cfg.Reranker,
 		rerankTopK:     cfg.RerankTopK,
-		bm25Index:      bm25.NewIndex(),
 		tokenBudget:    cfg.TokenBudget,
 		topN:           cfg.TopN,
 		logger:         logger,
@@ -314,7 +312,12 @@ func (o *Orchestrator) search(
 	}
 
 	useHybrid := o.cfg.Search.HybridEnabled != nil && *o.cfg.Search.HybridEnabled &&
-		vectorWeight < 1.0
+		vectorWeight < 1.0 && !req.DisableHybrid
+
+	maxBM25Docs := config.DefaultBM25MaxDocuments
+	if o.cfg.Search.BM25MaxDocuments != nil && *o.cfg.Search.BM25MaxDocuments > 0 {
+		maxBM25Docs = *o.cfg.Search.BM25MaxDocuments
+	}
 
 	for _, table := range o.cfg.Tables {
 		if o.dbPool == nil {
@@ -345,7 +348,7 @@ func (o *Orchestrator) search(
 			continue
 		}
 
-		docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter)
+		docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter, maxBM25Docs)
 		if err != nil {
 			o.logger.Warn("failed to fetch documents for BM25",
 				"table", table.Table, "error", err)
@@ -354,9 +357,28 @@ func (o *Orchestrator) search(
 			continue
 		}
 
-		o.bm25Index.Clear()
-		o.bm25Index.AddDocuments(docs)
-		bm25Results := o.bm25Index.Search(req.Query, topN*2)
+		if len(docs) >= maxBM25Docs {
+			o.logger.Warn(
+				"keyword search corpus truncated by bm25_max_documents; "+
+					"keyword coverage for this request is partial",
+				"table", table.Table, "limit", maxBM25Docs,
+			)
+		}
+
+		// The index is built per request and never shared. A single
+		// per-pipeline index mutated in place (clear, refill, search)
+		// cannot be made correct by locking each step, because the three
+		// steps are only meaningful as one unit: concurrent requests
+		// interleave, so a search can run against a corpus another
+		// request's filter populated. Since the filter is how callers
+		// scope results, that turns ordinary concurrent traffic into a
+		// way to defeat that scoping. Holding one lock across all three
+		// steps would fix correctness but serialise every request on the
+		// pipeline, which makes the cost problem above worse; a
+		// per-request index has neither drawback.
+		index := bm25.NewIndex()
+		index.AddDocuments(docs)
+		bm25Results := index.Search(req.Query, topN*2)
 
 		// Clear ids when the table has no stable id_column so fusion
 		// keys on content, matching the vector arm.

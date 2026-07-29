@@ -67,6 +67,16 @@ type QueryRequest struct {
 	// answer is returned without sources. See Orchestrator.sourcesAllowed.
 	IncludeSources bool      `json:"include_sources"`
 	Messages       []Message `json:"messages,omitempty"` // Previous conversation history
+
+	// DisableHybrid skips the keyword-search arm for this request,
+	// leaving vector search alone (default: false).
+	//
+	// This can only turn the arm off, never on: a request cannot enable
+	// hybrid search where the pipeline configuration has disabled it.
+	// The asymmetry is deliberate, since the keyword arm is the
+	// expensive half of a query, and a client should be able to opt out
+	// of work but not to opt into work an operator has declined.
+	DisableHybrid bool `json:"disable_hybrid,omitempty"`
 }
 
 // QueryResponse represents a non-streaming RAG query response.

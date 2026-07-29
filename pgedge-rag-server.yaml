@@ -89,6 +89,14 @@ pipelines:
           # Results below this score are filtered out before reaching the LLM.
           # Helps prevent hallucinated answers for unrelated queries.
           # min_similarity: 0.5
+          # Maximum rows the BM25 keyword arm reads per request
+          # (default: 10000). The BM25 arm ranks in memory, so without a
+          # cap a single query costs work proportional to the table's
+          # size. There is no "unlimited" value; raise this only if you
+          # need wider keyword coverage and accept the cost. Requests
+          # that hit the cap are logged, since keyword recall is then
+          # partial.
+          # bm25_max_documents: 10000
 
       # Reranking configuration (optional)
       # Reorders search results by relevance immediately before context

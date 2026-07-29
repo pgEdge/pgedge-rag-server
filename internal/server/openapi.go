@@ -478,6 +478,15 @@ func BuildOpenAPISpec() OpenAPISpec {
 								"and the request still succeeds.",
 							Default: false,
 						},
+						"disable_hybrid": {
+							Type: "boolean",
+							Description: "Skip the keyword-search arm for this " +
+								"request, using vector search alone. Reduces " +
+								"latency and database work. This can only turn " +
+								"hybrid search off: a request cannot enable it " +
+								"where the pipeline configuration has disabled it.",
+							Default: false,
+						},
 						"messages": {
 							Type:        "array",
 							Description: "Previous conversation history for context",

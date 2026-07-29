@@ -416,6 +416,11 @@
       "QueryRequest": {
         "type": "object",
         "properties": {
+          "disable_hybrid": {
+            "type": "boolean",
+            "description": "Skip the keyword-search arm for this request, using vector search alone. Reduces latency and database work. This can only turn hybrid search off: a request cannot enable it where the pipeline configuration has disabled it.",
+            "default": false
+          },
           "filter": {
             "description": "Structured filter to apply to search results",
             "$ref": "#/components/schemas/Filter"

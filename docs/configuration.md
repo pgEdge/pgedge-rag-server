@@ -606,6 +606,7 @@ pipelines:
       hybrid_enabled: true
       vector_weight: 0.7
       min_similarity: 0.5
+      bm25_max_documents: 10000
 ```
 
 | Field            | Description                              | Default    |
@@ -613,6 +614,7 @@ pipelines:
 | `hybrid_enabled` | Enable hybrid search (vector + BM25)     | `true`     |
 | `vector_weight`  | Weight for vector vs BM25 (0.0 to 1.0)   | `0.5`      |
 | `min_similarity` | Minimum cosine similarity threshold       | (disabled) |
+| `bm25_max_documents` | Maximum rows the BM25 arm reads per request | `10000` |
 
 **Understanding vector_weight:**
 
@@ -627,7 +629,43 @@ To use only vector search (no BM25), you can either:
 1. Set `hybrid_enabled: false`
 2. Set `vector_weight: 1.0`
 
-Both approaches skip the BM25 search phase entirely.
+Both approaches skip the BM25 search phase entirely. A client may also
+skip it for a single query by sending `"disable_hybrid": true` in the
+request, which is useful where latency matters more than keyword recall.
+That request flag can only turn the keyword arm off; it cannot enable it
+where the configuration has disabled it, since the keyword arm is the
+expensive half of a query and a caller should be able to opt out of work
+but not into work an operator has declined.
+
+**Bounding the cost of the keyword arm:**
+
+Unlike vector search, the BM25 arm has no server-side ranking to push
+down into PostgreSQL: it reads rows matching the filter and ranks them in
+memory. `bm25_max_documents` caps how many rows a single request may read
+for that purpose, which matters because without a cap the cost of a query
+scales with the size of the table rather than with the size of the result
+set, and any caller able to reach the query endpoint can impose it
+repeatedly.
+
+There is no value meaning "unlimited". Raise the number if you need wider
+keyword coverage, having accepted the cost that implies.
+
+When a table holds more matching rows than the cap, the subset that BM25
+ranks is an arbitrary one and may differ between requests, so keyword
+recall is partial and results for the same query may vary. The server
+logs a warning whenever a request hits the cap, so this shows up in
+operation rather than silently. The cap is deliberately not paired with
+an `ORDER BY`, because ordering would require PostgreSQL to scan and sort
+the whole matching set before discarding all but the first n rows, which
+is precisely the cost being avoided.
+
+!!! note "Prefer smaller, well-scoped tables"
+
+    If you are regularly hitting the cap, the better answer is usually a
+    narrower corpus per pipeline, or a config-level `filter` that scopes
+    the table down, rather than simply raising the limit. Vector search
+    is unaffected by this setting and continues to rank across the whole
+    table via its index.
 
 **When to adjust these settings:**
 

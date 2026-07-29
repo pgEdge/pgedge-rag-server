@@ -264,6 +264,7 @@ POST /v1/pipelines/{name}
 | `top_n`           | integer | No       | Override default result limit             |
 | `filter`          | object  | No       | Structured filter to apply to results     |
 | `include_sources` | boolean | No       | Request source documents (default: false); requires `allow_include_sources` on the pipeline |
+| `disable_hybrid`  | boolean | No       | Skip the keyword-search arm for this request (default: false) |
 | `messages`        | array   | No       | Previous conversation history for context |
 
 The `filter` parameter accepts a structured filter object with conditions

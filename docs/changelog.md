@@ -82,6 +82,19 @@ and this project adheres to
   That advisory affects Windows only and so did not apply to any
   supported deployment target, but the upgrade is free.
 
+- The BM25 keyword arm no longer reads a table without a bound. Its
+  query had no `LIMIT`, so every request fetched the content of every
+  row matching the filter and rebuilt an in-memory index from it,
+  meaning the cost of a request scaled with the size of the table rather
+  than with the size of the result set. Combined with the absence of
+  authentication and rate limiting on the same endpoint, that gave any
+  caller a cheap way to impose sustained load on both the database and
+  the server. Reads are now capped by a new per-pipeline
+  `search.bm25_max_documents` option, defaulting to 10000, and requests
+  that hit the cap are logged because keyword recall is then partial.
+  Vector search is unaffected and continues to rank across the whole
+  table via its index.
+
 ### Added
 
 - `make vulncheck` runs `govulncheck` over the module, reporting
@@ -91,6 +104,13 @@ and this project adheres to
   image scan may or may not detect a vulnerable Go module version,
   depending on whether it inspects binary buildinfo, but none can tell
   you whether the vulnerable code path is reachable.
+
+- `disable_hybrid` on a query request skips the keyword-search arm for
+  that request, using vector search alone, for callers that would rather
+  have lower latency than keyword recall. It can only turn the arm off:
+  a request cannot enable hybrid search where the pipeline configuration
+  has disabled it, since a caller should be able to opt out of work but
+  not into work an operator has declined.
 
 - Configurable `request_timeout` and `per_attempt_timeout` for LLM
   providers. Both accept a duration string such as `90s` or `2m` and
@@ -116,6 +136,21 @@ and this project adheres to
   ([#23](https://github.com/pgEdge/pgedge-rag-server/issues/23)).
 
 ### Fixed
+
+- The BM25 keyword index is now built per request instead of being a
+  single per-pipeline object mutated in place. Each request used to
+  clear the shared index, refill it from its own filtered documents and
+  then search it; those three steps were individually locked but not
+  locked as a unit, so concurrent requests interleaved and a search
+  could run against a corpus that a different request's filter had
+  populated. Where an application uses the `filter` parameter to scope
+  results to a customer or tenant, ordinary concurrent traffic could
+  therefore return rows from outside the caller's scope, with no
+  malicious input involved; it also explains non-deterministic or
+  simply wrong keyword results under load. Widening the lock to cover
+  all three steps would have fixed correctness whilst serialising every
+  request on a pipeline behind one mutex, so a per-request index was
+  used instead, which is both correct and better under concurrency.
 
 - Vector search now selects the configured `id_column`, so vector
   results carry an id. Previously the vector arm returned empty
