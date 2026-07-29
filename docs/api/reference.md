@@ -425,6 +425,33 @@ data: {"type": "done"}
 | 500         | `EXECUTION_ERROR`    | Pipeline execution failed      |
 | 500         | `INTERNAL_ERROR`     | Unexpected server error        |
 
+#### Error Detail Is Deliberately Coarse
+
+For failures originating upstream, the `message` field carries a short
+description of the failure class rather than the underlying error text,
+and is drawn from a fixed set:
+
+- `the configured provider rejected the server's credentials`
+- `the provider rate limit was exceeded; retry later`
+- `the provider rejected the request as invalid`
+- `the requested operation is not supported by the configured provider`
+- `the provider returned an error`
+- `the provider could not be reached`
+- `the request took too long to process`
+- `an internal error occurred`
+
+This is a security boundary rather than an oversight. The underlying
+error wraps the LLM provider's own response body, and providers
+characteristically echo a truncated form of the submitted API key in that
+body when they reject a credential, so relaying it would disclose part of
+the server's real key to whoever made the request. Since the query and
+health endpoints are unauthenticated, that could be anyone.
+
+Full error detail, with credential-shaped strings scrubbed, is written to
+the server log, so diagnosis happens there rather than in the client
+response. The same applies to the `error` field of a provider entry in
+`GET /v1/health`, and to the `error` event on a streaming response.
+
 ---
 
 ## Examples

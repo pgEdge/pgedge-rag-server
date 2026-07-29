@@ -21,6 +21,7 @@ import (
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 	"github.com/pgEdge/pgedge-rag-server/internal/database"
 	ragllm "github.com/pgEdge/pgedge-rag-server/internal/llm"
+	"github.com/pgEdge/pgedge-rag-server/internal/safeerr"
 )
 
 // ErrPipelineNotFound is returned when a requested pipeline does not exist.
@@ -375,11 +376,11 @@ func (p *Pipeline) Ping(ctx context.Context) PipelineHealth {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		embedding = pingProvider(ctx, p.embeddingProv.Ping)
+		embedding = pingProvider(ctx, p.logger, p.name, "embedding", p.embeddingProv.Ping)
 	}()
 	go func() {
 		defer wg.Done()
-		completion = pingProvider(ctx, p.completionProv.Ping)
+		completion = pingProvider(ctx, p.logger, p.name, "completion", p.completionProv.Ping)
 	}()
 	wg.Wait()
 
@@ -397,10 +398,35 @@ func (p *Pipeline) Ping(ctx context.Context) PipelineHealth {
 // spawned by Pipeline.Ping/Manager.Health, and Go's panic/recover is
 // per-goroutine, so recoveryMiddleware's recover on the request
 // goroutine can't catch it.
-func pingProvider(ctx context.Context, ping func(context.Context) error) (health ProviderHealth) {
+//
+// The reported Error is a fixed, classified description rather than the
+// underlying error's text. A failing ping wraps the provider's own error
+// body, and providers echo a truncated form of the submitted API key on
+// an authentication failure, so putting that text here would publish
+// part of a real credential: GET /v1/health is unauthenticated and
+// serialises this field straight to the caller. Full detail goes to the
+// log instead, with credential-shaped strings scrubbed.
+func pingProvider(
+	ctx context.Context,
+	logger *slog.Logger,
+	pipelineName string,
+	kind string,
+	ping func(context.Context) error,
+) (health ProviderHealth) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	defer func() {
 		if r := recover(); r != nil {
-			health = ProviderHealth{Reachable: false, Error: fmt.Sprintf("panic: %v", r)}
+			// A panic value can be anything, including something that
+			// embeds a request or credential, so it is logged rather
+			// than reported.
+			logger.Error("provider ping panicked",
+				"pipeline", pipelineName,
+				"provider_kind", kind,
+				"panic", safeerr.Redact(fmt.Sprintf("%v", r)))
+			health = ProviderHealth{Reachable: false, Error: safeerr.MsgInternal}
 		}
 	}()
 
@@ -408,7 +434,11 @@ func pingProvider(ctx context.Context, ping func(context.Context) error) (health
 	defer cancel()
 
 	if err := ping(pingCtx); err != nil {
-		return ProviderHealth{Reachable: false, Error: err.Error()}
+		logger.Warn("provider ping failed",
+			"pipeline", pipelineName,
+			"provider_kind", kind,
+			"error", safeerr.RedactError(err))
+		return ProviderHealth{Reachable: false, Error: safeerr.Message(err)}
 	}
 
 	return ProviderHealth{Reachable: true}

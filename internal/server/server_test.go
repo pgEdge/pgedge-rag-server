@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 	"github.com/pgEdge/pgedge-rag-server/internal/pipeline"
+	"github.com/pgEdge/pgedge-rag-server/internal/safeerr"
 )
 
 // mockPipelineManager implements PipelineManager for testing.
@@ -831,5 +833,107 @@ func TestSwapPipelineManager(t *testing.T) {
 	}
 	if len(resp2.Pipelines) != 1 || resp2.Pipelines[0].Name != "reloaded-pipeline" {
 		t.Fatalf("expected the reloaded pipeline after swap, got %+v", resp2.Pipelines)
+	}
+}
+
+// leakedTestKey stands in for the truncated credential that providers
+// echo back on an authentication failure. Synthetic.
+const leakedTestKey = "sk-proj-AAAABBBBCCCCDDDDEEEEFFFF0123"
+
+// providerAuthFailure builds the error shape pgedge-go-llm-lib produces
+// for a rejected credential, wrapped the way the orchestrator wraps it
+// on the way up to the handler.
+func providerAuthFailure() error {
+	return fmt.Errorf("failed to generate completion: %w", &llmlib.ProviderError{
+		Err:        llmlib.ErrAuthentication,
+		StatusCode: 401,
+		Provider:   "openai",
+		Message: `{"error":{"message":"Incorrect API key provided: ` + leakedTestKey +
+			`."}}`,
+	})
+}
+
+// TestPipelineEndpoint_ProviderErrorDoesNotLeakCredential is the
+// end-to-end guard for the non-streaming path. The handler used to send
+// err.Error() straight to the client, which meant a provider's own error
+// body, including the truncated API key it echoes on an auth failure,
+// went to an anonymous caller.
+func TestPipelineEndpoint_ProviderErrorDoesNotLeakCredential(t *testing.T) {
+	pm := newMockPipelineManager()
+	pm.pipelines["test-pipeline"].executor = &mockQueryExecutor{
+		ExecuteWithOptionsFunc: func(
+			ctx context.Context, req pipeline.QueryRequest,
+		) (*pipeline.QueryResponse, error) {
+			return nil, providerAuthFailure()
+		},
+	}
+	srv := New(testConfig(), pm, nil)
+
+	body := bytes.NewBufferString(`{"query": "test query"}`)
+	r := httptest.NewRequest(http.MethodPost, "/v1/pipelines/test-pipeline", body)
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(w, r)
+
+	raw := w.Body.String()
+	if strings.Contains(raw, leakedTestKey) {
+		t.Errorf("response leaked the API key:\n%s", raw)
+	}
+	if strings.Contains(raw, "sk-") {
+		t.Errorf("response leaked a credential-shaped string:\n%s", raw)
+	}
+	if strings.Contains(raw, "Incorrect API key provided") {
+		t.Errorf("response relayed the provider's error body:\n%s", raw)
+	}
+
+	var resp ErrorResponse
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Error.Code != "EXECUTION_ERROR" {
+		t.Errorf("expected error code EXECUTION_ERROR, got %q", resp.Error.Code)
+	}
+	// The caller should still learn what class of failure occurred.
+	if resp.Error.Message != safeerr.MsgAuthentication {
+		t.Errorf("expected the classified message %q, got %q",
+			safeerr.MsgAuthentication, resp.Error.Message)
+	}
+}
+
+// TestPipelineEndpoint_StreamingProviderErrorDoesNotLeakCredential
+// covers the SSE path, which had the same leak in its "error" event and
+// would otherwise be fixed independently of the non-streaming one.
+func TestPipelineEndpoint_StreamingProviderErrorDoesNotLeakCredential(t *testing.T) {
+	pm := newMockPipelineManager()
+	pm.pipelines["test-pipeline"].executor = &mockQueryExecutor{
+		ExecuteStreamWithOptionsFunc: func(
+			ctx context.Context, req pipeline.QueryRequest,
+		) (<-chan pipeline.StreamChunk, <-chan error) {
+			chunkChan := make(chan pipeline.StreamChunk)
+			errChan := make(chan error, 1)
+			errChan <- providerAuthFailure()
+			close(chunkChan)
+			return chunkChan, errChan
+		},
+	}
+	srv := New(testConfig(), pm, nil)
+
+	body := bytes.NewBufferString(`{"query": "test query", "stream": true}`)
+	r := httptest.NewRequest(http.MethodPost, "/v1/pipelines/test-pipeline", body)
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(w, r)
+
+	raw := w.Body.String()
+	if strings.Contains(raw, leakedTestKey) {
+		t.Errorf("SSE stream leaked the API key:\n%s", raw)
+	}
+	if strings.Contains(raw, "Incorrect API key provided") {
+		t.Errorf("SSE stream relayed the provider's error body:\n%s", raw)
+	}
+	if !strings.Contains(raw, safeerr.MsgAuthentication) {
+		t.Errorf("expected the classified message in the SSE error event:\n%s", raw)
 	}
 }

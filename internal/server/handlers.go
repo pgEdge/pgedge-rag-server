@@ -17,6 +17,7 @@ import (
 	"net/http"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/pipeline"
+	"github.com/pgEdge/pgedge-rag-server/internal/safeerr"
 )
 
 // HealthResponse is the response for the health check endpoint.
@@ -127,7 +128,11 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request) {
 				"pipeline not found: "+name)
 			return
 		}
-		s.respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		s.logger.Error("failed to resolve pipeline",
+			"pipeline", name,
+			"error", safeerr.RedactError(err))
+		s.respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR",
+			safeerr.MsgInternal)
 		return
 	}
 
@@ -178,10 +183,16 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request) {
 				"request took too long to process")
 			return
 		}
+		// The error is logged in full (with credential-shaped strings
+		// scrubbed) but never returned to the caller: it may wrap a
+		// provider's own error body, and providers echo a truncated form
+		// of the submitted API key on an authentication failure. This
+		// endpoint is unauthenticated, so the caller may be anyone.
 		s.logger.Error("pipeline execution failed",
 			"pipeline", name,
-			"error", err)
-		s.respondError(w, http.StatusInternalServerError, "EXECUTION_ERROR", err.Error())
+			"error", safeerr.RedactError(err))
+		s.respondError(w, http.StatusInternalServerError, "EXECUTION_ERROR",
+			safeerr.Message(err))
 		return
 	}
 
@@ -225,9 +236,14 @@ func (s *Server) handleStreamingQuery(w http.ResponseWriter, r *http.Request,
 			if !ok {
 				// Channel closed, check for errors
 				if err := <-errChan; err != nil {
+					// As with the non-streaming path, the raw error may
+					// carry a provider's response body and must not
+					// reach the client.
+					s.logger.Error("streaming pipeline execution failed",
+						"error", safeerr.RedactError(err))
 					s.sendSSE(w, flusher, pipeline.StreamEvent{
 						Type:  "error",
-						Error: err.Error(),
+						Error: safeerr.Message(err),
 					})
 				}
 				// Send done event

@@ -340,8 +340,11 @@ func BuildOpenAPISpec() OpenAPISpec {
 							Description: "Whether the provider responded to a connectivity check",
 						},
 						"error": {
-							Type:        "string",
-							Description: "Error message if unreachable",
+							Type: "string",
+							Description: "Failure class if unreachable, drawn from a " +
+								"fixed set. Never contains upstream provider error " +
+								"text, since that can include part of the configured " +
+								"API key; see the server log for detail.",
 						},
 					},
 					Required: []string{"reachable"},
@@ -594,8 +597,13 @@ func BuildOpenAPISpec() OpenAPISpec {
 							Description: "Error code",
 						},
 						"message": {
-							Type:        "string",
-							Description: "Error message",
+							Type: "string",
+							Description: "Human-readable description of the failure " +
+								"class. Deliberately coarse: upstream provider error " +
+								"text is never relayed here, because providers echo a " +
+								"truncated form of the submitted API key on an " +
+								"authentication failure. Full detail is written to the " +
+								"server log instead.",
 						},
 					},
 					Required: []string{"code", "message"},
