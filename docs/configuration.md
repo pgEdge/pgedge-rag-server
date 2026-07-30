@@ -72,6 +72,15 @@ activity there (a shell writing its history, an editor scratch file,
 and so on) would provoke needless reloads; mounting keys into a
 dedicated directory, as a container deployment does, avoids this.
 
+Directory-level detection has one further consequence worth knowing
+about if you run under Docker with the configuration bind-mounted as a
+single file, as the `docker-compose.yml` in this repository does: the
+directory the container watches is not the host directory you edit in,
+so host-side edits produce no event and no reload. See
+[Configuration Changes Not Applied](docker.md#configuration-changes-not-applied)
+for the detail and for how to mount the directory instead if you want
+reloads to work in a container.
+
 
 ## Configuration File Structure
 
@@ -338,14 +347,65 @@ The server therefore separates instructions from data in every request:
 
 ### Database Properties
 
-| Field      | Description                              | Default    |
-|------------|------------------------------------------|------------|
-| `host`     | PostgreSQL host                          | `localhost`|
-| `port`     | PostgreSQL port                          | `5432`     |
-| `database` | Database name                            | Required   |
-| `username` | Database user                            | `postgres` |
-| `password` | Database password                        | `""`       |
-| `ssl_mode` | SSL mode (disable, allow, prefer, etc.)  | `prefer`   |
+| Field           | Description                              | Default    |
+|-----------------|------------------------------------------|------------|
+| `host`          | PostgreSQL host                          | `localhost`|
+| `port`          | PostgreSQL port                          | `5432`     |
+| `database`      | Database name                            | Required   |
+| `username`      | Database user                            | `postgres` |
+| `password`      | Database password                        | `""`       |
+| `ssl_mode`      | SSL mode (see the list below)            | `prefer`   |
+| `ssl_cert`      | Path to the client certificate           | (none)     |
+| `ssl_key`       | Path to the private key for `ssl_cert`   | (none)     |
+| `ssl_root_ca`   | Path to the CA certificate used to verify the server | (none) |
+
+Valid values for `ssl_mode` are `disable`, `allow`, `prefer`, `require`,
+`verify-ca`, and `verify-full`, carrying the same meanings they do for
+`libpq`; anything else is rejected at startup.
+
+For multi-host (high-availability) deployments, `host` and `port` are
+replaced by the `hosts` array, optionally alongside
+`target_session_attrs`; see
+[Multi-Host Connections](#multi-host-connections).
+
+#### Certificate-Based Authentication
+
+Where the database is configured for `cert` authentication rather than a
+password, set `ssl_cert` and `ssl_key` to the paths of the client
+certificate and its private key, and leave `password` unset. Both are
+passed straight through to the underlying `libpq`-style connection
+string as `sslcert` and `sslkey`, so they behave exactly as they do for
+`psql`: the paths are read by the server process, which must therefore
+be able to read them, and the key file must not be group- or
+world-readable.
+
+`ssl_root_ca` maps to `sslrootcert` and points at the CA certificate
+used to verify the certificate the *server* presents. It is what makes
+`ssl_mode: "verify-ca"` and `ssl_mode: "verify-full"` meaningful, since
+without a trusted root there is nothing to verify the server's
+certificate against, and it is independent of client-certificate
+authentication: you can supply a root CA whilst still authenticating
+with a password.
+
+```yaml
+database:
+    host: "postgres.internal"
+    port: 5432
+    database: "ragdb"
+    username: "rag_user"
+    ssl_mode: "verify-full"
+    ssl_cert: "/etc/pgedge/certs/client.crt"
+    ssl_key: "/etc/pgedge/certs/client.key"
+    ssl_root_ca: "/etc/pgedge/certs/ca.crt"
+```
+
+All three fields are omitted from the connection string when left empty,
+so an existing password-based configuration is unaffected. Note that
+these paths are read when a connection pool is built, which includes
+every [configuration reload](#configuration-reloading), and that they
+are not part of the watched file set: replacing a certificate on disk
+does not itself trigger a reload, so a rotated certificate is picked up
+at the next reload or restart.
 
 ### Table Properties
 
@@ -821,6 +881,20 @@ Controls which server role is acceptable for connections:
 The default is `prefer-standby` when `hosts` is configured,
 since the RAG server is a read-only service. This can be
 overridden explicitly in the configuration.
+
+!!! note "`target_session_attrs` requires `hosts`"
+
+    The setting is only meaningful when there is more than one candidate
+    server to choose between, so it is accepted only alongside the
+    `hosts` array. Setting it on a single-host configuration (one that
+    uses `host` and `port`) is rejected at startup with a validation
+    error reading `only supported with multi-host 'hosts' configuration`,
+    rather than being silently ignored. If you are moving a single-host
+    configuration such as the one under
+    [Backward Compatibility](#backward-compatibility) towards HA, add
+    `hosts` and `target_session_attrs` together, and note that a single
+    entry in `hosts` is perfectly valid if you want role checking
+    without yet having a second node.
 
 ### Backward Compatibility
 

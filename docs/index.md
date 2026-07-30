@@ -21,8 +21,15 @@ The RAG server supports the following providers:
 |-------------|-------------------|-------------------|
 | `openai`    | Yes               | Yes               |
 | `anthropic` | No*               | Yes               |
+| `gemini`    | Yes               | Yes               |
 | `voyage`    | Yes               | No                |
 | `ollama`    | Yes               | Yes               |
+
+*Anthropic publishes no embedding API, so an `anthropic` pipeline pairs
+its completion model with one of the other providers for embeddings.
+See [Configuration](configuration.md) for how to set each of these up,
+and [Managing API Keys](keys.md) for where their credentials are read
+from.
 
 
 A RAG server is ideal when you have a well-defined use case with predictable query
@@ -49,8 +56,8 @@ articles, or support tickets.
 - **Hybrid Search** - Combines vector similarity (semantic) and BM25
   (keyword) search using Reciprocal Rank Fusion for better results.
 
-- **Multiple LLM Providers** - Support for OpenAI, Anthropic, Voyage, and
-  Ollama.
+- **Multiple LLM Providers** - Support for OpenAI, Anthropic, Gemini,
+  Voyage, and Ollama.
 
 - **Token Budget Management** - Automatically manages context size to
   control LLM costs.

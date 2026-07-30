@@ -271,6 +271,16 @@ func BuildOpenAPISpec() OpenAPISpec {
 								},
 							},
 						},
+						"413": {
+							Description: "Request body exceeds the 1 MiB limit",
+							Content: map[string]OpenAPIMediaType{
+								"application/json": {
+									Schema: OpenAPISchema{
+										Ref: "#/components/schemas/ErrorResponse",
+									},
+								},
+							},
+						},
 						"500": {
 							Description: "Server error",
 							Content: map[string]OpenAPIMediaType{

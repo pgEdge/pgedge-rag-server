@@ -161,6 +161,15 @@ GET /v1/pipelines
 |-------------|--------------------------|
 | 200         | List of pipelines        |
 
+!!! warning "This endpoint is unauthenticated"
+
+    Like the query and health endpoints, `/v1/pipelines` requires no
+    credentials, so anyone able to reach the server can enumerate every
+    configured pipeline together with its description. Treat pipeline
+    names and descriptions as public, and where that is not acceptable,
+    put an authenticating proxy in front of the service; see
+    [Authentication](#authentication).
+
 ---
 
 ### Pipeline Stats
@@ -218,6 +227,15 @@ calls are made and consume real tokens. `completion` usage is tracked
 correctly for all providers. This was confirmed empirically against a
 live HTTP round-trip and is a limitation in the shared library, not in
 this endpoint.
+
+!!! warning "This endpoint is unauthenticated"
+
+    Like the query and health endpoints, `/v1/stats` requires no
+    credentials, so anyone able to reach the server can read every
+    pipeline's name, description, and cumulative token consumption,
+    which reveals how heavily each pipeline is used. Where that is not
+    acceptable, put an authenticating proxy in front of the service; see
+    [Authentication](#authentication).
 
 ---
 
@@ -422,6 +440,7 @@ data: {"type": "done"}
 | 400         | `INVALID_REQUEST`    | Invalid request body or query  |
 | 404         | `PIPELINE_NOT_FOUND` | Pipeline does not exist        |
 | 405         | `METHOD_NOT_ALLOWED` | Wrong HTTP method              |
+| 413         | `REQUEST_TOO_LARGE`  | Request body exceeds the [size limit](#request-size-limit) |
 | 500         | `EXECUTION_ERROR`    | Pipeline execution failed      |
 | 500         | `INTERNAL_ERROR`     | Unexpected server error        |
 
@@ -588,6 +607,31 @@ while (true) {
 
 The server does not implement rate limiting. If needed, use a reverse proxy
 (nginx, Caddy, etc.) or API gateway in front of the server.
+
+## Request Size Limit
+
+The body of a query request is capped at 1 MiB. The limit is generous
+relative to any realistic question and conversation history, and it
+exists so that an unauthenticated caller cannot make the server buffer
+an arbitrarily large body; it is not configurable. A request whose body
+exceeds the cap is rejected with `413 Request Entity Too Large` and an
+error code of `REQUEST_TOO_LARGE`, rather than being read to completion:
+
+```json
+{
+  "error": {
+    "code": "REQUEST_TOO_LARGE",
+    "message": "request body exceeds maximum size of 1048576 bytes"
+  }
+}
+```
+
+The cap bounds the size of an individual request, not the rate at which
+requests arrive, so it is not a substitute for the rate limiting
+described above. Note also that a reverse proxy in front of the server
+usually imposes its own, often smaller, body limit (nginx defaults to
+1 MiB via `client_max_body_size`), so in a proxied deployment the
+effective limit is whichever of the two is lower.
 
 ## Authentication
 

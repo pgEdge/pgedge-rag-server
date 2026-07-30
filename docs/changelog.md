@@ -190,6 +190,53 @@ and this project adheres to
   `ROW_NUMBER()` ids no longer cause false merges)
   ([#27](https://github.com/pgEdge/pgedge-rag-server/issues/27)).
 
+### Documentation
+
+- Documented a set of behaviours the server already had but the
+  documentation either omitted or described incorrectly. Nothing about
+  the product changed; only the documentation
+  ([#46](https://github.com/pgEdge/pgedge-rag-server/issues/46)).
+
+    - The production guidance now states plainly that the server
+      implements neither client authentication nor rate limiting, and
+      that enabling TLS does not address either, so a production
+      deployment needs an authenticating proxy in front of it. Both the
+      Docker production checklist and the TLS sample configuration
+      previously read as though TLS were sufficient.
+
+    - The Docker page and the configuration reference no longer
+      contradict each other over whether a configuration change needs a
+      restart. The server does reload automatically, but the shipped
+      `docker-compose.yml` bind-mounts the configuration as a single
+      file, and because change detection watches the containing
+      directory, the container never sees a host-side edit; both pages
+      now say so, and the Docker page explains how to mount the
+      directory instead if reloads are wanted.
+
+    - `GET /v1/pipelines` and `GET /v1/stats` now carry the same
+      unauthenticated-endpoint warning as the query and health
+      endpoints: together they disclose every pipeline's name and
+      description, and `/v1/stats` additionally discloses cumulative
+      token consumption, to anyone who can reach the port.
+
+    - The `ssl_cert`, `ssl_key`, and `ssl_root_ca` database settings are
+      documented in the configuration reference, with an example of
+      certificate-based authentication. They have worked since they were
+      added but appeared nowhere in the documentation.
+
+    - The 1 MiB cap on a query request body is documented, along with
+      the `413`/`REQUEST_TOO_LARGE` response it produces, which is now
+      also present in the OpenAPI specification.
+
+    - Gemini is listed among the supported providers on the
+      documentation front page, where it had been missed despite being
+      fully supported and documented elsewhere.
+
+    - The configuration reference notes that `target_session_attrs` is
+      rejected at startup unless `hosts` is also set, which matters
+      because the adjacent section invites readers to keep a
+      single-host configuration.
+
 ## [1.0.0] - 2026-04-04
 
 ### Added
