@@ -9,14 +9,16 @@ vulnerabilities:
       - "pkg:rpm/redhat/coreutils-single@8.32-41.el9_8"
     statement: >-
       DoS and information disclosure in coreutils uniq via
-      out-of-bounds read with multibyte input. No fix available. The
-      server never invokes uniq.
+      out-of-bounds read with multibyte input. No Red Hat/UBI9 fix
+      available for coreutils-single yet, though upstream GNU
+      coreutils has one. The server never invokes uniq.
   - id: CVE-2026-56392
     purls:
       - "pkg:rpm/redhat/coreutils-single@8.32-41.el9_8"
     statement: >-
-      DoS via crafted tab stop values in coreutils unexpand. No fix
-      available. The server never invokes unexpand.
+      DoS via crafted tab stop values in coreutils unexpand. No Red
+      Hat/UBI9 fix available for coreutils-single yet, though upstream
+      GNU coreutils has one. The server never invokes unexpand.
 
   # libattr - Present in the UBI9 base image; the rag-server process
   # never invokes getfattr/setfattr or uses extended attribute APIs.
