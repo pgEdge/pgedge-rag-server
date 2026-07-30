@@ -59,6 +59,17 @@ pipelines:
     top_n: 15
 ```
 
+!!! warning "TLS alone does not make a deployment closed"
+
+    This configuration encrypts client connections, but the server has
+    no client authentication and no rate limiting of its own, so with
+    port 443 published every endpoint remains open to anyone who can
+    reach it. For a real production deployment, terminate TLS on an
+    authenticating reverse proxy or API gateway that also applies rate
+    limiting, and bind the RAG server to a private interface behind it.
+    See [Authentication](api/reference.md#authentication) and
+    [Rate Limiting](api/reference.md#rate-limiting).
+
 ## Local Development with Ollama
 
 ```yaml

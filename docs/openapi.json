@@ -145,6 +145,16 @@
               }
             }
           },
+          "413": {
+            "description": "Request body exceeds the 1 MiB limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Server error",
             "content": {

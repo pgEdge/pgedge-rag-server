@@ -196,8 +196,27 @@ For production deployments, consider:
 - Use strong passwords for PostgreSQL
 - Enable TLS/HTTPS for the RAG server (see
   [Configuration](configuration.md))
+- **Put an authenticating proxy in front of the server**; see the
+  warning below
 - Restrict network access using Docker network policies
 - Use secrets management (Docker Secrets, Kubernetes Secrets, etc.)
+
+!!! warning "TLS is not access control"
+
+    The RAG server implements neither client authentication nor rate
+    limiting, so every endpoint it exposes is reachable by anyone who
+    can reach the port, and any such caller can issue as many queries
+    as they like. Enabling TLS encrypts the connection and authenticates
+    the *server* to the client, but it does nothing to establish who
+    the client is, and it places no bound on how often they may call;
+    a TLS-only deployment is still an open one. A production setup
+    therefore needs an authenticating reverse proxy or API gateway
+    (nginx, Caddy, Envoy, or similar) in front of the service, handling
+    both authentication and rate limiting, with the RAG server itself
+    bound to a private network rather than published directly. See
+    [Authentication](api/reference.md#authentication) and
+    [Rate Limiting](api/reference.md#rate-limiting) in the API
+    reference.
 
 ### Data Persistence
 
@@ -274,14 +293,51 @@ includes the extension pre-installed.
 
 ### Configuration Changes Not Applied
 
-After modifying `pgedge-rag-server.yaml`:
+The server normally picks up configuration changes on its own, without a
+restart, as described under
+[Configuration Reloading](configuration.md#configuration-reloading).
+The `docker-compose.yml` shipped here is the exception, because it
+bind-mounts the configuration as a single file:
+
+```yaml
+volumes:
+    - ./pgedge-rag-server.yaml:/etc/pgedge/pgedge-rag-server.yaml:ro
+```
+
+Change detection works by watching the directory that contains the
+watched file rather than the file itself, and with a single-file bind
+mount the directory the container sees (`/etc/pgedge`) is not the host
+directory you edited in, so an edit on the host generates no event
+inside the container and no reload follows. Editors that save by writing
+a temporary file and renaming it over the original are worse still: the
+rename replaces the host inode, which detaches the bind mount
+altogether, leaving the container reading the original file
+indefinitely.
+
+So under Docker, after modifying `pgedge-rag-server.yaml`, restart the
+service:
 
 ```bash
 docker compose restart rag-server
 ```
 
-The configuration file is mounted read-only, so changes on the host are
-immediately available after restart.
+The mount being read-only does not get in the way of this; it only stops
+the *server* writing to the file.
+
+If you would rather have automatic reloads in a container, mount the
+containing directory instead of the individual file, so that the
+container and the host share the directory the watcher is watching:
+
+```yaml
+volumes:
+    - ./config:/etc/pgedge:ro
+```
+
+with `pgedge-rag-server.yaml` inside `./config`. This is also how a
+Kubernetes `ConfigMap` volume behaves, which is why reloads work there
+without any of this ceremony. Note that changes to server-level
+settings (`listen_address`, `port`, `tls`, and `cors`) are read only at
+startup and always need a restart, however the file is mounted.
 
 ## Additional Resources
 
