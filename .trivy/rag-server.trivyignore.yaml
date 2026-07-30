@@ -1,43 +1,60 @@
 vulnerabilities:
-  # coreutils-single - Present in the UBI9 base image; the server is a
-  # CGO_ENABLED=0 pure Go binary that never invokes os/exec (confirmed:
-  # no exec.Command call exists anywhere in this codebase), so it never
-  # shells out to uniq/unexpand or any other coreutils utility.
+  # coreutils-single - Present in the UBI9 base image; this server
+  # (rag-server) is a CGO_ENABLED=0 pure Go binary that never invokes
+  # os/exec (confirmed: no exec.Command call exists anywhere in this
+  # codebase), so it never shells out to uniq/unexpand or any other
+  # coreutils utility.
   - id: CVE-2026-56391
+    purls:
+      - "pkg:rpm/redhat/coreutils-single@8.32-41.el9_8"
     statement: >-
       DoS and information disclosure in coreutils uniq via
       out-of-bounds read with multibyte input. No fix available. The
       server never invokes uniq.
   - id: CVE-2026-56392
+    purls:
+      - "pkg:rpm/redhat/coreutils-single@8.32-41.el9_8"
     statement: >-
       DoS via crafted tab stop values in coreutils unexpand. No fix
       available. The server never invokes unexpand.
 
-  # libattr - Present in the UBI9 base image; the server never invokes
-  # getfattr/setfattr or uses extended attribute APIs.
+  # libattr - Present in the UBI9 base image; the rag-server process
+  # never invokes getfattr/setfattr or uses extended attribute APIs.
   - id: CVE-2026-54371
+    purls:
+      - "pkg:rpm/redhat/libattr@2.5.1-3.el9"
     statement: >-
       Symlink traversal privilege escalation via getfattr and setfattr.
       No fix available. The server does not invoke getfattr/setfattr
       or use extended attribute APIs.
 
   # libgcc - Rust-demangling code in libiberty, present transitively in
-  # the UBI9 base image. The CGO_ENABLED=0 Go binary does not link the
-  # C++ runtime's demangler and never demangles Rust symbol names.
+  # the UBI9 base image. The rag-server binary is built with
+  # CGO_ENABLED=0, so it does not link the C++ runtime's demangler and
+  # never demangles Rust symbol names; these code paths are not
+  # reachable by this process.
   - id: CVE-2021-46195
+    purls:
+      - "pkg:rpm/redhat/libgcc@11.5.0-14.el9"
     statement: >-
       Uncontrolled recursion in libiberty's Rust demangler. No fix
-      available. Not exploitable; the Go binary never demangles Rust
-      symbols.
+      available. Not reachable by rag-server: the CGO_ENABLED=0 Go
+      binary never demangles Rust symbols.
   - id: CVE-2022-27943
+    purls:
+      - "pkg:rpm/redhat/libgcc@11.5.0-14.el9"
     statement: >-
       Stack exhaustion in libiberty's Rust demangler
-      (demangle_const). No fix available. Not exploitable; the Go
-      binary never demangles Rust symbols.
+      (demangle_const). No fix available. Not reachable by
+      rag-server: the CGO_ENABLED=0 Go binary never demangles Rust
+      symbols.
 
   # ncurses-base / ncurses-libs - Present in the UBI9 base image; the
   # server has no terminal UI and does not link ncurses.
   - id: CVE-2023-50495
+    purls:
+      - "pkg:rpm/redhat/ncurses-base@6.2-12.20210508.el9"
+      - "pkg:rpm/redhat/ncurses-libs@6.2-12.20210508.el9"
     statement: >-
       Segmentation fault via _nc_wrap_entry(). No fix available. The
       server does not use ncurses.
@@ -46,6 +63,9 @@ vulnerabilities:
   # uses Go's regexp package (RE2), not PCRE2, for every pattern match
   # in the codebase (see internal/safeerr, internal/config/validation).
   - id: CVE-2022-41409
+    purls:
+      - "pkg:rpm/redhat/pcre2@10.40-6.el9"
+      - "pkg:rpm/redhat/pcre2-syntax@10.40-6.el9"
     statement: >-
       Infinite loop from a negative repeat value in pcre2test. No fix
       available. The server does not invoke pcre2test and does not
