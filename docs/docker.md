@@ -306,7 +306,7 @@ volumes:
 
 Change detection works by watching the directory that contains the
 watched file rather than the file itself, and with a single-file bind
-mount the directory the container sees (`/etc/pgedge`) is not the host
+mount, the directory the container sees (`/etc/pgedge`) is not the host
 directory you edited in, so an edit on the host generates no event
 inside the container and no reload follows. Editors that save by writing
 a temporary file and renaming it over the original are worse still: the

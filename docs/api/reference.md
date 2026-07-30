@@ -166,7 +166,7 @@ GET /v1/pipelines
     Like the query and health endpoints, `/v1/pipelines` requires no
     credentials, so anyone able to reach the server can enumerate every
     configured pipeline together with its description. Treat pipeline
-    names and descriptions as public, and where that is not acceptable
+    names and descriptions as public, and where that is not acceptable,
     put an authenticating proxy in front of the service; see
     [Authentication](#authentication).
 

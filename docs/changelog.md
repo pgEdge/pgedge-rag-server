@@ -209,15 +209,15 @@ and this project adheres to
       restart. The server does reload automatically, but the shipped
       `docker-compose.yml` bind-mounts the configuration as a single
       file, and because change detection watches the containing
-      directory the container never sees a host-side edit; both pages
+      directory, the container never sees a host-side edit; both pages
       now say so, and the Docker page explains how to mount the
       directory instead if reloads are wanted.
 
     - `GET /v1/pipelines` and `GET /v1/stats` now carry the same
       unauthenticated-endpoint warning as the query and health
-      endpoints, since either will disclose pipeline names,
-      descriptions, and token consumption to anyone who can reach the
-      port.
+      endpoints: together they disclose every pipeline's name and
+      description, and `/v1/stats` additionally discloses cumulative
+      token consumption, to anyone who can reach the port.
 
     - The `ssl_cert`, `ssl_key`, and `ssl_root_ca` database settings are
       documented in the configuration reference, with an example of
