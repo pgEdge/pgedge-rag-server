@@ -168,9 +168,24 @@ func testConfig() *config.Config {
 }
 
 func testServer() *Server {
-	cfg := testConfig()
-	pm := newMockPipelineManager()
-	return New(cfg, pm, nil)
+	return mustNewServer(nil, testConfig(), newMockPipelineManager())
+}
+
+// mustNewServer builds a Server and fails the test if the configuration
+// is one the server refuses to serve. t may be nil for callers that have
+// no *testing.T to hand, in which case a refusal panics.
+func mustNewServer(t *testing.T, cfg *config.Config, pm PipelineManager) *Server {
+	if t != nil {
+		t.Helper()
+	}
+	srv, err := New(cfg, pm, nil)
+	if err != nil {
+		if t == nil {
+			panic(err)
+		}
+		t.Fatalf("New() returned an unexpected error: %v", err)
+	}
+	return srv
 }
 
 // TestLiveEndpoint verifies the liveness endpoint returns HTTP 200 with
@@ -242,7 +257,7 @@ func TestHealthEndpoint_DegradedWhenProviderUnreachable(t *testing.T) {
 		Embedding:  pipeline.ProviderHealth{Reachable: true},
 		Completion: pipeline.ProviderHealth{Reachable: false, Error: "connection refused"},
 	}
-	srv := New(cfg, pm, nil)
+	srv := mustNewServer(t, cfg, pm)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
 	w := httptest.NewRecorder()
@@ -447,7 +462,7 @@ func TestPipelineEndpoint_NonStreamingTimeout(t *testing.T) {
 			return nil, ctx.Err()
 		},
 	}
-	srv := New(testConfig(), pm, nil)
+	srv := mustNewServer(t, testConfig(), pm)
 	srv.requestTimeout = 50 * time.Millisecond
 
 	body := bytes.NewBufferString(`{"query": "test query"}`)
@@ -486,7 +501,7 @@ func TestPipelineEndpoint_StreamingTimeout(t *testing.T) {
 			return make(chan pipeline.StreamChunk), make(chan error, 1)
 		},
 	}
-	srv := New(testConfig(), pm, nil)
+	srv := mustNewServer(t, testConfig(), pm)
 	srv.requestTimeout = 50 * time.Millisecond
 
 	body := bytes.NewBufferString(`{"query": "test query", "stream": true}`)
@@ -869,7 +884,7 @@ func TestPipelineEndpoint_ProviderErrorDoesNotLeakCredential(t *testing.T) {
 			return nil, providerAuthFailure()
 		},
 	}
-	srv := New(testConfig(), pm, nil)
+	srv := mustNewServer(t, testConfig(), pm)
 
 	body := bytes.NewBufferString(`{"query": "test query"}`)
 	r := httptest.NewRequest(http.MethodPost, "/v1/pipelines/test-pipeline", body)
@@ -919,7 +934,7 @@ func TestPipelineEndpoint_StreamingProviderErrorDoesNotLeakCredential(t *testing
 			return chunkChan, errChan
 		},
 	}
-	srv := New(testConfig(), pm, nil)
+	srv := mustNewServer(t, testConfig(), pm)
 
 	body := bytes.NewBufferString(`{"query": "test query", "stream": true}`)
 	r := httptest.NewRequest(http.MethodPost, "/v1/pipelines/test-pipeline", body)

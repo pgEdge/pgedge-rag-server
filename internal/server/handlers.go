@@ -17,6 +17,7 @@ import (
 	"net/http"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/database"
+	"github.com/pgEdge/pgedge-rag-server/internal/identity"
 	"github.com/pgEdge/pgedge-rag-server/internal/pipeline"
 	"github.com/pgEdge/pgedge-rag-server/internal/safeerr"
 )
@@ -205,6 +206,22 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Backstop for both dispatch paths, checked here because the
+	// streaming path commits to HTTP 200 before it calls the pipeline
+	// and could then only report a refusal as an SSE event. Under normal
+	// routing requireIdentity has already refused, so this only fires if
+	// a request reached the handler without passing through it.
+	if s.config.Identity.Enabled {
+		if _, ok := identity.FromContext(r.Context()); !ok {
+			s.logger.Error("query handler reached with no caller identity; "+
+				"this indicates a request path that bypasses requireIdentity",
+				"pipeline", name)
+			s.respondError(w, http.StatusUnauthorized, codeIdentityRequired,
+				"this server requires a caller identity")
+			return
+		}
+	}
+
 	// Handle streaming vs non-streaming
 	if req.Stream {
 		s.handleStreamingQuery(w, r, p, req)
@@ -219,6 +236,21 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := p.ExecuteWithOptions(ctx, req)
 	if err != nil {
+		// The database layer refuses to run a query with no identity in
+		// its context. requireIdentity should have caught that before any
+		// work was done, so reaching here means some path dispatched a
+		// query without passing through it. Report it as the refusal it
+		// is rather than as an internal error: a 500 would read as a
+		// server fault and invite a retry, when the correct response is
+		// that the request was never entitled to run.
+		if errors.Is(err, identity.ErrRequired) {
+			s.logger.Error("query reached the database layer with no caller identity; "+
+				"this indicates a request path that bypasses requireIdentity",
+				"pipeline", name)
+			s.respondError(w, http.StatusUnauthorized, codeIdentityRequired,
+				"this server requires a caller identity")
+			return
+		}
 		if isRequestTimeout(ctx) {
 			s.respondError(w, http.StatusGatewayTimeout, "REQUEST_TIMEOUT",
 				"request took too long to process")

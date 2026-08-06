@@ -22,6 +22,7 @@ import (
 	"github.com/pgEdge/pgedge-rag-server/internal/bm25"
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 	"github.com/pgEdge/pgedge-rag-server/internal/database"
+	"github.com/pgEdge/pgedge-rag-server/internal/identity"
 	ragllm "github.com/pgEdge/pgedge-rag-server/internal/llm"
 )
 
@@ -378,6 +379,15 @@ func (o *Orchestrator) search(
 			o.cfg.Search.MinSimilarity,
 		)
 		if err != nil {
+			// A missing identity is not a per-table retrieval failure to
+			// be logged and worked around: no table can be searched, and
+			// degrading to "no relevant information found" would present
+			// a refusal as an empty corpus. Return it so the HTTP layer
+			// can say plainly that the request was refused for want of an
+			// identity, rather than classifying and accumulating it below.
+			if errors.Is(err, identity.ErrRequired) {
+				return nil, err
+			}
 			// The full error, including SQLSTATE and table name, goes to
 			// the operator's log; only the kind travels any further
 			// towards the caller (issue #49).
@@ -396,6 +406,9 @@ func (o *Orchestrator) search(
 
 		docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter, maxBM25Docs)
 		if err != nil {
+			if errors.Is(err, identity.ErrRequired) {
+				return nil, err
+			}
 			// This counts as a failed table even though the vector arm
 			// succeeded, because on a hybrid pipeline the keyword arm is
 			// half of the search: when it cannot read the corpus, no

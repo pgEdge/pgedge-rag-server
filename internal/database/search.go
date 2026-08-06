@@ -11,12 +11,14 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
+	"github.com/pgEdge/pgedge-rag-server/internal/identity"
 )
 
 // parseTableIdentifier splits a table name into schema and table parts.
@@ -141,23 +143,29 @@ func (p *Pool) VectorSearch(
 		return nil, err
 	}
 
-	rows, err := p.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("vector search failed: %w", err)
-	}
-	defer rows.Close()
-
 	var results []SearchResult
-	for rows.Next() {
-		var r SearchResult
-		if err := rows.Scan(&r.ID, &r.Content, &r.Score); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
+	err = p.withRows(ctx, query, args, func(rows pgx.Rows) error {
+		for rows.Next() {
+			var r SearchResult
+			if err := rows.Scan(&r.ID, &r.Content, &r.Score); err != nil {
+				return fmt.Errorf("failed to scan row: %w", err)
+			}
+			results = append(results, r)
 		}
-		results = append(results, r)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("error iterating rows: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		// The identity errors are returned unwrapped in meaning so that
+		// callers can classify them with errors.Is; wrapping them in
+		// "vector search failed" would be true but useless, since the
+		// search never ran.
+		if errors.Is(err, identity.ErrRequired) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("vector search failed: %w", err)
 	}
 
 	return results, nil
@@ -262,26 +270,46 @@ func (p *Pool) FetchDocuments(
 		return nil, err
 	}
 
-	rows, err := p.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch documents: %w", err)
-	}
-	defer rows.Close()
-
 	docs := make(map[string]string)
-	for rows.Next() {
-		var id, content string
-		if err := rows.Scan(&id, &content); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-		docs[id] = content
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
+	if err := p.scanDocuments(ctx, query, args, docs); err != nil {
+		return nil, err
 	}
 
 	return docs, nil
+}
+
+// scanDocuments runs an id/content query through withRows and collects
+// the result into docs. Shared by FetchDocuments and
+// FetchDocumentsByIDs so both arms go through the same identity-bearing
+// path; a retrieval query that bypassed withRows would run as the
+// service role and defeat the whole mechanism, so there is deliberately
+// only one place that reads rows out of a corpus table.
+func (p *Pool) scanDocuments(
+	ctx context.Context,
+	query string,
+	args []interface{},
+	docs map[string]string,
+) error {
+	err := p.withRows(ctx, query, args, func(rows pgx.Rows) error {
+		for rows.Next() {
+			var id, content string
+			if err := rows.Scan(&id, &content); err != nil {
+				return fmt.Errorf("failed to scan row: %w", err)
+			}
+			docs[id] = content
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("error iterating rows: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, identity.ErrRequired) {
+			return err
+		}
+		return fmt.Errorf("failed to fetch documents: %w", err)
+	}
+	return nil
 }
 
 // FetchDocumentsByIDs fetches documents by their IDs.
@@ -315,23 +343,9 @@ func (p *Pool) FetchDocumentsByIDs(
 		pgx.Identifier{table.IDColumn}.Sanitize(),
 	)
 
-	rows, err := p.pool.Query(ctx, query, ids)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch documents: %w", err)
-	}
-	defer rows.Close()
-
 	docs := make(map[string]string)
-	for rows.Next() {
-		var id, content string
-		if err := rows.Scan(&id, &content); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-		docs[id] = content
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
+	if err := p.scanDocuments(ctx, query, []interface{}{ids}, docs); err != nil {
+		return nil, err
 	}
 
 	return docs, nil

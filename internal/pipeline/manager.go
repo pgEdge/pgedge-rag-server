@@ -118,9 +118,21 @@ func (m *Manager) createPipeline(
 	}
 
 	// Create database connection pool
-	dbPool, err := database.NewPool(ctx, pCfg.Database)
+	dbPool, err := database.NewPool(ctx, pCfg.Database, m.config.Identity)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	// Confirm the database will act on the identity this server
+	// presents, before serving a single request with it. See
+	// database.VerifyEnforcement for why this is checked at startup
+	// rather than left to be noticed later: every case it detects is one
+	// where retrieval works and returns rows whilst row-level security
+	// is not evaluating the caller.
+	if err := verifyEnforcement(ctx, pipelineLogger, m.config.Identity,
+		dbPool, pCfg.Tables); err != nil {
+		dbPool.Close()
+		return nil, err
 	}
 
 	// Create embedding client
@@ -216,6 +228,41 @@ func (m *Manager) createPipeline(
 		orchestrator:   orchestrator,
 		logger:         pipelineLogger,
 	}, nil
+}
+
+// verifyEnforcement runs the startup identity-enforcement preflight and
+// applies the configured enforcement_check policy to its findings.
+//
+// Under "error" (the default) any finding aborts startup. Under "warn"
+// every finding is logged at warning level and startup continues, which
+// is the setting for a deployment whose policies read the claims
+// indirectly and so cannot be verified textually. Under "off" the
+// preflight does not run at all.
+//
+// The warn path logs each finding separately rather than one summary
+// line, because each names a different table and a different remedy.
+func verifyEnforcement(
+	ctx context.Context,
+	logger *slog.Logger,
+	idCfg config.IdentityConfig,
+	pool enforcementVerifier,
+	tables []config.TableSource,
+) error {
+	problems := pool.VerifyEnforcement(ctx, tables)
+	if len(problems) == 0 {
+		return nil
+	}
+
+	if idCfg.WithDefaults().EnforcementCheck == config.EnforcementCheckWarn {
+		for _, problem := range problems {
+			logger.Warn("identity enforcement could not be verified; "+
+				"serving anyway because identity.enforcement_check is set to warn",
+				"problem", problem.Error())
+		}
+		return nil
+	}
+
+	return errors.Join(problems...)
 }
 
 // List returns information about all available pipelines.

@@ -208,8 +208,25 @@ func BuildOpenAPISpec() OpenAPISpec {
 			},
 			"/pipelines/{name}": {
 				Post: &OpenAPIOperation{
-					Summary:     "Query pipeline",
-					Description: "Execute a RAG query against a specific pipeline",
+					Summary: "Query pipeline",
+					Description: "Execute a RAG query against a specific pipeline.\n\n" +
+						"When the server is configured with `identity.enabled`, this " +
+						"endpoint requires a caller identity, supplied by the trusted " +
+						"proxy in front of the server as a JSON claim set in the " +
+						"configured claims header (default `X-Forwarded-Claims`) or a " +
+						"bare subject in the configured subject header (default " +
+						"`X-Forwarded-User`). Retrieval then runs as that caller and " +
+						"PostgreSQL row-level security decides what it may see. A " +
+						"request carrying no identity is refused with 401 " +
+						"`IDENTITY_REQUIRED`; there is no fallback to the service's " +
+						"own database role.\n\n" +
+						"Identity error codes: `IDENTITY_REQUIRED` (401, no identity " +
+						"was presented), `IDENTITY_MALFORMED` (400, the claims header " +
+						"was not a JSON object), `IDENTITY_UNTRUSTED_PEER` (403, the " +
+						"request came from an address not permitted to assert an " +
+						"identity) and `IDENTITY_ROLE_NOT_ALLOWED` (403, the claims " +
+						"named a database role that is not on the server's " +
+						"allowlist).",
 					OperationID: "queryPipeline",
 					Tags:        []string{"Pipelines"},
 					Parameters: []OpenAPIParameter{
@@ -253,6 +270,31 @@ func BuildOpenAPISpec() OpenAPISpec {
 						},
 						"400": {
 							Description: "Invalid request",
+							Content: map[string]OpenAPIMediaType{
+								"application/json": {
+									Schema: OpenAPISchema{
+										Ref: "#/components/schemas/ErrorResponse",
+									},
+								},
+							},
+						},
+						"401": {
+							Description: "No caller identity was presented and the " +
+								"server requires one (IDENTITY_REQUIRED)",
+							Content: map[string]OpenAPIMediaType{
+								"application/json": {
+									Schema: OpenAPISchema{
+										Ref: "#/components/schemas/ErrorResponse",
+									},
+								},
+							},
+						},
+						"403": {
+							Description: "The identity presented was not acceptable: " +
+								"the request came from an address not permitted to " +
+								"assert one (IDENTITY_UNTRUSTED_PEER), or it named a " +
+								"database role that is not permitted " +
+								"(IDENTITY_ROLE_NOT_ALLOWED)",
 							Content: map[string]OpenAPIMediaType{
 								"application/json": {
 									Schema: OpenAPISchema{

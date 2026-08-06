@@ -141,7 +141,13 @@ func run(configPath string, logger *slog.Logger) error {
 	}
 
 	// Create and start server
-	srv := server.New(cfg, pm, logger)
+	srv, err := server.New(cfg, pm, logger)
+	if err != nil {
+		if closeErr := pm.Close(); closeErr != nil {
+			logger.Error("failed to close pipeline manager", "error", closeErr)
+		}
+		return fmt.Errorf("failed to create server: %w", err)
+	}
 
 	// Close whatever pipeline manager is active at shutdown time, not
 	// necessarily the one created above — a reload may have swapped it

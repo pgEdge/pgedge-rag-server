@@ -23,12 +23,22 @@ import (
 
 // Pool wraps a pgxpool connection pool.
 type Pool struct {
-	pool   *pgxpool.Pool
-	config config.DatabaseConfig
+	pool     *pgxpool.Pool
+	config   config.DatabaseConfig
+	identity config.IdentityConfig
 }
 
 // NewPool creates a new database connection pool.
-func NewPool(ctx context.Context, cfg config.DatabaseConfig) (*Pool, error) {
+//
+// idCfg decides whether queries run as the caller who made the request
+// or as the role in cfg. It is taken here, at pool construction, rather
+// than passed per query, because it governs how every query on this
+// pool is issued — see Pool.withRows.
+func NewPool(
+	ctx context.Context,
+	cfg config.DatabaseConfig,
+	idCfg config.IdentityConfig,
+) (*Pool, error) {
 	connStr := buildConnectionString(cfg)
 
 	poolCfg, err := pgxpool.ParseConfig(connStr)
@@ -48,8 +58,9 @@ func NewPool(ctx context.Context, cfg config.DatabaseConfig) (*Pool, error) {
 	}
 
 	return &Pool{
-		pool:   pool,
-		config: cfg,
+		pool:     pool,
+		config:   cfg,
+		identity: idCfg.WithDefaults(),
 	}, nil
 }
 

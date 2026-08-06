@@ -27,6 +27,26 @@ jobs:
     test:
         name: Test
         runs-on: ubuntu-latest
+
+        # The identity tests need a real PostgreSQL with pgvector. They
+        # skip when RAG_TEST_DATABASE_URL is unset, and a skip is not a
+        # pass: they are the only tests that can observe an identity
+        # leaking between callers, or surviving on a pooled connection.
+        services:
+            postgres:
+                image: pgvector/pgvector:pg17
+                env:
+                    POSTGRES_USER: postgres
+                    POSTGRES_PASSWORD: postgres
+                    POSTGRES_DB: ragtest
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd pg_isready
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
+
         steps:
             - name: Checkout code
               uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -38,6 +58,8 @@ jobs:
 
             - name: Run tests
               run: make test
+              env:
+                  RAG_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/ragtest?sslmode=disable
 
             - name: Upload coverage
               uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4

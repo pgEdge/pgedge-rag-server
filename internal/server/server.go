@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
+	"github.com/pgEdge/pgedge-rag-server/internal/identity"
 	"github.com/pgEdge/pgedge-rag-server/internal/pipeline"
 )
 
@@ -59,10 +60,21 @@ type Server struct {
 	pipelinesMu    sync.RWMutex
 	pipelines      PipelineManager // guarded by pipelinesMu; use pipelineManager()/SwapPipelineManager
 	requestTimeout time.Duration
+
+	// identityExtractor reads the caller's identity out of a request.
+	// Nil when identity is disabled, in which case requireIdentity is a
+	// no-op and never dereferences it.
+	identityExtractor *identity.Extractor
 }
 
 // New creates a new HTTP server.
-func New(cfg *config.Config, pm PipelineManager, logger *slog.Logger) *Server {
+//
+// It returns an error only for configuration this server cannot serve
+// safely — today, an identity configuration it cannot build an
+// extractor from. Failing here rather than at the first request means a
+// deployment that has asked for per-caller identity and mis-specified it
+// does not start and then serve everyone as the service role.
+func New(cfg *config.Config, pm PipelineManager, logger *slog.Logger) (*Server, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -75,10 +87,31 @@ func New(cfg *config.Config, pm PipelineManager, logger *slog.Logger) *Server {
 		requestTimeout: DefaultRequestTimeout,
 	}
 
+	if cfg.Identity.Enabled {
+		extractor, err := identity.NewExtractor(cfg.Identity)
+		if err != nil {
+			return nil, fmt.Errorf("invalid identity configuration: %w", err)
+		}
+		s.identityExtractor = extractor
+
+		if len(cfg.Identity.TrustedProxies) == 0 {
+			logger.Warn(
+				"per-request identity is enabled with no identity.trusted_proxies; " +
+					"any client that can reach this server's port can assert any " +
+					"identity, and row-level security will enforce whatever it is " +
+					"handed. Bind to a private interface and set trusted_proxies")
+		}
+	} else {
+		logger.Warn(
+			"per-request identity is disabled; every retrieval runs as the " +
+				"pipeline's own database role regardless of who asked, so a corpus " +
+				"shared between users or tenants cannot be scoped per caller")
+	}
+
 	// Set up routes
 	s.setupRoutes()
 
-	return s
+	return s, nil
 }
 
 // pipelineManager returns the currently active PipelineManager. Safe for

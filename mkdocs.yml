@@ -70,6 +70,7 @@ nav:
       - Creating a Configuration File: configuration.md
       - Sample Configuration Files: samples.md
       - Managing API Keys: keys.md
+      - Per-Request Identity: identity.md
   - Invoking the pgEdge RAG Server: usage.md
   - Using the RAG Server API:
       - API Reference: api/reference.md
