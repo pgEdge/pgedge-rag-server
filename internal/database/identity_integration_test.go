@@ -229,7 +229,7 @@ func TestIdentity_DoesNotSurviveOnPooledConnection(t *testing.T) {
 	probe := func(ctx context.Context) (backendPID string, claims string) {
 		t.Helper()
 		result := map[string]string{}
-		err := pool.withRows(ctx,
+		err := pool.withRows(ctx, ordinaryQuery,
 			"SELECT pg_backend_pid()::text, current_setting($1, true)",
 			[]interface{}{idCfg.ClaimsSetting},
 			func(rows pgx.Rows) error {
@@ -349,7 +349,7 @@ func TestIdentity_RoleIsAssumedAndReleased(t *testing.T) {
 	})
 
 	var during string
-	err := pool.withRows(ctx, "SELECT current_user::text", nil,
+	err := pool.withRows(ctx, ordinaryQuery, "SELECT current_user::text", nil,
 		func(rows pgx.Rows) error {
 			for rows.Next() {
 				if err := rows.Scan(&during); err != nil {
@@ -415,7 +415,7 @@ func TestIdentity_RefusesWhenTheSettingDoesNotHold(t *testing.T) {
 	t.Run("a value that does not hold is refused", func(t *testing.T) {
 		ctx := callerContext("1") // reads back as "on"
 
-		err := pool.withRows(ctx, "SELECT 1", nil, func(rows pgx.Rows) error {
+		err := pool.withRows(ctx, ordinaryQuery, "SELECT 1", nil, func(rows pgx.Rows) error {
 			for rows.Next() {
 			}
 			return rows.Err()
@@ -431,7 +431,7 @@ func TestIdentity_RefusesWhenTheSettingDoesNotHold(t *testing.T) {
 	t.Run("a value that holds is accepted", func(t *testing.T) {
 		ctx := callerContext("on")
 
-		err := pool.withRows(ctx, "SELECT 1", nil, func(rows pgx.Rows) error {
+		err := pool.withRows(ctx, ordinaryQuery, "SELECT 1", nil, func(rows pgx.Rows) error {
 			for rows.Next() {
 			}
 			return rows.Err()

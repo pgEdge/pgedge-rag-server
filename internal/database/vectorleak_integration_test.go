@@ -107,16 +107,16 @@ func probeVector() []float32 {
 // query returned n rows" is then asserting nothing in particular. One
 // statement cannot disagree with itself.
 func explainAnalyze(
+	ctx context.Context,
 	t *testing.T,
 	pool *Pool,
-	ctx context.Context,
 	query string,
 	args []interface{},
 ) (plan string, actualRows int) {
 	t.Helper()
 
 	var lines []string
-	err := pool.withRows(ctx,
+	err := pool.withRows(ctx, vectorQuery,
 		"EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) "+query, args,
 		func(rows pgx.Rows) error {
 			for rows.Next() {
@@ -199,6 +199,10 @@ func usesIndexScan(plan string) bool {
 // it would most likely mean the corpus shape drifted, not that pgvector
 // stopped behaving this way.
 func TestSharedVectorIndexLeaksAcrossIdentities(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a 20,000-row HNSW corpus; skipped in short mode")
+	}
+
 	admin := adminPool(t)
 	if !hasPGVector(t, admin) {
 		t.Skip("pgvector is not installed; skipping vector index side-channel test")
@@ -235,7 +239,7 @@ func TestSharedVectorIndexLeaksAcrossIdentities(t *testing.T) {
 		// Plan and row count from one execution, through the same
 		// identity-bearing path the real query uses, so the planner
 		// settings this configuration applies are in force.
-		plan, delivered := explainAnalyze(t, pool, ctx, query, args)
+		plan, delivered := explainAnalyze(ctx, t, pool, query, args)
 		t.Logf("plan with a shared index:\n%s", plan)
 
 		// The rows that do come back are still correctly filtered. The
@@ -316,11 +320,20 @@ func TestExactSearchDisablesIndexScans(t *testing.T) {
 
 	cases := []struct {
 		name            string
+		kind            queryKind
 		allowSharedIdx  bool
 		wantIndexScanOn string
 	}{
-		{"default forces exact scans", false, "off"},
-		{"opting in leaves the planner alone", true, "on"},
+		{"a vector query defaults to an exact scan", vectorQuery, false, "off"},
+		{"opting in leaves the planner alone", vectorQuery, true, "on"},
+		// The mitigation exists for the approximate vector index. The
+		// keyword-corpus read and the fetch-by-id lookup do not consult
+		// it, so disabling index scans for them would force sequential
+		// scans over primary keys and ordinary filter predicates for no
+		// security benefit at all.
+		{"a non-vector query keeps its indexes", ordinaryQuery, false, "on"},
+		{"a non-vector query keeps its indexes when opted in",
+			ordinaryQuery, true, "on"},
 	}
 
 	for _, tc := range cases {
@@ -331,7 +344,7 @@ func TestExactSearchDisablesIndexScans(t *testing.T) {
 			}, 1)
 
 			var indexScan, bitmapScan string
-			err := pool.withRows(callerContext(aliceClaims),
+			err := pool.withRows(callerContext(aliceClaims), tc.kind,
 				"SELECT current_setting('enable_indexscan'), "+
 					"current_setting('enable_bitmapscan')", nil,
 				func(rows pgx.Rows) error {

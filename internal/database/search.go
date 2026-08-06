@@ -144,7 +144,7 @@ func (p *Pool) VectorSearch(
 	}
 
 	var results []SearchResult
-	err = p.withRows(ctx, query, args, func(rows pgx.Rows) error {
+	err = p.withRows(ctx, vectorQuery, query, args, func(rows pgx.Rows) error {
 		for rows.Next() {
 			var r SearchResult
 			if err := rows.Scan(&r.ID, &r.Content, &r.Score); err != nil {
@@ -290,7 +290,7 @@ func (p *Pool) scanDocuments(
 	args []interface{},
 	docs map[string]string,
 ) error {
-	err := p.withRows(ctx, query, args, func(rows pgx.Rows) error {
+	err := p.withRows(ctx, ordinaryQuery, query, args, func(rows pgx.Rows) error {
 		for rows.Next() {
 			var id, content string
 			if err := rows.Scan(&id, &content); err != nil {

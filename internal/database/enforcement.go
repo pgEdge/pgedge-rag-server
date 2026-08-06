@@ -32,7 +32,9 @@ var ErrEnforcementUnverified = errors.New("identity enforcement could not be ver
 // table, for the role this pool is connected as.
 //
 // relrowsecurity / relforcerowsecurity, the ownership test and
-// rolbypassrls together decide whether policies run at all;
+// rolsuper/rolbypassrls together decide whether policies run at all —
+// a superuser bypasses row-level security whether or not it carries
+// BYPASSRLS, so both attributes are read;
 // pg_get_expr over pg_policy gives the policy text, which is what the
 // pinning check reads. The table name is bound as a parameter and cast
 // to regclass so a configured name cannot be concatenated into this
@@ -43,7 +45,7 @@ SELECT
 	c.relrowsecurity,
 	c.relforcerowsecurity,
 	pg_catalog.pg_has_role(current_user, c.relowner, 'USAGE') AS owns_table,
-	(SELECT r.rolbypassrls FROM pg_catalog.pg_roles r
+	(SELECT r.rolsuper OR r.rolbypassrls FROM pg_catalog.pg_roles r
 	  WHERE r.rolname = current_user) AS bypasses_rls,
 	COALESCE(
 		(SELECT array_agg(
@@ -115,12 +117,96 @@ func (p *Pool) VerifyEnforcement(
 	}
 
 	var problems []error
+
+	if err := p.verifyAllowedRoles(ctx); err != nil {
+		problems = append(problems, err)
+	}
+
 	for _, table := range tables {
 		if err := p.verifyTable(ctx, table.Table); err != nil {
 			problems = append(problems, err)
 		}
 	}
 	return problems
+}
+
+// bypassingRolesSQL finds roles that row-level security does not apply
+// to, among a given set of names.
+const bypassingRolesSQL = `
+SELECT r.rolname
+  FROM pg_catalog.pg_roles r
+ WHERE r.rolname = ANY($1::text[])
+   AND (r.rolsuper OR r.rolbypassrls)
+ ORDER BY r.rolname`
+
+// verifyAllowedRoles checks the roles a request may be switched into.
+//
+// The per-table check reads the attributes of the role the pool logs in
+// as, which is the identity every query starts from. But when
+// identity.allowed_roles is non-empty a request can leave that role
+// behind: the claims name a role, this server assumes it, and the query
+// runs as that role instead. If one of those roles is a superuser or
+// carries BYPASSRLS, every policy on every table is skipped for any
+// caller who claims it — and the per-table check, which never looks at
+// that role, reports the table as verified.
+//
+// That is precisely the shape of failure this preflight exists to
+// catch, so it is checked here as well: once per pool, since it is a
+// property of the roles rather than of any table.
+func (p *Pool) verifyAllowedRoles(ctx context.Context) error {
+	if len(p.identity.AllowedRoles) == 0 {
+		return nil
+	}
+
+	rows, err := p.pool.Query(ctx, bypassingRolesSQL, p.identity.AllowedRoles)
+	if err != nil {
+		return fmt.Errorf("%w: could not inspect identity.allowed_roles: %w",
+			ErrEnforcementUnverified, err)
+	}
+	defer rows.Close()
+
+	var bypassing []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return fmt.Errorf("%w: could not inspect identity.allowed_roles: %w",
+				ErrEnforcementUnverified, err)
+		}
+		bypassing = append(bypassing, name)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("%w: could not inspect identity.allowed_roles: %w",
+			ErrEnforcementUnverified, err)
+	}
+
+	if len(bypassing) == 0 {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"%w: identity.allowed_roles names %s, which %s row-level security "+
+			"(superuser or BYPASSRLS); a caller whose claims name such a role "+
+			"would see every row of every table, so it must not be reachable "+
+			"through a claim",
+		ErrEnforcementUnverified, strings.Join(quoteAll(bypassing), ", "),
+		plural(len(bypassing), "bypasses", "bypass"))
+}
+
+// quoteAll renders names for an error message.
+func quoteAll(names []string) []string {
+	quoted := make([]string, len(names))
+	for i, name := range names {
+		quoted[i] = fmt.Sprintf("%q", name)
+	}
+	return quoted
+}
+
+// plural picks a verb form for a count.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // verifyTable performs the checks described on VerifyEnforcement for a
@@ -169,8 +255,9 @@ func (p *Pool) verifyTable(ctx context.Context, table string) error {
 
 	if bypassesRLS != nil && *bypassesRLS {
 		return fmt.Errorf(
-			"%w: the role this pipeline connects as has BYPASSRLS, so no policy on "+
-				"%q will be applied to any caller; connect as a role without it",
+			"%w: the role this pipeline connects as is a superuser or has "+
+				"BYPASSRLS, so no policy on %q will be applied to any caller; "+
+				"connect as an ordinary role instead",
 			ErrEnforcementUnverified, table)
 	}
 

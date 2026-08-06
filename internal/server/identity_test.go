@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -262,10 +263,16 @@ func TestRequireIdentity_OnlyGuardsTheQueryEndpoint(t *testing.T) {
 }
 
 // TestHandlePipeline_RefusesWhenTheDatabaseLayerDoes covers the
-// backstop: if a query somehow reaches the pipeline with no identity and
-// the database layer refuses it, that must surface as a refusal rather
-// than as an internal error, on both the streaming and non-streaming
-// paths.
+// non-streaming backstop: if a query somehow reaches the pipeline with
+// no identity and the database layer refuses it, that must surface as a
+// refusal rather than as an internal error.
+//
+// The streaming path cannot be covered the same way, and does not need
+// to be: it commits to HTTP 200 before calling the pipeline, so a
+// refusal arriving from the executor could only be reported as an SSE
+// event. That is why the handler checks the context up front for both
+// paths instead — see
+// TestHandlePipeline_RefusesStreamingRequestsWithoutIdentity.
 func TestHandlePipeline_RefusesWhenTheDatabaseLayerDoes(t *testing.T) {
 	pm := newMockPipelineManager()
 	pm.pipelines["test-pipeline"].executor = &mockQueryExecutor{
@@ -295,6 +302,114 @@ func TestHandlePipeline_RefusesWhenTheDatabaseLayerDoes(t *testing.T) {
 
 // TestNew_RejectsUnusableIdentityConfig checks that the server refuses
 // to start rather than starting with an identity check that cannot run.
+// TestHandlePipeline_RefusesStreamingRequestsWithoutIdentity covers the
+// streaming path's half of the backstop.
+//
+// The refusal has to happen before the handler commits to HTTP 200,
+// because after that the only channel left is an SSE error event on a
+// response that already claims success. So this asserts a real 401 with
+// the identity code, and that the pipeline was never called.
+func TestHandlePipeline_RefusesStreamingRequestsWithoutIdentity(t *testing.T) {
+	pm := newMockPipelineManager()
+
+	streamed := false
+	pm.pipelines["test-pipeline"].executor = &mockQueryExecutor{
+		ExecuteStreamWithOptionsFunc: func(
+			ctx context.Context, req pipeline.QueryRequest,
+		) (<-chan pipeline.StreamChunk, <-chan error) {
+			streamed = true
+			chunks := make(chan pipeline.StreamChunk)
+			errs := make(chan error, 1)
+			close(chunks)
+			close(errs)
+			return chunks, errs
+		},
+	}
+
+	srv := mustNewServer(t, identityConfig(nil), pm)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/pipelines/test-pipeline",
+		strings.NewReader(`{"query":"what is pgEdge?","stream":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("name", "test-pipeline")
+
+	// Dispatched straight to the handler rather than through the mux, so
+	// requireIdentity does not run. That is the whole point: this asserts
+	// the handler's own check, which is what stands between a request
+	// that somehow skipped the middleware and a corpus read as the
+	// service role. Routing through the mux would only re-test the
+	// middleware, and would pass whether or not this backstop exists.
+	w := httptest.NewRecorder()
+	srv.handlePipeline(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (body: %s)", w.Code, w.Body.String())
+	}
+	if code := decodeError(t, w).Error.Code; code != codeIdentityRequired {
+		t.Errorf("error code = %q, want %q", code, codeIdentityRequired)
+	}
+	if streamed {
+		t.Error("the streaming pipeline ran for a request that was refused")
+	}
+	if ct := w.Header().Get("Content-Type"); ct == "text/event-stream" {
+		t.Error("the refusal was written as an event stream; the caller would " +
+			"have to parse SSE to discover it was refused")
+	}
+}
+
+// TestIdentityMessage checks that a refusal describes the case it is
+// actually refusing. A caller who sent malformed claims, or claimed a
+// role they may not have, did present an identity — telling them the
+// server "requires a caller identity" would send them to the wrong fix.
+func TestIdentityMessage(t *testing.T) {
+	tests := []struct {
+		code        string
+		err         error
+		wantContain string
+		wantAbsent  []string
+	}{
+		{
+			code:        codeIdentityRequired,
+			err:         identity.ErrRequired,
+			wantContain: "requires a caller identity",
+		},
+		{
+			code:        codeIdentityMalformed,
+			err:         identity.ErrMalformedClaims,
+			wantContain: "not a JSON claim set",
+			wantAbsent:  []string{"requires a caller identity"},
+		},
+		{
+			code:        codeIdentityRoleDenied,
+			err:         identity.ErrRoleNotAllowed,
+			wantContain: "not accepted",
+			wantAbsent:  []string{"requires a caller identity"},
+		},
+		{
+			code:        codeIdentityUntrusted,
+			err:         fmt.Errorf("%w: 203.0.113.9", identity.ErrUntrustedPeer),
+			wantContain: "may not assert a caller identity",
+			// The peer address describes the deployment's topology, not
+			// the request, and goes to the log instead.
+			wantAbsent: []string{"203.0.113.9"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			msg := identityMessage(tt.code, tt.err)
+			if !strings.Contains(msg, tt.wantContain) {
+				t.Errorf("message %q does not contain %q", msg, tt.wantContain)
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(msg, absent) {
+					t.Errorf("message %q should not contain %q", msg, absent)
+				}
+			}
+		})
+	}
+}
+
 func TestNew_RejectsUnusableIdentityConfig(t *testing.T) {
 	cfg := identityConfig(func(c *config.IdentityConfig) {
 		c.TrustedProxies = []string{"not-a-cidr"}

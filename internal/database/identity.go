@@ -24,11 +24,11 @@ import (
 // collapsed into "".
 const noRole = "none"
 
-// applyIdentitySQL applies a request's identity, and the planner
-// settings that go with it, to the current transaction.
+// applyClaimsSQL installs the caller's claim set and the planner
+// settings that go with this query, in the current transaction.
 //
 // Everything is done through set_config(name, value, is_local => true)
-// with bound parameters, in one statement, for three reasons:
+// with bound parameters, for three reasons:
 //
 //   - is_local => true gives SET LOCAL semantics, so every value is
 //     discarded when the transaction ends. That is what keeps an
@@ -39,19 +39,25 @@ const noRole = "none"
 //     statement out of them by string formatting would make the claim
 //     set an injection vector into the very statement that establishes
 //     the security context.
-//   - set_config returns the value it actually installed, so a single
-//     round trip both sets and confirms. See applyIdentity for why
-//     confirming matters.
-//
-// The role is applied in the same statement rather than afterwards.
-// set_config evaluates its arguments left to right, so the claim set is
-// installed while still connected as the service role, and the role
-// switch that may reduce privileges happens last.
-const applyIdentitySQL = `SELECT
+//   - set_config returns the value it actually installed, so setting and
+//     confirming cost one round trip between them. See applyIdentity for
+//     why confirming matters.
+const applyClaimsSQL = `SELECT
 	set_config($1, $2, true),
-	set_config('role', $3, true),
-	set_config('enable_indexscan', $4, true),
-	set_config('enable_bitmapscan', $4, true)`
+	set_config('enable_indexscan', $3, true),
+	set_config('enable_bitmapscan', $3, true)`
+
+// applyRoleSQL switches the transaction to the role the caller claimed.
+//
+// This is a second statement rather than another entry in the target
+// list of the first, because PostgreSQL does not guarantee the order in
+// which it evaluates independent target-list expressions. The claim set
+// must be installed before any role switch that might reduce
+// privileges, and a separate statement is the only way to actually say
+// so. Nothing here is on a latency-critical path that a fourth round
+// trip per query would ruin, and correctness is not worth trading for
+// one.
+const applyRoleSQL = `SELECT set_config('role', $1, true)`
 
 // applyIdentity establishes id as the identity of tx.
 //
@@ -82,9 +88,9 @@ func applyIdentity(
 		indexScans = "off"
 	}
 
-	var gotClaims, gotRole, gotIndexScan, gotBitmapScan string
-	err := tx.QueryRow(ctx, applyIdentitySQL, setting, id.Claims, role, indexScans).
-		Scan(&gotClaims, &gotRole, &gotIndexScan, &gotBitmapScan)
+	var gotClaims, gotIndexScan, gotBitmapScan string
+	err := tx.QueryRow(ctx, applyClaimsSQL, setting, id.Claims, indexScans).
+		Scan(&gotClaims, &gotIndexScan, &gotBitmapScan)
 	if err != nil {
 		return fmt.Errorf("failed to apply request identity: %w", err)
 	}
@@ -97,12 +103,6 @@ func applyIdentity(
 			setting, gotClaims)
 	}
 
-	if gotRole != role {
-		return fmt.Errorf(
-			"database did not retain the requested role: asked for %q, reads back as %q",
-			role, gotRole)
-	}
-
 	if gotIndexScan != indexScans || gotBitmapScan != indexScans {
 		return fmt.Errorf(
 			"database did not retain the scan settings: asked for %q, reads back as "+
@@ -110,7 +110,49 @@ func applyIdentity(
 			indexScans, gotIndexScan, gotBitmapScan)
 	}
 
+	// The role switch is a separate statement so that it demonstrably
+	// happens after the claim set is installed, rather than in whatever
+	// order the planner felt like evaluating a target list.
+	var gotRole string
+	if err := tx.QueryRow(ctx, applyRoleSQL, role).Scan(&gotRole); err != nil {
+		return fmt.Errorf("failed to assume the requested role: %w", err)
+	}
+
+	if gotRole != role {
+		return fmt.Errorf(
+			"database did not retain the requested role: asked for %q, reads back as %q",
+			role, gotRole)
+	}
+
 	return nil
+}
+
+// queryKind says whether a query consults an approximate vector index.
+//
+// It exists because the exact-scan mitigation must not be applied more
+// widely than the exposure it addresses. Turning off index scans is how
+// this package stops a shared HNSW/IVFFlat index leaking one identity's
+// corpus density to another — but withRows is the single path for every
+// identity-bearing read, and the keyword-corpus and fetch-by-id queries
+// have nothing to do with that index. Disabling index scans for them
+// would force sequential scans on primary-key lookups and on ordinary
+// filter predicates, which is a real cost paid for no security benefit.
+type queryKind int
+
+const (
+	// ordinaryQuery reads rows without consulting a vector index, and
+	// keeps normal planner access to whatever indexes exist.
+	ordinaryQuery queryKind = iota
+
+	// vectorQuery orders by vector distance and would otherwise be
+	// answered from an approximate index shared between identities.
+	vectorQuery
+)
+
+// exactSearch reports whether this query must avoid the approximate
+// vector index, given the pool's configuration.
+func (p *Pool) exactSearch(kind queryKind) bool {
+	return kind == vectorQuery && !p.identity.AllowSharedVectorIndex
 }
 
 // withRows runs one query and hands its rows to scan.
@@ -131,6 +173,7 @@ func applyIdentity(
 // rolled back and the connection released as soon as it does.
 func (p *Pool) withRows(
 	ctx context.Context,
+	kind queryKind,
 	sql string,
 	args []interface{},
 	scan func(pgx.Rows) error,
@@ -175,7 +218,7 @@ func (p *Pool) withRows(
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 
 	if err := applyIdentity(ctx, tx, p.identity.ClaimsSetting, id,
-		!p.identity.AllowSharedVectorIndex); err != nil {
+		p.exactSearch(kind)); err != nil {
 		return err
 	}
 

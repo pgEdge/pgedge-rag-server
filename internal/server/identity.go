@@ -102,17 +102,33 @@ func classifyIdentityError(err error) (int, string) {
 
 // identityMessage returns the message sent to the caller.
 //
-// The underlying error text is included only for the cases whose detail
-// is about the request itself and is already known to whoever sent it —
-// which header was missing, which role was claimed. The untrusted-peer
-// case gets a fixed message instead: its detail is the peer address and
-// the configured CIDR blocks, which describe the deployment's network
-// topology rather than the request, and there is no reason to hand that
-// to a caller who has just failed a trust check. Full detail is logged
-// either way.
+// Each case gets its own wording, because they call for different
+// fixes in different places and a shared message would send whoever
+// reads it to the wrong one. "This server requires a caller identity"
+// is true of a request that sent none; it is actively misleading for a
+// request that sent one which turned out to be malformed, or one whose
+// claimed role is not permitted — in both of those an identity was
+// presented, and the problem is what it contained.
+//
+// The underlying error text is included only where its detail is about
+// the request itself and so is already known to whoever sent it: which
+// header was missing, what was wrong with the JSON, which role was
+// claimed. The untrusted-peer case gets a fixed message instead — its
+// detail is the peer address and the configured CIDR blocks, which
+// describe the deployment's network topology rather than the request,
+// and there is no reason to hand that to a caller who has just failed a
+// trust check. Full detail is logged either way.
 func identityMessage(code string, err error) string {
-	if code == codeIdentityUntrusted {
+	switch code {
+	case codeIdentityUntrusted:
 		return "requests from this address may not assert a caller identity"
+	case codeIdentityMalformed:
+		return fmt.Sprintf(
+			"the caller identity presented is not a JSON claim set: %s", err.Error())
+	case codeIdentityRoleDenied:
+		return fmt.Sprintf(
+			"the caller identity presented is not accepted: %s", err.Error())
+	default:
+		return fmt.Sprintf("this server requires a caller identity: %s", err.Error())
 	}
-	return fmt.Sprintf("this server requires a caller identity: %s", err.Error())
 }

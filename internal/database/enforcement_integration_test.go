@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -235,6 +236,82 @@ func TestVerifyEnforcement_BypassRLSRole(t *testing.T) {
 	}
 	if !strings.Contains(errors.Join(problems...).Error(), "BYPASSRLS") {
 		t.Errorf("problem does not mention BYPASSRLS: %v", problems)
+	}
+}
+
+// TestVerifyEnforcement_AllowedRolesThatBypassRLS covers the roles a
+// request can be switched into, which the per-table check never sees.
+//
+// The per-table check reads the attributes of the role the pool logs in
+// as. A caller whose claims name a role on the allowlist leaves that
+// role behind for the query, so a superuser or BYPASSRLS role on the
+// allowlist skips every policy on every table for that caller — while
+// the per-table check happily reports each table as verified. Both ways
+// of bypassing are covered, because they are separate role attributes
+// and only one of them is named BYPASSRLS.
+func TestVerifyEnforcement_AllowedRolesThatBypassRLS(t *testing.T) {
+	cases := []struct {
+		name      string
+		attribute string
+		wantFlag  bool
+	}{
+		{"a BYPASSRLS role on the allowlist", "BYPASSRLS", true},
+		{"a superuser on the allowlist", "SUPERUSER", true},
+		{"an ordinary role on the allowlist", "NOSUPERUSER", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			admin := adminPool(t)
+			role, password := serviceRole(t, admin)
+			schema := testSchema(t, admin, role)
+			tenantCorpus(t, admin, schema, role, config.DefaultClaimsSetting, false)
+
+			claimable := uniqueName(t, "rag_claimable")
+			exec(t, admin, fmt.Sprintf("DROP ROLE IF EXISTS %s",
+				pgx.Identifier{claimable}.Sanitize()))
+			exec(t, admin, fmt.Sprintf("CREATE ROLE %s %s",
+				pgx.Identifier{claimable}.Sanitize(), tc.attribute))
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				_, _ = admin.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s",
+					pgx.Identifier{claimable}.Sanitize()))
+			})
+
+			idCfg := config.IdentityConfig{
+				Enabled:      true,
+				AllowedRoles: []string{claimable},
+			}.WithDefaults()
+
+			pool := servicePool(t, role, password, idCfg, 2)
+			tables := []config.TableSource{{Table: schema + ".chunks"}}
+
+			problems := pool.VerifyEnforcement(context.Background(), tables)
+
+			if !tc.wantFlag {
+				if len(problems) != 0 {
+					t.Fatalf("an ordinary allowlisted role was flagged: %v", problems)
+				}
+				return
+			}
+
+			if len(problems) == 0 {
+				t.Fatalf("a %s role on identity.allowed_roles verified cleanly; "+
+					"a caller claiming it would see every row of every table",
+					tc.attribute)
+			}
+
+			joined := errors.Join(problems...).Error()
+			if !strings.Contains(joined, claimable) {
+				t.Errorf("the problem does not name the offending role %q: %s",
+					claimable, joined)
+			}
+			if !strings.Contains(joined, "allowed_roles") {
+				t.Errorf("the problem does not point at identity.allowed_roles: %s",
+					joined)
+			}
+		})
 	}
 }
 

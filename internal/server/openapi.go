@@ -215,7 +215,13 @@ func BuildOpenAPISpec() OpenAPISpec {
 						"proxy in front of the server as a JSON claim set in the " +
 						"configured claims header (default `X-Forwarded-Claims`) or a " +
 						"bare subject in the configured subject header (default " +
-						"`X-Forwarded-User`). Retrieval then runs as that caller and " +
+						"`X-Forwarded-User`). The server does NOT verify those " +
+						"headers: it checks no signature, issuer, audience or " +
+						"expiry, and trusts whatever the proxy asserts. Anything " +
+						"able to reach this server's port directly can therefore " +
+						"assert any identity, so the deployment must ensure only a " +
+						"trusted proxy can — see docs/identity.md. " +
+						"Retrieval then runs as that caller and " +
 						"PostgreSQL row-level security decides what it may see. A " +
 						"request carrying no identity is refused with 401 " +
 						"`IDENTITY_REQUIRED`; there is no fallback to the service's " +

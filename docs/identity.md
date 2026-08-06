@@ -13,8 +13,12 @@ and PostgreSQL's own row-level security decides what the query may see.
 The model is PostgREST's, and policies written for PostgREST work
 unchanged.
 
-The server makes no authorisation decisions of its own. It presents an
-identity; the database enforces the policies written against it.
+The server makes no *row-level* authorisation decisions. It presents an
+identity; PostgreSQL decides which rows that identity may see. It does
+still enforce two boundary checks of its own before any query is
+issued — `trusted_proxies` decides who may assert an identity at all,
+and `allowed_roles` bounds which database roles a claim may name — but
+neither of those looks at data.
 
 !!! warning "Two halves that must land together"
 
@@ -22,8 +26,11 @@ identity; the database enforces the policies written against it.
     must have row-level security enabled on every configured table, with
     policies keyed on the claims the server sets, and the pipeline must
     connect as a role those policies actually apply to. The server
-    checks all of that at startup and refuses to start if it cannot
-    confirm it — see [Startup enforcement checks](#startup-enforcement-checks).
+    checks all of that at startup; under the default
+    `enforcement_check: error` it refuses to start if it cannot confirm
+    it. `warn` logs each finding and starts anyway, and `off` skips the
+    check — see
+    [Startup enforcement checks](#startup-enforcement-checks).
 
 ## Who may assert an identity
 
@@ -124,14 +131,14 @@ no control.
 
 Either a full claim set:
 
-```
+```text
 X-Forwarded-Claims: {"sub":"alice","role":"rag_tenant","tenant":"acme"}
 ```
 
 or, for a proxy that can assert who the caller is but cannot emit JSON,
 a bare subject:
 
-```
+```text
 X-Forwarded-User: alice
 ```
 
@@ -148,9 +155,14 @@ the proxy asserted.
 For the lifetime of each query, inside a read-only transaction:
 
 ```sql
+-- claims and planner settings first ...
 SELECT set_config('request.jwt.claims', '{"sub":"alice"}', true),
-       set_config('role', 'rag_tenant', true),
-       ...
+       set_config('enable_indexscan', 'off', true),
+       set_config('enable_bitmapscan', 'off', true);
+
+-- ... then the role switch, as its own statement so that it
+-- demonstrably happens after the claims are installed
+SELECT set_config('role', 'rag_tenant', true);
 ```
 
 Policies then read it in the usual way:
@@ -192,8 +204,10 @@ probes and discovery keep working unchanged.
 ## Startup enforcement checks
 
 When identity is enabled, the server inspects every configured table
-before serving anything, and refuses to start if the database will not
-act on the identity it presents.
+before serving anything. Under the default `enforcement_check: error`
+it refuses to start if the database will not act on the identity it
+presents; under `warn` it logs each finding and serves anyway, and
+under `off` it does not look.
 
 This exists because the failures it looks for are silent. In every case
 below, queries succeed and return rows; the only thing wrong is that the
@@ -203,8 +217,14 @@ The checks, in order:
 
 - **The relation resolves.** A configured name the connecting role
   cannot see would otherwise fail per request.
-- **The connecting role does not have `BYPASSRLS`.** Such a role ignores
-  every policy on every table.
+- **The connecting role is not a superuser and does not have
+  `BYPASSRLS`.** Either attribute makes a role ignore every policy on
+  every table.
+- **No role in `allowed_roles` is a superuser or has `BYPASSRLS`.** A
+  caller whose claims name such a role leaves the connecting role behind
+  for the query, so the per-table checks — which only ever look at the
+  connecting role — would report every table as verified while that
+  caller saw all of it.
 - **Row-level security is enabled** on the table. Without it, every
   caller sees every row whatever identity is presented.
 - **The connecting role does not own the table**, unless the table has
@@ -274,7 +294,7 @@ one identity, 50 by another, HNSW index on `vector_cosine_ops`, a policy
 keyed on the claims parameter. The second identity asks for her ten
 nearest chunks:
 
-```
+```text
  Limit (actual rows=0 loops=1)
    ->  Index Scan using chunks_embedding_idx on chunks (actual rows=0 loops=1)
          Order By: (embedding <=> '[0.5,...]'::vector)
@@ -387,5 +407,14 @@ stripped any inbound copy of that header.
 - The preflight's pinning detection is textual, with the two limits
   noted above.
 - Enabling identity adds a transaction (one extra round trip to begin,
-  one to apply the identity and roll back) to each query, and — unless
-  you opt into a shared index — makes the vector arm an exact scan.
+  one to apply the identity, one for the role switch, and one to roll
+  back) to each query, and — unless you opt into a shared index — makes
+  the vector arm an exact scan for the vector search. Other retrieval
+  queries keep normal index access.
+- The value of `subject_claim` is written to the log at **debug** level
+  on each accepted request, so an operator can tie a query to the caller
+  who made it. If you point `subject_claim` at something that is
+  personal data in your jurisdiction — `email`, say — that log inherits
+  the retention and handling obligations that come with it. The claim
+  set itself is never logged; only that one field, and only at debug
+  level, which is off by default.

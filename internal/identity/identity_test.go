@@ -89,6 +89,25 @@ func TestExtract(t *testing.T) {
 			wantErr: ErrMalformedClaims,
 		},
 		{
+			// json.Unmarshal accepts null into a map without error and
+			// leaves the map nil, so this passes the decode and would
+			// otherwise reach the database as the text "null".
+			name:    "claims that are JSON null are refused",
+			headers: map[string]string{"X-Forwarded-Claims": `null`},
+			wantErr: ErrMalformedClaims,
+		},
+		{
+			name:    "claims that are a JSON string are refused",
+			headers: map[string]string{"X-Forwarded-Claims": `"alice"`},
+			wantErr: ErrMalformedClaims,
+		},
+		{
+			name:        "an empty claim set is accepted and carries no subject",
+			headers:     map[string]string{"X-Forwarded-Claims": `{}`},
+			wantClaims:  `{}`,
+			wantSubject: "",
+		},
+		{
 			name:       "custom header names are honoured",
 			cfg:        config.IdentityConfig{ClaimsHeader: "X-Tenant-Claims"},
 			headers:    map[string]string{"X-Tenant-Claims": `{"sub":"alice"}`},

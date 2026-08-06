@@ -156,6 +156,15 @@ func (e *Extractor) Extract(r *http.Request) (*Identity, error) {
 	if err := json.Unmarshal([]byte(claims), &decoded); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrMalformedClaims, err)
 	}
+	// json.Unmarshal accepts a literal null into a map without error and
+	// leaves the map nil, so "null" would otherwise pass as a claim set
+	// and reach the database as the text "null". The policy would then
+	// evaluate to NULL and the request would fail closed — but at the
+	// database, with nothing to say why. Refuse it here, where the cause
+	// is still visible.
+	if decoded == nil {
+		return nil, fmt.Errorf("%w: claims are JSON null", ErrMalformedClaims)
+	}
 
 	id := &Identity{
 		Claims:  claims,
