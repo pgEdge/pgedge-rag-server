@@ -475,6 +475,11 @@ request: the answer is built from the documents that were retrieved, and
 the narrowed coverage is logged by the server. A failure only becomes the
 response when the request ends with no results at all.
 
+On a hybrid pipeline, a table counts as failed when either arm of its
+search fails. If the keyword arm cannot read the corpus, no keyword
+matching ran for that table, so a vector arm that also matched nothing
+has not established that the corpus holds nothing relevant.
+
 As with every other error, the message carries no table name, schema,
 SQL text or SQLSTATE — see below. The full detail, including the
 database's own message, is written to the server log.

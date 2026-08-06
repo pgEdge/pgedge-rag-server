@@ -1968,3 +1968,91 @@ func TestSearch_ConcurrentRequestsDoNotShareKeywordIndex(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// newHybridRetrievalOrchestrator builds a hybrid-search orchestrator
+// over a single table whose vector arm returns vectorResults and whose
+// keyword arm's corpus read fails with fetchErr, so the BM25 failure
+// branch of search() decides the outcome.
+func newHybridRetrievalOrchestrator(
+	vectorResults []database.SearchResult,
+	fetchErr error,
+) *Orchestrator {
+	hybrid := true
+	backend := &MockSearchBackend{
+		VectorSearchFunc: func(
+			ctx context.Context, embedding []float32, table config.TableSource,
+			topN int, filter *config.Filter, minSimilarity *float64,
+		) ([]database.SearchResult, error) {
+			return vectorResults, nil
+		},
+		FetchDocumentsFunc: func(
+			ctx context.Context, table config.TableSource,
+			filter *config.Filter, maxDocuments int,
+		) (map[string]string, error) {
+			return nil, fetchErr
+		},
+	}
+	return NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{
+			Name: "test-pipeline",
+			Tables: []config.TableSource{
+				{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+			},
+			Search: config.SearchConfig{HybridEnabled: &hybrid},
+		},
+		DBPool:         backend,
+		EmbeddingProv:  &MockEmbedder{},
+		CompletionProv: &MockCompleter{},
+		TokenBudget:    DefaultTokenBudget,
+		TopN:           DefaultTopN,
+	})
+}
+
+// TestOrchestrator_Execute_HybridKeywordArmFailureWithNoMatchesFails
+// covers the BM25 corpus read failing on a hybrid pipeline whose vector
+// arm matched nothing.
+//
+// It is a failure, not an empty result, because no keyword matching ran:
+// the request never established that the corpus holds nothing relevant,
+// only that half the search found nothing. Answering "no relevant
+// information" there is the same ambiguity issue #49 is about, and on a
+// filtered corpus the keyword arm is often the arm that would have
+// matched.
+func TestOrchestrator_Execute_HybridKeywordArmFailureWithNoMatchesFails(t *testing.T) {
+	orch := newHybridRetrievalOrchestrator(nil, permissionDeniedError("docs"))
+
+	resp, err := orch.Execute(context.Background(), QueryRequest{Query: "test query"})
+	if err == nil {
+		t.Fatalf("expected an error when no keyword matching ran and nothing matched, got %+v", resp)
+	}
+
+	var retrievalErr *database.RetrievalError
+	if !errors.As(err, &retrievalErr) {
+		t.Fatalf("expected a *database.RetrievalError, got %T: %v", err, err)
+	}
+	if retrievalErr.Kind != database.FailureRefused {
+		t.Errorf("expected kind %v, got %v", database.FailureRefused, retrievalErr.Kind)
+	}
+}
+
+// TestOrchestrator_Execute_HybridKeywordArmFailureWithMatchesAnswers is
+// the other side of that rule: the vector arm found documents, so the
+// request is answerable and the lost keyword recall only narrows
+// coverage — logged, not fatal, exactly as a corpus truncated by
+// bm25_max_documents is.
+func TestOrchestrator_Execute_HybridKeywordArmFailureWithMatchesAnswers(t *testing.T) {
+	orch := newHybridRetrievalOrchestrator(
+		[]database.SearchResult{
+			{ID: "doc-1", Content: "Refunds are issued within 14 days.", Score: 0.9},
+		},
+		permissionDeniedError("docs"),
+	)
+
+	resp, err := orch.Execute(context.Background(), QueryRequest{Query: "test query"})
+	if err != nil {
+		t.Fatalf("expected no error when the vector arm returned results, got %v", err)
+	}
+	if resp.Answer == "" {
+		t.Error("expected an answer built from the vector arm's results")
+	}
+}

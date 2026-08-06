@@ -396,8 +396,20 @@ func (o *Orchestrator) search(
 
 		docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter, maxBM25Docs)
 		if err != nil {
+			// This counts as a failed table even though the vector arm
+			// succeeded, because on a hybrid pipeline the keyword arm is
+			// half of the search: when it cannot read the corpus, no
+			// keyword matching happened at all for this request. If the
+			// vector arm also matched nothing, the request has not
+			// established that the corpus holds nothing relevant, only
+			// that half a search found nothing — which is the very
+			// ambiguity issue #49 is about. It is only decisive when the
+			// request ends with no results whatsoever; a vector hit here
+			// still answers, with the narrowed coverage left to this log
+			// line, as with a corpus truncated by bm25_max_documents.
 			kind := database.ClassifyFailure(err)
-			o.logger.Warn("failed to fetch documents for BM25",
+			o.logger.Warn("failed to fetch documents for BM25; "+
+				"no keyword matching ran for this table",
 				"table", table.Table, "failure_kind", kind.String(), "error", err)
 			failure.observe(kind, err)
 			allResults = append(allResults, vectorResults...)
