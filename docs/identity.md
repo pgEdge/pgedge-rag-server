@@ -225,6 +225,10 @@ The checks, in order:
   for the query, so the per-table checks — which only ever look at the
   connecting role — would report every table as verified while that
   caller saw all of it.
+- **No role in `allowed_roles` owns a configured table** that lacks
+  `FORCE ROW LEVEL SECURITY`, for the same reason: an owner is exempt
+  from its own policies, and a role the caller can ask to become is no
+  safer for being reached through a claim.
 - **Row-level security is enabled** on the table. Without it, every
   caller sees every row whatever identity is presented.
 - **The connecting role does not own the table**, unless the table has
@@ -233,8 +237,15 @@ The checks, in order:
   exist, they read the right parameter, they test correctly in `psql` as
   another role — and they do nothing at all for the server, because the
   service role happens to own the table.
-- **At least one policy is defined.**
-- **At least one policy refers to the configured claims parameter.**
+- **At least one policy governs `SELECT`.** A policy declared `FOR
+  INSERT`, `UPDATE` or `DELETE` does not decide what a query may read,
+  so it is not counted; only `FOR SELECT` and `FOR ALL` are.
+- **At least one of those policies refers to the configured claims
+  parameter in its `USING` clause.** A `WITH CHECK` clause constrains
+  rows being written and never rows being returned, so a claims-aware
+  write policy sitting beside a `USING (true)` read policy is not
+  enforcement — it is a wide-open table with a reassuring-looking
+  policy list.
 
 ### Database-side identity pinning
 
@@ -329,9 +340,11 @@ SELECT set_config('enable_indexscan', 'off', true),
        set_config('enable_bitmapscan', 'off', true)
 ```
 
-The vector arm then performs an exact scan. Every caller gets the rows
-she asked for, and the result count carries no information about anyone
-else's corpus. The cost is that vector search becomes O(n) in the table
+The vector arm then performs an exact scan. Every caller gets her own
+nearest rows, up to the limit she asked for — fewer only when she owns
+fewer than that many rows, which is a fact about her own corpus rather
+than anyone else's. The result count no longer carries information
+about what other identities hold. The cost is that vector search becomes O(n) in the table
 size rather than approximate — which is the price of a shared table
 serving multiple identities, and is why the alternative below exists.
 

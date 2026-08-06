@@ -84,7 +84,7 @@ func TestVerifyEnforcement(t *testing.T) {
 					q, pgx.Identifier{role}.Sanitize()))
 				return "nopolicy"
 			},
-			wantProblem: "no policy is defined",
+			wantProblem: "no policy governs SELECT",
 		},
 		{
 			name: "service role owns the table and it is not forced",
@@ -142,6 +142,67 @@ func TestVerifyEnforcement(t *testing.T) {
 				return "chunk_view"
 			},
 			wantProblem: "is a view",
+		},
+		{
+			// A policy that constrains writes says nothing about what a
+			// caller may read. Counting it would let a wide-open SELECT
+			// policy pass on the strength of a claims-aware INSERT one.
+			name: "the only claims-aware policy governs writes, not reads",
+			setup: func(t *testing.T, admin *pgxpool.Pool, schema, role string) string {
+				q := pgx.Identifier{schema, "writeonly"}.Sanitize()
+				exec(t, admin, fmt.Sprintf(
+					"CREATE TABLE %s (id text, owner text, content text)", q))
+				exec(t, admin, fmt.Sprintf(
+					"ALTER TABLE %s ENABLE ROW LEVEL SECURITY", q))
+				exec(t, admin, fmt.Sprintf(
+					"CREATE POLICY read_all ON %s FOR SELECT USING (true)", q))
+				exec(t, admin, fmt.Sprintf(
+					`CREATE POLICY write_own ON %s FOR INSERT
+					   WITH CHECK (owner = current_setting(%s, true)::json->>'sub')`,
+					q, quoteLiteral(config.DefaultClaimsSetting)))
+				exec(t, admin, fmt.Sprintf("GRANT SELECT ON %s TO %s",
+					q, pgx.Identifier{role}.Sanitize()))
+				return "writeonly"
+			},
+			wantProblem: "USING clause",
+		},
+		{
+			// The mirror image: only a write policy exists at all, so
+			// nothing decides what a read may return.
+			name: "no policy governs reads",
+			setup: func(t *testing.T, admin *pgxpool.Pool, schema, role string) string {
+				q := pgx.Identifier{schema, "nordpolicy"}.Sanitize()
+				exec(t, admin, fmt.Sprintf(
+					"CREATE TABLE %s (id text, owner text, content text)", q))
+				exec(t, admin, fmt.Sprintf(
+					"ALTER TABLE %s ENABLE ROW LEVEL SECURITY", q))
+				exec(t, admin, fmt.Sprintf(
+					`CREATE POLICY write_own ON %s FOR INSERT
+					   WITH CHECK (owner = current_setting(%s, true)::json->>'sub')`,
+					q, quoteLiteral(config.DefaultClaimsSetting)))
+				exec(t, admin, fmt.Sprintf("GRANT SELECT ON %s TO %s",
+					q, pgx.Identifier{role}.Sanitize()))
+				return "nordpolicy"
+			},
+			wantProblem: "no policy governs SELECT",
+		},
+		{
+			// A FOR ALL policy does govern reads, and must count.
+			name: "a FOR ALL claims policy verifies",
+			setup: func(t *testing.T, admin *pgxpool.Pool, schema, role string) string {
+				q := pgx.Identifier{schema, "forall"}.Sanitize()
+				exec(t, admin, fmt.Sprintf(
+					"CREATE TABLE %s (id text, owner text, content text)", q))
+				exec(t, admin, fmt.Sprintf(
+					"ALTER TABLE %s ENABLE ROW LEVEL SECURITY", q))
+				exec(t, admin, fmt.Sprintf(
+					`CREATE POLICY own_rows ON %s FOR ALL
+					   USING (owner = current_setting(%s, true)::json->>'sub')`,
+					q, quoteLiteral(config.DefaultClaimsSetting)))
+				exec(t, admin, fmt.Sprintf("GRANT SELECT ON %s TO %s",
+					q, pgx.Identifier{role}.Sanitize()))
+				return "forall"
+			},
 		},
 		{
 			name: "policies pin identity on session_user and ignore the claims",
@@ -253,11 +314,36 @@ func TestVerifyEnforcement_AllowedRolesThatBypassRLS(t *testing.T) {
 	cases := []struct {
 		name      string
 		attribute string
+		// ownsTable makes the claimable role the owner of the configured
+		// table, which exempts it from that table's policies unless the
+		// table forces row-level security.
+		ownsTable bool
+		forceRLS  bool
 		wantFlag  bool
+		wantSaid  string
 	}{
-		{"a BYPASSRLS role on the allowlist", "BYPASSRLS", true},
-		{"a superuser on the allowlist", "SUPERUSER", true},
-		{"an ordinary role on the allowlist", "NOSUPERUSER", false},
+		{
+			name: "a BYPASSRLS role on the allowlist", attribute: "BYPASSRLS",
+			wantFlag: true, wantSaid: "BYPASSRLS",
+		},
+		{
+			name: "a superuser on the allowlist", attribute: "SUPERUSER",
+			wantFlag: true, wantSaid: "BYPASSRLS",
+		},
+		{
+			name: "an ordinary role on the allowlist", attribute: "NOSUPERUSER",
+		},
+		{
+			// The same exemption the per-table check applies to the
+			// connecting role, but reached through a claim instead.
+			name:      "an allowlisted role that owns a configured table",
+			attribute: "NOSUPERUSER", ownsTable: true,
+			wantFlag: true, wantSaid: "FORCE ROW LEVEL SECURITY",
+		},
+		{
+			name:      "an allowlisted owner of a table that forces row-level security",
+			attribute: "NOSUPERUSER", ownsTable: true, forceRLS: true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -272,6 +358,18 @@ func TestVerifyEnforcement_AllowedRolesThatBypassRLS(t *testing.T) {
 				pgx.Identifier{claimable}.Sanitize()))
 			exec(t, admin, fmt.Sprintf("CREATE ROLE %s %s",
 				pgx.Identifier{claimable}.Sanitize(), tc.attribute))
+
+			if tc.ownsTable {
+				chunks := pgx.Identifier{schema, "chunks"}.Sanitize()
+				if tc.forceRLS {
+					exec(t, admin, fmt.Sprintf(
+						"ALTER TABLE %s FORCE ROW LEVEL SECURITY", chunks))
+				}
+				exec(t, admin, fmt.Sprintf("ALTER TABLE %s OWNER TO %s",
+					chunks, pgx.Identifier{claimable}.Sanitize()))
+				exec(t, admin, fmt.Sprintf("GRANT SELECT ON %s TO %s",
+					chunks, pgx.Identifier{role}.Sanitize()))
+			}
 			t.Cleanup(func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
@@ -298,7 +396,7 @@ func TestVerifyEnforcement_AllowedRolesThatBypassRLS(t *testing.T) {
 
 			if len(problems) == 0 {
 				t.Fatalf("a %s role on identity.allowed_roles verified cleanly; "+
-					"a caller claiming it would see every row of every table",
+					"a caller claiming it would see rows it should not",
 					tc.attribute)
 			}
 
@@ -310,6 +408,10 @@ func TestVerifyEnforcement_AllowedRolesThatBypassRLS(t *testing.T) {
 			if !strings.Contains(joined, "allowed_roles") {
 				t.Errorf("the problem does not point at identity.allowed_roles: %s",
 					joined)
+			}
+			if !strings.Contains(joined, tc.wantSaid) {
+				t.Errorf("the problem does not explain the mechanism (%q): %s",
+					tc.wantSaid, joined)
 			}
 		})
 	}

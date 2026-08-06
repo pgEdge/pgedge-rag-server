@@ -34,11 +34,23 @@ var ErrEnforcementUnverified = errors.New("identity enforcement could not be ver
 // relrowsecurity / relforcerowsecurity, the ownership test and
 // rolsuper/rolbypassrls together decide whether policies run at all —
 // a superuser bypasses row-level security whether or not it carries
-// BYPASSRLS, so both attributes are read;
-// pg_get_expr over pg_policy gives the policy text, which is what the
-// pinning check reads. The table name is bound as a parameter and cast
-// to regclass so a configured name cannot be concatenated into this
-// statement.
+// BYPASSRLS, so both attributes are read; pg_get_expr over pg_policy
+// gives the policy text, which is what the pinning check reads. The
+// table name is bound as a parameter and cast to regclass so a
+// configured name cannot be concatenated into this statement.
+//
+// Only policies that govern reads are collected, and only their USING
+// clause:
+//
+//   - polcmd is restricted to 'r' (FOR SELECT) and '*' (FOR ALL). A
+//     policy that only governs writes says nothing about what a caller
+//     may see, so counting it would let a table whose SELECT policy is
+//     USING (true) pass the check on the strength of a claims-aware
+//     FOR INSERT policy — wide open to every caller, and reported as
+//     verified.
+//   - polwithcheck is excluded for the same reason. WITH CHECK
+//     constrains rows being written, never rows being returned, and
+//     this server only ever reads.
 const enforcementSQL = `
 SELECT
 	c.relkind::text,
@@ -49,11 +61,10 @@ SELECT
 	  WHERE r.rolname = current_user) AS bypasses_rls,
 	COALESCE(
 		(SELECT array_agg(
-			COALESCE(pg_catalog.pg_get_expr(p.polqual, p.polrelid), '')
-			|| ' ' ||
-			COALESCE(pg_catalog.pg_get_expr(p.polwithcheck, p.polrelid), ''))
+			COALESCE(pg_catalog.pg_get_expr(p.polqual, p.polrelid), ''))
 		   FROM pg_catalog.pg_policy p
-		  WHERE p.polrelid = c.oid),
+		  WHERE p.polrelid = c.oid
+		    AND p.polcmd IN ('r', '*')),
 		ARRAY[]::text[]) AS policy_exprs
 FROM pg_catalog.pg_class c
 WHERE c.oid = $1::regclass`
@@ -118,9 +129,7 @@ func (p *Pool) VerifyEnforcement(
 
 	var problems []error
 
-	if err := p.verifyAllowedRoles(ctx); err != nil {
-		problems = append(problems, err)
-	}
+	problems = append(problems, p.verifyAllowedRoles(ctx, tables)...)
 
 	for _, table := range tables {
 		if err := p.verifyTable(ctx, table.Table); err != nil {
@@ -131,12 +140,24 @@ func (p *Pool) VerifyEnforcement(
 }
 
 // bypassingRolesSQL finds roles that row-level security does not apply
-// to, among a given set of names.
+// to at all, among a given set of names.
 const bypassingRolesSQL = `
 SELECT r.rolname
   FROM pg_catalog.pg_roles r
  WHERE r.rolname = ANY($1::text[])
    AND (r.rolsuper OR r.rolbypassrls)
+ ORDER BY r.rolname`
+
+// owningRolesSQL finds roles that own a given relation, among a set of
+// names, where the relation does not force row-level security on its
+// owner.
+const owningRolesSQL = `
+SELECT r.rolname
+  FROM pg_catalog.pg_roles r, pg_catalog.pg_class c
+ WHERE r.rolname = ANY($1::text[])
+   AND c.oid = $2::regclass
+   AND NOT c.relforcerowsecurity
+   AND pg_catalog.pg_has_role(r.rolname, c.relowner, 'USAGE')
  ORDER BY r.rolname`
 
 // verifyAllowedRoles checks the roles a request may be switched into.
@@ -151,45 +172,107 @@ SELECT r.rolname
 // that role, reports the table as verified.
 //
 // That is precisely the shape of failure this preflight exists to
-// catch, so it is checked here as well: once per pool, since it is a
-// property of the roles rather than of any table.
-func (p *Pool) verifyAllowedRoles(ctx context.Context) error {
+// catch, so it is checked here as well. Two ways a claimable role can
+// escape policy are covered, because they are separate mechanisms:
+//
+//   - the role is a superuser or carries BYPASSRLS, which skips every
+//     policy on every table; and
+//   - the role owns one of the configured tables, since an owner is
+//     exempt from its own policies unless the table has FORCE ROW LEVEL
+//     SECURITY. This is the same exemption the per-table check applies
+//     to the connecting role, and it is no less dangerous for a role
+//     the caller can ask to become.
+func (p *Pool) verifyAllowedRoles(
+	ctx context.Context,
+	tables []config.TableSource,
+) []error {
 	if len(p.identity.AllowedRoles) == 0 {
 		return nil
 	}
 
-	rows, err := p.pool.Query(ctx, bypassingRolesSQL, p.identity.AllowedRoles)
+	var problems []error
+
+	bypassing, err := p.rolesMatching(ctx, bypassingRolesSQL, p.identity.AllowedRoles)
 	if err != nil {
-		return fmt.Errorf("%w: could not inspect identity.allowed_roles: %w",
+		problems = append(problems, err)
+	} else if len(bypassing) > 0 {
+		problems = append(problems, fmt.Errorf(
+			"%w: identity.allowed_roles names %s, which %s row-level security "+
+				"(superuser or BYPASSRLS); a caller whose claims name such a role "+
+				"would see every row of every table, so it must not be reachable "+
+				"through a claim",
+			ErrEnforcementUnverified, strings.Join(quoteAll(bypassing), ", "),
+			plural(len(bypassing), "bypasses", "bypass")))
+	}
+
+	for _, table := range tables {
+		owners, err := p.rolesMatching(ctx, owningRolesSQL,
+			p.identity.AllowedRoles, table.Table)
+		if err != nil {
+			// A relation that does not resolve is reported once, by the
+			// per-table check; repeating it here would be noise.
+			if !errors.Is(err, errRelationUnresolved) {
+				problems = append(problems, err)
+			}
+			continue
+		}
+		if len(owners) == 0 {
+			continue
+		}
+
+		problems = append(problems, fmt.Errorf(
+			"%w: identity.allowed_roles names %s, which %s %q, and an owner is "+
+				"exempt from its own policies unless the table has FORCE ROW LEVEL "+
+				"SECURITY; a caller whose claims name such a role would see every "+
+				"row of it. Run ALTER TABLE %s FORCE ROW LEVEL SECURITY, or remove "+
+				"the role from identity.allowed_roles",
+			ErrEnforcementUnverified, strings.Join(quoteAll(owners), ", "),
+			plural(len(owners), "owns", "own"), table.Table, table.Table))
+	}
+
+	return problems
+}
+
+// errRelationUnresolved marks a lookup that failed because the
+// configured relation does not resolve, so callers can leave that
+// finding to the per-table check rather than reporting it twice.
+var errRelationUnresolved = errors.New("relation does not resolve")
+
+// rolesMatching runs a role-selecting query and collects the names it
+// returns.
+func (p *Pool) rolesMatching(
+	ctx context.Context,
+	sql string,
+	args ...any,
+) ([]string, error) {
+	rows, err := p.pool.Query(ctx, sql, args...)
+	if err != nil {
+		if isUndefinedObject(err) {
+			return nil, errRelationUnresolved
+		}
+		return nil, fmt.Errorf("%w: could not inspect identity.allowed_roles: %w",
 			ErrEnforcementUnverified, err)
 	}
 	defer rows.Close()
 
-	var bypassing []string
+	var names []string
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
-			return fmt.Errorf("%w: could not inspect identity.allowed_roles: %w",
+			return nil, fmt.Errorf("%w: could not inspect identity.allowed_roles: %w",
 				ErrEnforcementUnverified, err)
 		}
-		bypassing = append(bypassing, name)
+		names = append(names, name)
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("%w: could not inspect identity.allowed_roles: %w",
+		if isUndefinedObject(err) {
+			return nil, errRelationUnresolved
+		}
+		return nil, fmt.Errorf("%w: could not inspect identity.allowed_roles: %w",
 			ErrEnforcementUnverified, err)
 	}
 
-	if len(bypassing) == 0 {
-		return nil
-	}
-
-	return fmt.Errorf(
-		"%w: identity.allowed_roles names %s, which %s row-level security "+
-			"(superuser or BYPASSRLS); a caller whose claims name such a role "+
-			"would see every row of every table, so it must not be reachable "+
-			"through a claim",
-		ErrEnforcementUnverified, strings.Join(quoteAll(bypassing), ", "),
-		plural(len(bypassing), "bypasses", "bypass"))
+	return names, nil
 }
 
 // quoteAll renders names for an error message.
@@ -286,8 +369,9 @@ func (p *Pool) verifyTable(ctx context.Context, table string) error {
 
 	if len(policyExprs) == 0 {
 		return fmt.Errorf(
-			"%w: row-level security is enabled on %q but no policy is defined, so "+
-				"every caller would see no rows at all",
+			"%w: row-level security is enabled on %q but no policy governs SELECT, "+
+				"so every caller would see no rows at all; a policy declared FOR "+
+				"INSERT, UPDATE or DELETE does not decide what a query may read",
 			ErrEnforcementUnverified, table)
 	}
 
@@ -298,7 +382,8 @@ func (p *Pool) verifyTable(ctx context.Context, table string) error {
 	}
 
 	return fmt.Errorf(
-		"%w: no row-level security policy on %q refers to %s, so the identity this "+
+		"%w: no SELECT policy on %q refers to %s in its USING clause, so the "+
+			"identity this "+
 			"server sets is being discarded and the policies are keyed on something "+
 			"else — commonly a table keyed on session_user that pins a fixed identity "+
 			"for the service login role. The database half of this change has to land "+
