@@ -163,6 +163,43 @@ and this project adheres to
 
 ### Fixed
 
+- **Breaking:** a retrieval that could not run is now reported to the
+  caller as a failure instead of as a successful search that matched
+  nothing. When a configured table's vector search failed — for example
+  `permission denied for table docs` (SQLSTATE 42501) — the failure was
+  logged at WARN and, if any other configured table completed a lookup,
+  the request still answered `200` with `No relevant information found
+  in the available documents.` and `tokens_used` of `0`. A misconfigured
+  or unreadable corpus was therefore indistinguishable from a genuinely
+  empty one, and the only record of the real reason was the server log,
+  which the person running the query usually cannot see.
+
+  Three outcomes are now distinguished. A refused query answers `500`
+  with error code `RETRIEVAL_REFUSED`: the database received the search
+  and would not run it, which means a permissions or configuration
+  problem for whoever deployed the pipeline, and retrying will fail
+  identically. An unreachable document store answers `503` with
+  `RETRIEVAL_UNAVAILABLE`, which unlike the refusal is transient and may
+  be retried. A search that ran correctly and matched nothing is
+  unchanged: `200`, the same answer string, the same zero token count.
+  A failure of unclassified cause answers `500` with `RETRIEVAL_FAILED`.
+  Streaming requests commit to `200` before retrieval starts, so for
+  those the failure arrives as an `error` event on the stream.
+
+  The error body carries no table name, schema, SQL text or SQLSTATE;
+  the messages are derived from the failure classification alone, so
+  nothing the database put in its own message can reach the caller. Full
+  detail, including the database's message, is written to the server log
+  alongside a `failure_kind` field.
+
+  A table that fails alongside another that returns results still does
+  not fail the request, since there are documents to answer from; only a
+  request that ends with no results at all reports the failure. This
+  supersedes the earlier carve-out where any successful lookup suppressed
+  a sibling table's failure, which is the case that produced the false
+  empty result above
+  ([#49](https://github.com/pgEdge/pgedge-rag-server/issues/49)).
+
 - The BM25 keyword index is now built per request instead of being a
   single per-pipeline object mutated in place. Each request used to
   clear the shared index, refill it from its own filtered documents and

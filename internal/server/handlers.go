@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/pgEdge/pgedge-rag-server/internal/database"
 	"github.com/pgEdge/pgedge-rag-server/internal/pipeline"
 	"github.com/pgEdge/pgedge-rag-server/internal/safeerr"
 )
@@ -57,6 +58,46 @@ type ErrorDetail struct {
 // reject clearly-oversized payloads before they reach the LLM/embedding
 // call.
 const maxRequestBodyBytes = 1 << 20 // 1 MiB
+
+// retrievalErrorResponse maps a failed document retrieval onto a status
+// code and error code, reporting false for any error that is not a
+// retrieval failure (issue #49).
+//
+// The choice of status codes:
+//
+//   - A refused query — insufficient privilege, a missing table, a
+//     missing extension — is a fault in how this server was deployed,
+//     not in the request. The caller did nothing wrong and could not
+//     have phrased the request differently, so this is 500 rather than
+//     any 4xx. It is deliberately not 503: nothing about it is
+//     transient, and a client or proxy that retries a 503 would hammer a
+//     query that is going to be refused identically every time.
+//
+//   - An unreachable database is 503, the standard "this server depends
+//     on something that is currently unavailable". It tells a caller the
+//     request is worth retrying, which is exactly the difference between
+//     this case and a refusal.
+//
+//   - Anything else that stopped the search is 500, because a failure of
+//     unknown cause must still be reported as a failure.
+//
+// A search that ran and matched nothing never reaches here; it is a 200
+// with the usual "no relevant information" answer.
+func retrievalErrorResponse(err error) (status int, code string, ok bool) {
+	var retrievalErr *database.RetrievalError
+	if !errors.As(err, &retrievalErr) {
+		return 0, "", false
+	}
+
+	switch retrievalErr.Kind {
+	case database.FailureRefused:
+		return http.StatusInternalServerError, "RETRIEVAL_REFUSED", true
+	case database.FailureUnreachable:
+		return http.StatusServiceUnavailable, "RETRIEVAL_UNAVAILABLE", true
+	default:
+		return http.StatusInternalServerError, "RETRIEVAL_FAILED", true
+	}
+}
 
 // isRequestTimeout reports whether ctx's Done() channel closed because
 // its deadline was exceeded (the server's own request timeout), as
@@ -191,6 +232,15 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("pipeline execution failed",
 			"pipeline", name,
 			"error", safeerr.RedactError(err))
+		// A retrieval that could not run is reported as the failure it
+		// is, distinguishing a refused query from an unreachable
+		// database, rather than as a generic execution error (issue
+		// #49). The message still comes from safeerr, so no schema
+		// detail or SQL text reaches the caller.
+		if status, code, ok := retrievalErrorResponse(err); ok {
+			s.respondError(w, status, code, safeerr.Message(err))
+			return
+		}
 		s.respondError(w, http.StatusInternalServerError, "EXECUTION_ERROR",
 			safeerr.Message(err))
 		return
@@ -238,7 +288,11 @@ func (s *Server) handleStreamingQuery(w http.ResponseWriter, r *http.Request,
 				if err := <-errChan; err != nil {
 					// As with the non-streaming path, the raw error may
 					// carry a provider's response body and must not
-					// reach the client.
+					// reach the client. A retrieval failure gets the
+					// same client-safe wording as the non-streaming
+					// path — the status is already committed to 200
+					// here, so the SSE error event is the only place
+					// that distinction can be carried (issue #49).
 					s.logger.Error("streaming pipeline execution failed",
 						"error", safeerr.RedactError(err))
 					s.sendSSE(w, flusher, pipeline.StreamEvent{

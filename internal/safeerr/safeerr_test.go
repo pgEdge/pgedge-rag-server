@@ -14,9 +14,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"syscall"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
+
+	"github.com/pgEdge/pgedge-rag-server/internal/database"
 )
 
 // leakedKey stands in for the truncated credential a provider echoes back
@@ -173,5 +177,114 @@ func TestRedactError(t *testing.T) {
 	// The point of RedactError is that the rest survives for diagnosis.
 	if !strings.Contains(got, "Incorrect API key provided") {
 		t.Errorf("RedactError() should keep non-secret detail for logs, got %q", got)
+	}
+}
+
+// refusedRetrievalError builds the error the pipeline produces when the
+// database refuses a configured table's search: a *RetrievalError whose
+// wrapped cause carries the SQLSTATE, the table name and the SQL text.
+// Everything in that cause is for the operator's log only.
+func refusedRetrievalError() error {
+	cause := fmt.Errorf(
+		"vector search failed (SELECT id, content FROM public.docs "+
+			"ORDER BY embedding <=> $1::vector LIMIT $2): %w",
+		&pgconn.PgError{
+			Severity:   "ERROR",
+			Code:       "42501",
+			Message:    "permission denied for table docs",
+			TableName:  "docs",
+			SchemaName: "public",
+		},
+	)
+	return &database.RetrievalError{Kind: database.FailureRefused, Err: cause}
+}
+
+// TestMessage_RetrievalFailureKinds pins the three answers a caller can
+// get for a failed retrieval (issue #49). Each must be distinct: the
+// whole point is that a caller can tell a configuration problem from an
+// outage without reading the operator's log.
+func TestMessage_RetrievalFailureKinds(t *testing.T) {
+	tests := []struct {
+		name string
+		kind database.FailureKind
+		want string
+	}{
+		{"refused", database.FailureRefused, MsgRetrievalRefused},
+		{"unreachable", database.FailureUnreachable, MsgRetrievalUnreachable},
+		{"unknown", database.FailureUnknown, MsgRetrievalFailed},
+	}
+
+	seen := make(map[string]string, len(tests))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := &database.RetrievalError{
+				Kind: tt.kind,
+				Err:  errors.New("permission denied for table docs"),
+			}
+
+			got := Message(err)
+			if got != tt.want {
+				t.Errorf("Message(%v) = %q, want %q", tt.kind, got, tt.want)
+			}
+			if prev, dup := seen[got]; dup {
+				t.Errorf("kind %v shares its message with %v: %q", tt.kind, prev, got)
+			}
+			seen[got] = tt.name
+		})
+	}
+}
+
+// TestMessage_RetrievalFailureDoesNotLeakSchemaDetail is the constraint
+// from issue #49: the operator's log carries the SQLSTATE, the table
+// name and the SQL text; the caller gets none of them.
+func TestMessage_RetrievalFailureDoesNotLeakSchemaDetail(t *testing.T) {
+	err := refusedRetrievalError()
+
+	// Sanity check: the raw error really does carry the detail, so this
+	// test would be meaningless if it did not.
+	for _, detail := range []string{"docs", "42501", "SELECT", "embedding"} {
+		if !strings.Contains(err.Error(), detail) {
+			t.Fatalf("test setup is wrong: the raw error should contain %q", detail)
+		}
+	}
+
+	got := Message(err)
+
+	for _, detail := range []string{
+		"docs", "public", "42501", "SELECT", "embedding", "permission denied",
+	} {
+		if strings.Contains(got, detail) {
+			t.Errorf("Message() leaked %q to the caller: %q", detail, got)
+		}
+	}
+	if got != MsgRetrievalRefused {
+		t.Errorf("expected the refused message, got %q", got)
+	}
+}
+
+// TestMessage_RetrievalFailureOutranksTransportClassification checks the
+// ordering inside Message: a refusal that happens to wrap a network-shaped
+// error must still be reported as a refusal, not as "the provider could
+// not be reached", which would send the operator after the wrong system.
+func TestMessage_RetrievalFailureOutranksTransportClassification(t *testing.T) {
+	err := &database.RetrievalError{
+		Kind: database.FailureRefused,
+		Err:  fmt.Errorf("closing connection: %w", syscall.ECONNRESET),
+	}
+
+	if got := Message(err); got != MsgRetrievalRefused {
+		t.Errorf("Message() = %q, want %q", got, MsgRetrievalRefused)
+	}
+}
+
+// TestRedactError_KeepsRetrievalDetailForTheLog is the other half of the
+// contract: what the caller is denied, the operator must still get.
+func TestRedactError_KeepsRetrievalDetailForTheLog(t *testing.T) {
+	got := RedactError(refusedRetrievalError())
+
+	for _, detail := range []string{"refused", "docs", "42501", "permission denied"} {
+		if !strings.Contains(got, detail) {
+			t.Errorf("log text lost %q, which the operator needs: %q", detail, got)
+		}
 	}
 }

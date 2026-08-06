@@ -12,11 +12,14 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/bm25"
@@ -701,47 +704,100 @@ func TestBuildChatRequest_OmitsTemperature(t *testing.T) {
 	}
 }
 
-// TestRetrievalFailureError_AllTablesFailed is a regression test for
-// issue #25: when every configured table's search failed and none
-// produced results, retrievalFailureError must return a non-nil error so
-// callers surface an infrastructure failure instead of a false "no
-// relevant information" response.
-func TestRetrievalFailureError_AllTablesFailed(t *testing.T) {
-	err := retrievalFailureError(0, true, false)
+// TestRetrievalFailure_AllTablesFailed is a regression test for
+// issue #25: when a configured table's search failed and no results were
+// produced, errorForResultCount must return a non-nil error so callers
+// surface an infrastructure failure instead of a false "no relevant
+// information" response.
+func TestRetrievalFailure_AllTablesFailed(t *testing.T) {
+	var f retrievalFailure
+	f.observe(database.FailureUnreachable, errors.New("connection refused"))
+
+	err := f.errorForResultCount(0)
 	if err == nil {
 		t.Fatal("expected a non-nil error when every table failed and none succeeded")
 	}
 }
 
-// TestRetrievalFailureError_NoTablesConfigured verifies that having zero
-// configured tables (hadError=false, hadSuccessfulLookup=false) is treated
-// as a legitimate empty result, not a failure — there was nothing to fail.
-func TestRetrievalFailureError_NoTablesConfigured(t *testing.T) {
-	err := retrievalFailureError(0, false, false)
-	if err != nil {
+// TestRetrievalFailure_NoTablesConfigured verifies that having zero
+// configured tables (nothing observed at all) is treated as a legitimate
+// empty result, not a failure — there was nothing to fail.
+func TestRetrievalFailure_NoTablesConfigured(t *testing.T) {
+	var f retrievalFailure
+
+	if err := f.errorForResultCount(0); err != nil {
 		t.Errorf("expected no error with no tables configured, got %v", err)
 	}
 }
 
-// TestRetrievalFailureError_PartialFailureWithSuccessfulLookup verifies
-// that a partial failure (some tables errored, but at least one search
-// completed successfully) is NOT treated as a total failure, even if the
-// successful table happened to return zero matching documents — that's a
-// legitimate empty result, not an infrastructure problem.
-func TestRetrievalFailureError_PartialFailureWithSuccessfulLookup(t *testing.T) {
-	err := retrievalFailureError(0, true, true)
-	if err != nil {
-		t.Errorf("expected no error when at least one table's search succeeded, got %v", err)
+// TestRetrievalFailure_PartialFailureWithNoResults pins the behaviour
+// change made for issue #49, replacing the carve-out added in #37: a
+// table that failed is a failure even when another table searched
+// cleanly and matched nothing. A partly unreadable corpus is not an
+// empty corpus, and reporting it as one is what hid the original
+// misconfiguration.
+func TestRetrievalFailure_PartialFailureWithNoResults(t *testing.T) {
+	var f retrievalFailure
+	f.observe(database.FailureRefused, errors.New("permission denied for table docs"))
+
+	err := f.errorForResultCount(0)
+	if err == nil {
+		t.Fatal("expected an error when a table was refused and no results were found")
+	}
+
+	var retrievalErr *database.RetrievalError
+	if !errors.As(err, &retrievalErr) {
+		t.Fatalf("expected a *database.RetrievalError, got %T", err)
+	}
+	if retrievalErr.Kind != database.FailureRefused {
+		t.Errorf("expected kind %v, got %v", database.FailureRefused, retrievalErr.Kind)
 	}
 }
 
-// TestRetrievalFailureError_ResultsPresent verifies that having any
-// results at all short-circuits the failure check, regardless of the
-// error/success flags — results in hand always mean a usable response.
-func TestRetrievalFailureError_ResultsPresent(t *testing.T) {
-	err := retrievalFailureError(1, true, false)
-	if err != nil {
+// TestRetrievalFailure_ResultsPresent verifies that having any results
+// at all short-circuits the failure check: a request that retrieved
+// documents can be answered, so a failed table alongside them only
+// narrows coverage and is left to the WARN log.
+func TestRetrievalFailure_ResultsPresent(t *testing.T) {
+	var f retrievalFailure
+	f.observe(database.FailureRefused, errors.New("permission denied for table docs"))
+
+	if err := f.errorForResultCount(1); err != nil {
 		t.Errorf("expected no error when results were found, got %v", err)
+	}
+}
+
+// TestRetrievalFailure_RefusedOutranksUnreachable checks the precedence
+// rule: with tables failing in different ways, the refusal is what gets
+// reported, because it proves the database answered and leaves the
+// operator with a grant or configuration to fix.
+func TestRetrievalFailure_RefusedOutranksUnreachable(t *testing.T) {
+	refusal := errors.New("permission denied for table docs")
+
+	// Observed in both orders — precedence must not depend on which
+	// table happened to be configured first.
+	for _, name := range []string{"unreachable-first", "refused-first"} {
+		t.Run(name, func(t *testing.T) {
+			var f retrievalFailure
+			if name == "unreachable-first" {
+				f.observe(database.FailureUnreachable, errors.New("connection refused"))
+				f.observe(database.FailureRefused, refusal)
+			} else {
+				f.observe(database.FailureRefused, refusal)
+				f.observe(database.FailureUnreachable, errors.New("connection refused"))
+			}
+
+			var retrievalErr *database.RetrievalError
+			if !errors.As(f.errorForResultCount(0), &retrievalErr) {
+				t.Fatal("expected a *database.RetrievalError")
+			}
+			if retrievalErr.Kind != database.FailureRefused {
+				t.Errorf("expected kind %v, got %v", database.FailureRefused, retrievalErr.Kind)
+			}
+			if !errors.Is(retrievalErr.Err, refusal) {
+				t.Errorf("expected the refusal to be the retained error, got %v", retrievalErr.Err)
+			}
+		})
 	}
 }
 
@@ -1089,49 +1145,251 @@ func TestOrchestrator_Execute_TotalRetrievalFailureSurfacesError(t *testing.T) {
 	}
 }
 
-// TestOrchestrator_Execute_PartialRetrievalFailureFallsThroughToEmptyResult
-// is a regression test for issue #37: with two tables where the first
-// fails and the second succeeds (with zero matches), the real search()
-// loop must still fall through to the legitimate "no relevant
-// information" response, not surface an error.
-func TestOrchestrator_Execute_PartialRetrievalFailureFallsThroughToEmptyResult(t *testing.T) {
-	var calls int
+// newRetrievalFailureOrchestrator builds an orchestrator over the named
+// tables whose vector search behaves as searchFunc says, so the real
+// search() loop decides between a failure and an empty result.
+func newRetrievalFailureOrchestrator(
+	tables []string,
+	searchFunc func(table config.TableSource) ([]database.SearchResult, error),
+) *Orchestrator {
 	backend := &MockSearchBackend{
 		VectorSearchFunc: func(
 			ctx context.Context, embedding []float32, table config.TableSource,
 			topN int, filter *config.Filter, minSimilarity *float64,
 		) ([]database.SearchResult, error) {
-			calls++
-			if calls == 1 {
-				return nil, errors.New("table 1 unreachable")
-			}
-			return nil, nil // table 2 succeeds, with zero matches
+			return searchFunc(table)
 		},
 	}
-	pCfg := config.Pipeline{
-		Name: "test-pipeline",
-		Tables: []config.TableSource{
-			{Table: "docs1", TextColumn: "content", VectorColumn: "embedding"},
-			{Table: "docs2", TextColumn: "content", VectorColumn: "embedding"},
-		},
+	sources := make([]config.TableSource, 0, len(tables))
+	for _, name := range tables {
+		sources = append(sources, config.TableSource{
+			Table: name, TextColumn: "content", VectorColumn: "embedding",
+		})
 	}
-	orch := NewOrchestrator(OrchestratorConfig{
-		Pipeline:       &pCfg,
+	return NewOrchestrator(OrchestratorConfig{
+		Pipeline:       &config.Pipeline{Name: "test-pipeline", Tables: sources},
 		DBPool:         backend,
 		EmbeddingProv:  &MockEmbedder{},
 		CompletionProv: &MockCompleter{},
 		TokenBudget:    DefaultTokenBudget,
 		TopN:           DefaultTopN,
 	})
+}
+
+// permissionDeniedError is what pgx surfaces when the pipeline's
+// database role cannot read a configured table — the case from issue
+// #49. It is built as a real *pgconn.PgError so the test exercises the
+// same classification path a live database would.
+func permissionDeniedError(table string) error {
+	return fmt.Errorf("vector search failed: %w", &pgconn.PgError{
+		Severity: "ERROR",
+		Code:     "42501",
+		Message:  "permission denied for table " + table,
+	})
+}
+
+// TestOrchestrator_Execute_RefusedQuerySurfacesRefusedFailure is the
+// core case from issue #49: the database refuses the vector search, so
+// Execute must report a refusal rather than an answer. The pipeline has
+// a single table, matching the reported deployment.
+func TestOrchestrator_Execute_RefusedQuerySurfacesRefusedFailure(t *testing.T) {
+	orch := newRetrievalFailureOrchestrator(
+		[]string{"docs"},
+		func(table config.TableSource) ([]database.SearchResult, error) {
+			return nil, permissionDeniedError(table.Table)
+		},
+	)
+
+	resp, err := orch.Execute(context.Background(), QueryRequest{Query: "test query"})
+	if err == nil {
+		t.Fatalf("expected an error when the database refused the search, got %+v", resp)
+	}
+
+	var retrievalErr *database.RetrievalError
+	if !errors.As(err, &retrievalErr) {
+		t.Fatalf("expected a *database.RetrievalError, got %T: %v", err, err)
+	}
+	if retrievalErr.Kind != database.FailureRefused {
+		t.Errorf("expected kind %v, got %v", database.FailureRefused, retrievalErr.Kind)
+	}
+}
+
+// TestOrchestrator_Execute_UnreachableDatabaseSurfacesUnreachableFailure
+// covers the second of the three cases: the search never reached the
+// database, which is transient and worth retrying, so it must be
+// distinguishable from a refusal.
+func TestOrchestrator_Execute_UnreachableDatabaseSurfacesUnreachableFailure(t *testing.T) {
+	orch := newRetrievalFailureOrchestrator(
+		[]string{"docs"},
+		func(table config.TableSource) ([]database.SearchResult, error) {
+			return nil, fmt.Errorf("vector search failed: %w", syscall.ECONNREFUSED)
+		},
+	)
+
+	_, err := orch.Execute(context.Background(), QueryRequest{Query: "test query"})
+	if err == nil {
+		t.Fatal("expected an error when the database could not be reached")
+	}
+
+	var retrievalErr *database.RetrievalError
+	if !errors.As(err, &retrievalErr) {
+		t.Fatalf("expected a *database.RetrievalError, got %T: %v", err, err)
+	}
+	if retrievalErr.Kind != database.FailureUnreachable {
+		t.Errorf("expected kind %v, got %v", database.FailureUnreachable, retrievalErr.Kind)
+	}
+}
+
+// TestOrchestrator_Execute_CleanSearchWithNoMatchesIsNotAFailure is the
+// third case, and the one that must not change: every configured table
+// searched successfully and none matched, so the caller still gets the
+// existing "no relevant information" answer with zero tokens used.
+// Callers depend on this response.
+func TestOrchestrator_Execute_CleanSearchWithNoMatchesIsNotAFailure(t *testing.T) {
+	orch := newRetrievalFailureOrchestrator(
+		[]string{"docs1", "docs2"},
+		func(table config.TableSource) ([]database.SearchResult, error) {
+			return nil, nil
+		},
+	)
 
 	resp, err := orch.Execute(context.Background(), QueryRequest{Query: "test query"})
 	if err != nil {
-		t.Fatalf("expected no error when at least one table's search succeeded, got %v", err)
+		t.Fatalf("expected no error when every table searched cleanly, got %v", err)
 	}
 
 	expected := "No relevant information found in the available documents."
 	if resp.Answer != expected {
 		t.Errorf("expected answer %q, got %q", expected, resp.Answer)
+	}
+	if resp.TokensUsed != 0 {
+		t.Errorf("expected tokens_used 0, got %d", resp.TokensUsed)
+	}
+}
+
+// TestOrchestrator_Execute_RefusedTableWithCleanEmptyTableStillFails
+// pins the behaviour change for issue #49, superseding the #37
+// carve-out: with one table refused and another searching cleanly but
+// matching nothing, the caller used to be told the corpus was empty.
+// Half an unreadable corpus is not an empty one.
+func TestOrchestrator_Execute_RefusedTableWithCleanEmptyTableStillFails(t *testing.T) {
+	orch := newRetrievalFailureOrchestrator(
+		[]string{"docs1", "docs2"},
+		func(table config.TableSource) ([]database.SearchResult, error) {
+			if table.Table == "docs1" {
+				return nil, permissionDeniedError(table.Table)
+			}
+			return nil, nil // docs2 searches cleanly, with zero matches
+		},
+	)
+
+	resp, err := orch.Execute(context.Background(), QueryRequest{Query: "test query"})
+	if err == nil {
+		t.Fatalf("expected an error when a configured table was refused, got %+v", resp)
+	}
+
+	var retrievalErr *database.RetrievalError
+	if !errors.As(err, &retrievalErr) {
+		t.Fatalf("expected a *database.RetrievalError, got %T: %v", err, err)
+	}
+	if retrievalErr.Kind != database.FailureRefused {
+		t.Errorf("expected kind %v, got %v", database.FailureRefused, retrievalErr.Kind)
+	}
+}
+
+// TestOrchestrator_Execute_RefusedTableWithResultsStillAnswers keeps the
+// other half of the partial-failure rule: results in hand mean the
+// request can be answered, so a failed table alongside them narrows
+// coverage and is left to the operator's log rather than failing a
+// request that has documents to ground on.
+func TestOrchestrator_Execute_RefusedTableWithResultsStillAnswers(t *testing.T) {
+	orch := newRetrievalFailureOrchestrator(
+		[]string{"docs1", "docs2"},
+		func(table config.TableSource) ([]database.SearchResult, error) {
+			if table.Table == "docs1" {
+				return nil, permissionDeniedError(table.Table)
+			}
+			return []database.SearchResult{
+				{ID: "doc-1", Content: "Refunds are issued within 14 days.", Score: 0.9},
+			}, nil
+		},
+	)
+
+	resp, err := orch.Execute(context.Background(), QueryRequest{Query: "test query"})
+	if err != nil {
+		t.Fatalf("expected no error when one table returned results, got %v", err)
+	}
+	if resp.Answer == "" {
+		t.Error("expected an answer built from the readable table's results")
+	}
+}
+
+// TestOrchestrator_ExecuteStream_RefusedQuerySurfacesRefusedFailure
+// covers the streaming path, which commits to HTTP 200 before retrieval
+// starts: the classified failure has to arrive on the error channel, or
+// a streaming caller is left with the same false empty result the
+// non-streaming caller used to get.
+func TestOrchestrator_ExecuteStream_RefusedQuerySurfacesRefusedFailure(t *testing.T) {
+	orch := newRetrievalFailureOrchestrator(
+		[]string{"docs"},
+		func(table config.TableSource) ([]database.SearchResult, error) {
+			return nil, permissionDeniedError(table.Table)
+		},
+	)
+
+	chunkChan, errChan := orch.ExecuteStream(context.Background(), QueryRequest{
+		Query:  "test query",
+		Stream: true,
+	})
+
+	for chunk := range chunkChan {
+		t.Errorf("expected no chunks when the search was refused, got %+v", chunk)
+	}
+
+	err := <-errChan
+	if err == nil {
+		t.Fatal("expected an error on the error channel when the search was refused")
+	}
+
+	var retrievalErr *database.RetrievalError
+	if !errors.As(err, &retrievalErr) {
+		t.Fatalf("expected a *database.RetrievalError, got %T: %v", err, err)
+	}
+	if retrievalErr.Kind != database.FailureRefused {
+		t.Errorf("expected kind %v, got %v", database.FailureRefused, retrievalErr.Kind)
+	}
+}
+
+// TestOrchestrator_Execute_NoDatabasePoolIsRefused checks the other
+// deployment fault that stops a search dead: a pipeline that reaches
+// retrieval with no pool at all. Like a missing grant it is
+// deterministic and fixed by whoever deployed the pipeline, so it is
+// classified the same way.
+func TestOrchestrator_Execute_NoDatabasePoolIsRefused(t *testing.T) {
+	orch := NewOrchestrator(OrchestratorConfig{
+		Pipeline: &config.Pipeline{
+			Name: "test-pipeline",
+			Tables: []config.TableSource{
+				{Table: "docs", TextColumn: "content", VectorColumn: "embedding"},
+			},
+		},
+		EmbeddingProv:  &MockEmbedder{},
+		CompletionProv: &MockCompleter{},
+		TokenBudget:    DefaultTokenBudget,
+		TopN:           DefaultTopN,
+	})
+
+	_, err := orch.Execute(context.Background(), QueryRequest{Query: "test query"})
+	if err == nil {
+		t.Fatal("expected an error when the pipeline has no database pool")
+	}
+
+	var retrievalErr *database.RetrievalError
+	if !errors.As(err, &retrievalErr) {
+		t.Fatalf("expected a *database.RetrievalError, got %T: %v", err, err)
+	}
+	if retrievalErr.Kind != database.FailureRefused {
+		t.Errorf("expected kind %v, got %v", database.FailureRefused, retrievalErr.Kind)
 	}
 }
 
