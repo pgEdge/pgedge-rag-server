@@ -441,8 +441,52 @@ data: {"type": "done"}
 | 404         | `PIPELINE_NOT_FOUND` | Pipeline does not exist        |
 | 405         | `METHOD_NOT_ALLOWED` | Wrong HTTP method              |
 | 413         | `REQUEST_TOO_LARGE`  | Request body exceeds the [size limit](#request-size-limit) |
+| 500         | `RETRIEVAL_REFUSED`  | The document search could not be run; see [Failed Retrieval](#failed-retrieval) |
+| 500         | `RETRIEVAL_FAILED`   | The document search failed for an unclassified reason |
 | 500         | `EXECUTION_ERROR`    | Pipeline execution failed      |
 | 500         | `INTERNAL_ERROR`     | Unexpected server error        |
+| 503         | `RETRIEVAL_UNAVAILABLE` | The document store could not be reached |
+| 504         | `REQUEST_TIMEOUT`    | The request took too long to process |
+
+#### Failed Retrieval
+
+A query whose document search does not complete is reported as a
+failure, never as a successful search that matched nothing. Three
+outcomes are distinguished:
+
+- **The search was refused** (`500 RETRIEVAL_REFUSED`). The database
+  received the query and would not run it — insufficient privilege on a
+  configured table, a missing table or column, or a missing `pgvector`
+  extension. This is a server-side configuration or permissions problem
+  and is fixed by whoever deployed the pipeline. Nothing about it is
+  transient, so retrying will fail identically.
+
+- **The document store could not be reached** (`503
+  RETRIEVAL_UNAVAILABLE`). No search ran. Unlike the refusal, this is
+  transient and the request may be retried.
+
+- **The search ran and matched nothing** (`200`). This is not a failure.
+  The response is the ordinary query response, with `answer` set to
+  `No relevant information found in the available documents.` and
+  `tokens_used` of `0`.
+
+A table that fails while another table returns results does not fail the
+request: the answer is built from the documents that were retrieved, and
+the narrowed coverage is logged by the server. A failure only becomes the
+response when the request ends with no results at all.
+
+On a hybrid pipeline, a table counts as failed when either arm of its
+search fails. If the keyword arm cannot read the corpus, no keyword
+matching ran for that table, so a vector arm that also matched nothing
+has not established that the corpus holds nothing relevant.
+
+As with every other error, the message carries no table name, schema,
+SQL text or SQLSTATE — see below. The full detail, including the
+database's own message, is written to the server log.
+
+For streaming requests the HTTP status is committed to `200` before
+retrieval starts, so a retrieval failure arrives as an `error` event on
+the stream, carrying the same message, followed by `done`.
 
 #### Error Detail Is Deliberately Coarse
 
@@ -458,8 +502,16 @@ and is drawn from a fixed set:
 - `the provider could not be reached`
 - `the request took too long to process`
 - `an internal error occurred`
+- `the document search could not be run because of a server-side
+  configuration or permissions problem; no documents were searched`
+- `the document store could not be reached; no documents were searched`
+- `the document search failed; no documents were searched`
 
-This is a security boundary rather than an oversight. The underlying
+This is a security boundary rather than an oversight. For a failed
+retrieval the underlying error carries the SQL text, the table and schema
+names and the database's own message, which describe the deployment's
+internals to an unauthenticated caller. For an upstream provider failure
+the underlying
 error wraps the LLM provider's own response body, and providers
 characteristically echo a truncated form of the submitted API key in that
 body when they reject a credential, so relaying it would disclose part of

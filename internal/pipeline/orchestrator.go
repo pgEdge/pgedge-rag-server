@@ -237,18 +237,58 @@ func (o *Orchestrator) ExecuteStream(
 	return chunkChan, errChan
 }
 
-// retrievalFailureError distinguishes "search ran cleanly and found
-// nothing" from "the backend is broken" (issue #25). It returns a non-nil
-// error only when every configured table's search failed and none
-// produced results — a partial failure, where at least one table
-// completed a lookup (hadSuccessfulLookup), still falls through to the
-// normal "no relevant information" response, since a search that ran
-// successfully and found nothing is a legitimate empty result.
-func retrievalFailureError(resultCount int, hadError, hadSuccessfulLookup bool) error {
-	if resultCount == 0 && hadError && !hadSuccessfulLookup {
-		return errors.New("retrieval failed for all configured tables")
+// errNoSearchBackend is the failure recorded when a pipeline reaches
+// the search stage with no database pool. Nothing can be searched, so
+// it is a deployment fault of exactly the same kind as a missing grant:
+// deterministic, and fixed by whoever configured the pipeline.
+var errNoSearchBackend = errors.New("no database pool configured for pipeline")
+
+// retrievalFailure accumulates the failures seen while searching the
+// configured tables, keeping the one whose kind has the highest
+// precedence (see database.FailureKind) along with its error for the
+// operator's log.
+type retrievalFailure struct {
+	kind database.FailureKind
+	err  error
+}
+
+// observe records a failed table lookup. The retained error is the one
+// matching the winning kind, so the log line accompanying a "refused"
+// response describes an actual refusal rather than some other table's
+// unrelated timeout.
+func (f *retrievalFailure) observe(kind database.FailureKind, err error) {
+	if err == nil {
+		return
 	}
-	return nil
+	if f.err == nil || kind > f.kind {
+		f.kind = kind
+		f.err = err
+	}
+}
+
+// errorForResultCount decides whether the search as a whole failed.
+//
+// It distinguishes "the search ran and found nothing" from "the search
+// did not run" (issues #25, #49). Any failed table with no results to
+// show for the request is a failure: a corpus that is partly unreadable
+// is not an empty corpus, and reporting it as one hides a
+// misconfiguration behind an answer that looks legitimate. This
+// supersedes the partial-failure carve-out from #37, which let a
+// refused table pass as an empty result whenever some other table
+// happened to search cleanly.
+//
+// Results in hand still win. A request that retrieved documents can be
+// answered, so a table that failed alongside them only narrows
+// coverage; that is logged at WARN and does not fail the request.
+func (f retrievalFailure) errorForResultCount(resultCount int) error {
+	if resultCount > 0 || f.err == nil {
+		return nil
+	}
+	kind := f.kind
+	if kind == database.FailureNone {
+		kind = database.FailureUnknown
+	}
+	return &database.RetrievalError{Kind: kind, Err: f.err}
 }
 
 // bm25ToSearchResults converts BM25 results into database.SearchResult.
@@ -287,13 +327,15 @@ func bm25ToSearchResults(
 // and returns deduplicated, topN-capped results. Extracted so Execute
 // and ExecuteStream share the same retrieval path.
 //
-// If every configured table's search fails and none produce results, an
-// error is returned instead of an empty slice, so callers can surface an
-// infrastructure failure rather than a false "no relevant information"
-// response — see issue #25. For streaming callers this arrives as an
-// "error" SSE event rather than a different HTTP status code, since the
-// response status is already committed to 200 by the time streaming
-// starts.
+// If any configured table's search fails and the request ends up with
+// no results, a *database.RetrievalError is returned instead of an empty
+// slice, so callers can surface an infrastructure failure rather than a
+// false "no relevant information" response — see issues #25 and #49. The
+// error carries a FailureKind so the API layer can tell a refused query
+// apart from an unreachable database. For streaming callers this arrives
+// as an "error" SSE event rather than a different HTTP status code,
+// since the response status is already committed to 200 by the time
+// streaming starts.
 func (o *Orchestrator) search(
 	ctx context.Context,
 	req QueryRequest,
@@ -301,7 +343,7 @@ func (o *Orchestrator) search(
 	topN int,
 ) ([]database.SearchResult, error) {
 	var allResults []database.SearchResult
-	var hadError, hadSuccessfulLookup bool
+	var failure retrievalFailure
 
 	vectorWeight := 0.5
 	if o.cfg.Search.VectorWeight != nil {
@@ -324,10 +366,10 @@ func (o *Orchestrator) search(
 			o.logger.Warn("no database pool configured", "table", table.Table)
 			// A missing pool means this table cannot be searched at all,
 			// which is an infrastructure failure rather than a legitimate
-			// empty result — mark it so a total absence of a usable pool
+			// empty result — mark it so an absence of a usable pool
 			// surfaces as an error instead of a false "no relevant
 			// information" response (issue #25).
-			hadError = true
+			failure.observe(database.FailureRefused, errNoSearchBackend)
 			continue
 		}
 
@@ -336,11 +378,15 @@ func (o *Orchestrator) search(
 			o.cfg.Search.MinSimilarity,
 		)
 		if err != nil {
-			o.logger.Warn("vector search failed", "table", table.Table, "error", err)
-			hadError = true
+			// The full error, including SQLSTATE and table name, goes to
+			// the operator's log; only the kind travels any further
+			// towards the caller (issue #49).
+			kind := database.ClassifyFailure(err)
+			o.logger.Warn("vector search failed",
+				"table", table.Table, "failure_kind", kind.String(), "error", err)
+			failure.observe(kind, err)
 			continue
 		}
-		hadSuccessfulLookup = true
 
 		if !useHybrid {
 			o.logger.Debug("using vector-only search", "table", table.Table)
@@ -350,9 +396,22 @@ func (o *Orchestrator) search(
 
 		docs, err := o.dbPool.FetchDocuments(ctx, table, req.Filter, maxBM25Docs)
 		if err != nil {
-			o.logger.Warn("failed to fetch documents for BM25",
-				"table", table.Table, "error", err)
-			hadError = true
+			// This counts as a failed table even though the vector arm
+			// succeeded, because on a hybrid pipeline the keyword arm is
+			// half of the search: when it cannot read the corpus, no
+			// keyword matching happened at all for this request. If the
+			// vector arm also matched nothing, the request has not
+			// established that the corpus holds nothing relevant, only
+			// that half a search found nothing — which is the very
+			// ambiguity issue #49 is about. It is only decisive when the
+			// request ends with no results whatsoever; a vector hit here
+			// still answers, with the narrowed coverage left to this log
+			// line, as with a corpus truncated by bm25_max_documents.
+			kind := database.ClassifyFailure(err)
+			o.logger.Warn("failed to fetch documents for BM25; "+
+				"no keyword matching ran for this table",
+				"table", table.Table, "failure_kind", kind.String(), "error", err)
+			failure.observe(kind, err)
 			allResults = append(allResults, vectorResults...)
 			continue
 		}
@@ -388,7 +447,7 @@ func (o *Orchestrator) search(
 		allResults = append(allResults, hybridResults...)
 	}
 
-	if err := retrievalFailureError(len(allResults), hadError, hadSuccessfulLookup); err != nil {
+	if err := failure.errorForResultCount(len(allResults)); err != nil {
 		return nil, err
 	}
 

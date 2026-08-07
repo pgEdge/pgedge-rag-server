@@ -282,7 +282,35 @@ func BuildOpenAPISpec() OpenAPISpec {
 							},
 						},
 						"500": {
-							Description: "Server error",
+							Description: "Server error. error.code is RETRIEVAL_REFUSED when the " +
+								"document search could not be run because of a server-side " +
+								"configuration or permissions problem, RETRIEVAL_FAILED when the " +
+								"search failed for an unclassified reason, or EXECUTION_ERROR for " +
+								"any other failure. A retrieval failure is never reported as an " +
+								"empty result set",
+							Content: map[string]OpenAPIMediaType{
+								"application/json": {
+									Schema: OpenAPISchema{
+										Ref: "#/components/schemas/ErrorResponse",
+									},
+								},
+							},
+						},
+						"503": {
+							Description: "The document store could not be reached, so no search " +
+								"ran (error.code RETRIEVAL_UNAVAILABLE). Unlike a 500 this is " +
+								"transient and the request may be retried",
+							Content: map[string]OpenAPIMediaType{
+								"application/json": {
+									Schema: OpenAPISchema{
+										Ref: "#/components/schemas/ErrorResponse",
+									},
+								},
+							},
+						},
+						"504": {
+							Description: "The request took too long to process " +
+								"(error.code REQUEST_TIMEOUT)",
 							Content: map[string]OpenAPIMediaType{
 								"application/json": {
 									Schema: OpenAPISchema{

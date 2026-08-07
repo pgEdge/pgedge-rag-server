@@ -20,9 +20,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
+	"github.com/pgEdge/pgedge-rag-server/internal/database"
 	"github.com/pgEdge/pgedge-rag-server/internal/pipeline"
 	"github.com/pgEdge/pgedge-rag-server/internal/safeerr"
 )
@@ -935,5 +937,239 @@ func TestPipelineEndpoint_StreamingProviderErrorDoesNotLeakCredential(t *testing
 	}
 	if !strings.Contains(raw, safeerr.MsgAuthentication) {
 		t.Errorf("expected the classified message in the SSE error event:\n%s", raw)
+	}
+}
+
+// retrievalFailure builds the error the pipeline returns when a search
+// could not be run, wrapped the way it reaches the handler. The cause
+// carries the SQLSTATE, schema, table and SQL text that must stay in the
+// operator's log — see issue #49.
+func retrievalFailure(kind database.FailureKind) error {
+	cause := fmt.Errorf(
+		"vector search failed (SELECT id, content FROM public.docs "+
+			"ORDER BY embedding <=> $1::vector LIMIT $2): %w",
+		&pgconn.PgError{
+			Severity:   "ERROR",
+			Code:       "42501",
+			Message:    "permission denied for table docs",
+			TableName:  "docs",
+			SchemaName: "public",
+		},
+	)
+	return &database.RetrievalError{Kind: kind, Err: cause}
+}
+
+// serverWithRetrievalFailure returns a server whose only pipeline fails
+// retrieval with the given kind, on both the streaming and non-streaming
+// paths.
+func serverWithRetrievalFailure(kind database.FailureKind) *Server {
+	pm := newMockPipelineManager()
+	pm.pipelines["test-pipeline"].executor = &mockQueryExecutor{
+		ExecuteWithOptionsFunc: func(
+			ctx context.Context, req pipeline.QueryRequest,
+		) (*pipeline.QueryResponse, error) {
+			return nil, retrievalFailure(kind)
+		},
+		ExecuteStreamWithOptionsFunc: func(
+			ctx context.Context, req pipeline.QueryRequest,
+		) (<-chan pipeline.StreamChunk, <-chan error) {
+			chunkChan := make(chan pipeline.StreamChunk)
+			errChan := make(chan error, 1)
+			errChan <- retrievalFailure(kind)
+			close(chunkChan)
+			return chunkChan, errChan
+		},
+	}
+	return New(testConfig(), pm, nil)
+}
+
+func postQuery(t *testing.T, srv *Server, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodPost, "/v1/pipelines/test-pipeline",
+		bytes.NewBufferString(body))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, r)
+	return w
+}
+
+// TestPipelineEndpoint_RetrievalFailureStatusCodes pins the status code
+// and error code for each way a retrieval can fail (issue #49).
+//
+// A refused query is 500: the caller phrased nothing wrongly and cannot
+// fix it, and nothing about it is transient, so it must not be a 4xx and
+// must not be the retryable 503. An unreachable database is 503, which
+// is what tells a caller the request is worth retrying — the one thing
+// that distinguishes it from a refusal in practice.
+func TestPipelineEndpoint_RetrievalFailureStatusCodes(t *testing.T) {
+	tests := []struct {
+		name       string
+		kind       database.FailureKind
+		wantStatus int
+		wantCode   string
+		wantMsg    string
+	}{
+		{
+			"refused", database.FailureRefused,
+			http.StatusInternalServerError, "RETRIEVAL_REFUSED",
+			safeerr.MsgRetrievalRefused,
+		},
+		{
+			"unreachable", database.FailureUnreachable,
+			http.StatusServiceUnavailable, "RETRIEVAL_UNAVAILABLE",
+			safeerr.MsgRetrievalUnreachable,
+		},
+		{
+			"unknown", database.FailureUnknown,
+			http.StatusInternalServerError, "RETRIEVAL_FAILED",
+			safeerr.MsgRetrievalFailed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := postQuery(t, serverWithRetrievalFailure(tt.kind), `{"query": "test query"}`)
+
+			if w.Code != tt.wantStatus {
+				t.Errorf("expected status %d, got %d (body: %s)",
+					tt.wantStatus, w.Code, w.Body.String())
+			}
+
+			var resp ErrorResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if resp.Error.Code != tt.wantCode {
+				t.Errorf("expected error code %q, got %q", tt.wantCode, resp.Error.Code)
+			}
+			if resp.Error.Message != tt.wantMsg {
+				t.Errorf("expected message %q, got %q", tt.wantMsg, resp.Error.Message)
+			}
+		})
+	}
+}
+
+// TestPipelineEndpoint_RetrievalFailureDoesNotLeakSchemaDetail is the
+// end-to-end form of the constraint in issue #49: the response body may
+// not carry the table name, the schema, the SQLSTATE, the SQL text or
+// the database's own message, however useful they would be to whoever
+// deployed the pipeline. They belong in the log.
+func TestPipelineEndpoint_RetrievalFailureDoesNotLeakSchemaDetail(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		name := "non-streaming"
+		body := `{"query": "test query"}`
+		if streaming {
+			name = "streaming"
+			body = `{"query": "test query", "stream": true}`
+		}
+
+		t.Run(name, func(t *testing.T) {
+			w := postQuery(t, serverWithRetrievalFailure(database.FailureRefused), body)
+
+			raw := w.Body.String()
+			for _, detail := range []string{
+				"docs", "public", "42501", "SELECT", "embedding",
+				"permission denied", "vector",
+			} {
+				if strings.Contains(raw, detail) {
+					t.Errorf("response leaked %q:\n%s", detail, raw)
+				}
+			}
+			if !strings.Contains(raw, safeerr.MsgRetrievalRefused) {
+				t.Errorf("expected the classified refusal message:\n%s", raw)
+			}
+		})
+	}
+}
+
+// TestPipelineEndpoint_StreamingRetrievalFailureIsReportedAsAnError
+// covers the SSE path. Its status is committed to 200 before retrieval
+// starts, so the failure can only be carried in the error event — and
+// the stream must not instead deliver an answer chunk that reads like an
+// empty corpus.
+func TestPipelineEndpoint_StreamingRetrievalFailureIsReportedAsAnError(t *testing.T) {
+	srv := serverWithRetrievalFailure(database.FailureUnreachable)
+
+	w := postQuery(t, srv, `{"query": "test query", "stream": true}`)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected the streaming status to stay %d, got %d",
+			http.StatusOK, w.Code)
+	}
+
+	raw := w.Body.String()
+	if strings.Contains(raw, "No relevant information found") {
+		t.Errorf("a failed retrieval was streamed as an empty result:\n%s", raw)
+	}
+	if !strings.Contains(raw, `"type":"error"`) {
+		t.Errorf("expected an SSE error event:\n%s", raw)
+	}
+	if !strings.Contains(raw, safeerr.MsgRetrievalUnreachable) {
+		t.Errorf("expected the classified unreachable message:\n%s", raw)
+	}
+}
+
+// TestPipelineEndpoint_EmptyCorpusStillAnswers200 is the case that must
+// not change: a search that ran correctly and matched nothing keeps its
+// existing 200, answer string and zero token count, because callers
+// depend on it.
+func TestPipelineEndpoint_EmptyCorpusStillAnswers200(t *testing.T) {
+	const emptyAnswer = "No relevant information found in the available documents."
+
+	pm := newMockPipelineManager()
+	pm.pipelines["test-pipeline"].executor = &mockQueryExecutor{
+		ExecuteWithOptionsFunc: func(
+			ctx context.Context, req pipeline.QueryRequest,
+		) (*pipeline.QueryResponse, error) {
+			return &pipeline.QueryResponse{Answer: emptyAnswer, TokensUsed: 0}, nil
+		},
+	}
+	srv := New(testConfig(), pm, nil)
+
+	w := postQuery(t, srv, `{"query": "test query"}`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (body: %s)",
+			http.StatusOK, w.Code, w.Body.String())
+	}
+
+	var resp pipeline.QueryResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Answer != emptyAnswer {
+		t.Errorf("expected answer %q, got %q", emptyAnswer, resp.Answer)
+	}
+	if resp.TokensUsed != 0 {
+		t.Errorf("expected tokens_used 0, got %d", resp.TokensUsed)
+	}
+}
+
+// TestPipelineEndpoint_NonRetrievalErrorKeepsExecutionError guards the
+// boundary: the retrieval mapping must not swallow every other failure.
+// A provider error is still EXECUTION_ERROR at 500.
+func TestPipelineEndpoint_NonRetrievalErrorKeepsExecutionError(t *testing.T) {
+	pm := newMockPipelineManager()
+	pm.pipelines["test-pipeline"].executor = &mockQueryExecutor{
+		ExecuteWithOptionsFunc: func(
+			ctx context.Context, req pipeline.QueryRequest,
+		) (*pipeline.QueryResponse, error) {
+			return nil, providerAuthFailure()
+		},
+	}
+	srv := New(testConfig(), pm, nil)
+
+	w := postQuery(t, srv, `{"query": "test query"}`)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+
+	var resp ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Error.Code != "EXECUTION_ERROR" {
+		t.Errorf("expected error code EXECUTION_ERROR, got %q", resp.Error.Code)
 	}
 }

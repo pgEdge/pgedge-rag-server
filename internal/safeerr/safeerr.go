@@ -40,6 +40,8 @@ import (
 	"syscall"
 
 	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
+
+	"github.com/pgEdge/pgedge-rag-server/internal/database"
 )
 
 // Client-safe descriptions. These are deliberately coarse: they tell a
@@ -56,6 +58,24 @@ const (
 	MsgInternal       = "an internal error occurred"
 )
 
+// Client-safe descriptions of a failed document retrieval (issue #49).
+//
+// Each says which of three things happened — the search was refused, the
+// document store could not be reached, or something else went wrong —
+// and each states that no search completed, so a caller can never
+// mistake one of them for an empty corpus. None of them names a table, a
+// column, a SQLSTATE or any part of the query: the wording is derived
+// from database.FailureKind alone, so nothing the database chose to put
+// in its message can reach the caller. The detail is in the operator's
+// log.
+const (
+	MsgRetrievalRefused = "the document search could not be run because of a " +
+		"server-side configuration or permissions problem; no documents were searched"
+	MsgRetrievalUnreachable = "the document store could not be reached; " +
+		"no documents were searched"
+	MsgRetrievalFailed = "the document search failed; no documents were searched"
+)
+
 // Message returns a description of err that is safe to send to an API
 // client.
 //
@@ -69,6 +89,23 @@ const (
 func Message(err error) string {
 	if err == nil {
 		return ""
+	}
+
+	// A retrieval failure is classified before it gets here, so its
+	// message is chosen from the kind rather than from anything the
+	// database said. It is checked first because such an error can wrap
+	// a pgconn error that a later clause might otherwise claim: a
+	// refused query on a dropped connection is still a refusal.
+	var retrievalErr *database.RetrievalError
+	if errors.As(err, &retrievalErr) {
+		switch retrievalErr.Kind {
+		case database.FailureRefused:
+			return MsgRetrievalRefused
+		case database.FailureUnreachable:
+			return MsgRetrievalUnreachable
+		default:
+			return MsgRetrievalFailed
+		}
 	}
 
 	switch {

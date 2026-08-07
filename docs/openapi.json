@@ -156,7 +156,27 @@
             }
           },
           "500": {
-            "description": "Server error",
+            "description": "Server error. error.code is RETRIEVAL_REFUSED when the document search could not be run because of a server-side configuration or permissions problem, RETRIEVAL_FAILED when the search failed for an unclassified reason, or EXECUTION_ERROR for any other failure. A retrieval failure is never reported as an empty result set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The document store could not be reached, so no search ran (error.code RETRIEVAL_UNAVAILABLE). Unlike a 500 this is transient and the request may be retried",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The request took too long to process (error.code REQUEST_TIMEOUT)",
             "content": {
               "application/json": {
                 "schema": {
