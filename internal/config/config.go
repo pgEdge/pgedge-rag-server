@@ -49,10 +49,11 @@ func (d *Duration) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 // Config is the root configuration structure for the server.
 type Config struct {
-	Server    ServerConfig  `yaml:"server"`
-	APIKeys   APIKeysConfig `yaml:"api_keys"`
-	Defaults  Defaults      `yaml:"defaults"`
-	Pipelines []Pipeline    `yaml:"pipelines"`
+	Server    ServerConfig   `yaml:"server"`
+	Identity  IdentityConfig `yaml:"identity"`
+	APIKeys   APIKeysConfig  `yaml:"api_keys"`
+	Defaults  Defaults       `yaml:"defaults"`
+	Pipelines []Pipeline     `yaml:"pipelines"`
 }
 
 // APIKeysConfig contains paths to files containing API keys for LLM providers.
@@ -64,6 +65,213 @@ type APIKeysConfig struct {
 	OpenAI    string `yaml:"openai"`    // Path to file containing OpenAI API key
 	Voyage    string `yaml:"voyage"`    // Path to file containing Voyage API key
 	Gemini    string `yaml:"gemini"`    // Path to file containing Gemini API key
+}
+
+// Identity defaults. These are the values used when the corresponding
+// field is left unset and identity is enabled.
+const (
+	// DefaultClaimsHeader is the request header whose value is the
+	// caller's verified claim set, as a JSON object.
+	DefaultClaimsHeader = "X-Forwarded-Claims"
+
+	// DefaultSubjectHeader is the request header carrying a bare subject
+	// string, used only when the claims header is absent.
+	DefaultSubjectHeader = "X-Forwarded-User"
+
+	// DefaultClaimsSetting is the PostgreSQL run-time parameter the
+	// claim set is written to for the duration of a query. This is the
+	// name PostgREST uses, so policies already written for PostgREST
+	// work unchanged.
+	DefaultClaimsSetting = "request.jwt.claims"
+
+	// DefaultSubjectClaim is the claim read out of the claim set to
+	// label the request in logs. It is not used for authorisation — the
+	// database decides that — only for operator visibility.
+	DefaultSubjectClaim = "sub"
+
+	// DefaultRoleClaim is the claim naming a PostgreSQL role to assume
+	// for the query. A role is only ever assumed if it also appears in
+	// allowed_roles, so this defaulting cannot by itself switch roles.
+	DefaultRoleClaim = "role"
+)
+
+// Enforcement check modes for identity.enforcement_check.
+const (
+	EnforcementCheckError = "error"
+	EnforcementCheckWarn  = "warn"
+	EnforcementCheckOff   = "off"
+)
+
+// IdentityConfig controls whether retrieval runs as the caller rather
+// than as the service's own database role.
+//
+// # The trust boundary
+//
+// The claims this server acts on arrive in ordinary HTTP request
+// headers. This server does not verify them: it does not check a
+// signature, does not fetch a JWKS, and does not validate an issuer,
+// audience or expiry. It treats the configured headers as already
+// verified, and applies them to the database session.
+//
+// That means the security of everything below depends on one
+// assumption, which is now load-bearing:
+//
+//	Only a trusted component may set the claims and subject headers on
+//	a request that reaches this server. That component must strip any
+//	inbound copy of those headers from client input and re-set them
+//	from a credential it has itself verified.
+//
+// In practice that component is an ingress proxy, API gateway or
+// service mesh sidecar. If a caller can reach this server's listening
+// port directly, that caller can assert any identity it likes, and
+// row-level security will faithfully enforce the identity it was
+// handed. Bind the server to a private interface, and set
+// trusted_proxies so the peer address is checked as well.
+//
+// See docs/identity.md for the full deployment contract.
+type IdentityConfig struct {
+	// Enabled turns per-request identity on. When false (the default)
+	// the server behaves exactly as it did before this option existed:
+	// every query runs as the pipeline's configured database role, and
+	// no identity is read from or required of a request.
+	//
+	// When true, a request that carries no identity is refused. There is
+	// deliberately no fallback to the service's own role — falling back
+	// would reintroduce the shared-role bypass invisibly, which is the
+	// defect this option exists to remove.
+	Enabled bool `yaml:"enabled"`
+
+	// ClaimsHeader names the request header carrying the caller's
+	// verified claims as a JSON object, e.g.
+	// {"sub":"alice","role":"rag_tenant"}. Defaults to
+	// DefaultClaimsHeader. Configurable because the header a given
+	// ingress emits is a property of that deployment, not of this
+	// server.
+	ClaimsHeader string `yaml:"claims_header"`
+
+	// SubjectHeader names a fallback header carrying a bare subject
+	// string, for proxies that can assert who the caller is but cannot
+	// emit a JSON claim set. Its value is wrapped as
+	// {"<subject_claim>":"<value>"}. Only consulted when ClaimsHeader is
+	// absent or empty. Defaults to DefaultSubjectHeader. Set to "-" to
+	// disable the fallback and require a full claim set.
+	SubjectHeader string `yaml:"subject_header"`
+
+	// ClaimsSetting is the PostgreSQL run-time parameter the claim set
+	// is written to, with SET LOCAL semantics, for the duration of each
+	// query. Defaults to DefaultClaimsSetting.
+	ClaimsSetting string `yaml:"claims_setting"`
+
+	// SubjectClaim names the claim used to label requests in the log,
+	// and the key used to wrap SubjectHeader. Defaults to
+	// DefaultSubjectClaim.
+	SubjectClaim string `yaml:"subject_claim"`
+
+	// RoleClaim names the claim that may request a PostgreSQL role for
+	// the query, in the manner of PostgREST. Defaults to
+	// DefaultRoleClaim. Set to "-" to ignore role claims entirely.
+	RoleClaim string `yaml:"role_claim"`
+
+	// AllowedRoles is the set of PostgreSQL roles a request may be
+	// switched to. An empty list (the default) disables role switching
+	// completely: a request whose claims name a role is refused rather
+	// than served with the role ignored, so a deployment cannot
+	// half-configure this and believe role switching is in effect.
+	//
+	// The allowlist lives here rather than being left to the proxy on
+	// purpose. The proxy decides who the caller is; this bounds what
+	// that decision can reach in the database, so a compromised or
+	// misconfigured proxy cannot name postgres and get it.
+	AllowedRoles []string `yaml:"allowed_roles"`
+
+	// TrustedProxies is a list of CIDR blocks. When non-empty, a
+	// request whose immediate peer address falls outside every block is
+	// refused before its headers are read at all.
+	//
+	// This checks the TCP peer, not X-Forwarded-For, because the peer
+	// address is the only part of a request a client cannot choose. It
+	// is a second line behind network policy, not a replacement for it.
+	// Empty (the default) disables the check and logs a warning at
+	// startup.
+	TrustedProxies []string `yaml:"trusted_proxies"`
+
+	// EnforcementCheck controls the startup preflight that verifies the
+	// database will actually enforce the identity this server presents.
+	// See database.VerifyEnforcement for what is checked.
+	//
+	//   error (default) — refuse to start if enforcement cannot be
+	//                     confirmed for a configured table
+	//   warn            — log loudly and start anyway
+	//   off             — skip the check
+	//
+	// The default is deliberately fatal. Every failure this check
+	// detects is one where retrieval appears to work and returns rows,
+	// whilst row-level security is either absent or evaluating an
+	// identity other than the caller's. There is no symptom to notice
+	// in production, so the only safe moment to notice is startup.
+	EnforcementCheck string `yaml:"enforcement_check"`
+
+	// AllowSharedVectorIndex permits per-identity retrieval to use an
+	// approximate vector index (HNSW/IVFFlat) that is shared between
+	// identities.
+	//
+	// Default false, which forces an exact scan for the vector arm by
+	// disabling index and bitmap scans for the query's transaction.
+	//
+	// This is not a performance knob, it is a disclosure one. pgvector
+	// applies row-level security as a filter on top of the index scan,
+	// after the index has already chosen candidates from the whole
+	// corpus. When a caller's own rows are a minority, the scan's
+	// candidate budget is spent on rows she may not see and the query
+	// returns fewer rows than asked for — sometimes none. The size of
+	// that shortfall, and the query's latency, are both functions of how
+	// many rows the caller may NOT see lie near her query vector. A
+	// caller who chooses query vectors can use that to map another
+	// tenant's corpus in embedding space, and embedding inversion turns
+	// a position in that space back into approximate text.
+	//
+	// No forbidden row is ever returned; the filtering works. The
+	// filtering is what produces the signal, so filtering harder makes
+	// it worse rather than better. Setting this true is only safe when
+	// every identity that can reach a given table is permitted to know
+	// the shape of everything in it — a single-tenant corpus split by
+	// document category, say, rather than a corpus split by customer.
+	AllowSharedVectorIndex bool `yaml:"allow_shared_vector_index"`
+}
+
+// Disabled is the sentinel value for SubjectHeader and RoleClaim that
+// turns the corresponding mechanism off entirely, as distinct from
+// leaving the field empty, which selects the default.
+const Disabled = "-"
+
+// WithDefaults returns a copy of the identity configuration with unset
+// fields filled in.
+//
+// It returns a copy rather than mutating in place so it can be applied
+// idempotently wherever the configuration is consumed. A Config built in
+// code (a test, an embedding of this server) then behaves the same as
+// one loaded from YAML, instead of silently running with empty header
+// names.
+func (c IdentityConfig) WithDefaults() IdentityConfig {
+	if c.ClaimsHeader == "" {
+		c.ClaimsHeader = DefaultClaimsHeader
+	}
+	if c.SubjectHeader == "" {
+		c.SubjectHeader = DefaultSubjectHeader
+	}
+	if c.ClaimsSetting == "" {
+		c.ClaimsSetting = DefaultClaimsSetting
+	}
+	if c.SubjectClaim == "" {
+		c.SubjectClaim = DefaultSubjectClaim
+	}
+	if c.RoleClaim == "" {
+		c.RoleClaim = DefaultRoleClaim
+	}
+	if c.EnforcementCheck == "" {
+		c.EnforcementCheck = EnforcementCheckError
+	}
+	return c
 }
 
 // ServerConfig contains HTTP server settings.

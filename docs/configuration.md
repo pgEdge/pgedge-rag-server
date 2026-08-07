@@ -87,6 +87,7 @@ reloads to work in a container.
 The configuration file includes the following top-level sections:
 
 - [`server`](#specifying-properties-in-the-server-section) - HTTP/HTTPS server settings
+- [`identity`](identity.md) - Run retrieval as the caller who asked, rather than as one fixed database role
 - [`defaults`](#specifying-properties-in-the-defaults-section) - Default values for pipelines (LLM providers, token budget, etc.)
 - [`pipelines`](#specifying-properties-in-the-server-section) - RAG pipeline definitions
 
@@ -120,6 +121,30 @@ server:
 | `tls.key_file`         | Path to TLS private key            | Required if TLS enabled |
 | `cors.enabled`         | Enable CORS headers                | `false`       |
 | `cors.allowed_origins` | List of allowed origins            | `[]` (none)   |
+
+## Specifying Properties in the Identity Section
+
+By default every query runs as the database role in a pipeline's
+`database:` block, whoever the caller is. The optional `identity`
+section makes retrieval run as the caller instead, so that PostgreSQL
+row-level security can scope a shared corpus per user or per tenant:
+
+```yaml
+identity:
+  enabled: true
+  claims_header: "X-Forwarded-Claims"
+  allowed_roles:
+    - "rag_tenant"
+  trusted_proxies:
+    - "10.0.0.0/8"
+```
+
+Enabling this changes the server's trust model — the claims headers
+become load-bearing — and it requires row-level security policies on the
+database side to have any effect. It also interacts with approximate
+vector indexes in a way that matters for multi-tenant corpora. All of
+that is covered in [Per-Request Identity](identity.md), which you should
+read before turning it on.
 
 ### CORS Configuration
 

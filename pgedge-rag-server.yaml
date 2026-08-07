@@ -9,6 +9,31 @@ server:
     #   cert_file: "/etc/pgedge/server.crt"
     #   key_file: "/etc/pgedge/server.key"
 
+# Per-request identity (optional, off by default).
+#
+# When disabled, every query runs as the database role configured for
+# the pipeline, whoever asked. When enabled, the verified claims that
+# arrive with a request are applied to the database session for the
+# lifetime of that query, and PostgreSQL row-level security decides what
+# it may see.
+#
+# Enabling this changes the server's trust model: the claims headers are
+# only as trustworthy as whatever sits in front of the server, and the
+# database must have row-level security policies keyed on the claims for
+# it to have any effect. Read docs/identity.md before turning it on.
+#
+# identity:
+#     enabled: true
+#     # Header the trusted proxy sets, carrying a JSON claim set.
+#     claims_header: "X-Forwarded-Claims"
+#     # Roles a request may be switched to. Empty (the default) refuses
+#     # any request whose claims name a role.
+#     allowed_roles:
+#         - "rag_tenant"
+#     # Peers permitted to assert an identity at all.
+#     trusted_proxies:
+#         - "10.0.0.0/8"
+
 # Define one or more RAG pipelines
 pipelines:
     - name: "example-docs"

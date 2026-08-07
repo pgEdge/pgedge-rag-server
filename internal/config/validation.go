@@ -70,6 +70,9 @@ func (c *Config) Validate() error {
 	// Validate server config
 	errs = append(errs, c.validateServer()...)
 
+	// Validate identity
+	errs = append(errs, c.validateIdentity()...)
+
 	// Validate defaults
 	errs = append(errs, c.validateDefaults()...)
 
@@ -117,6 +120,100 @@ func (c *Config) validateServer() ValidationErrors {
 				Message: fmt.Sprintf("file not found: %s", c.Server.TLS.KeyFile),
 			})
 		}
+	}
+
+	return errs
+}
+
+// httpTokenRe matches a legal HTTP field name (RFC 9110 token). Header
+// names are validated rather than trusted because an operator typo such
+// as "X Forwarded Claims" would silently never match any request, which
+// under enabled identity means every request is refused with no clue as
+// to why.
+var httpTokenRe = regexp.MustCompile(`^[!#$%&'*+\-.^_` + "`" + `|~0-9A-Za-z]+$`)
+
+// gucNameRe matches a PostgreSQL run-time parameter name. A customised
+// parameter (one this server may set from an untrusted-in-origin value)
+// must be qualified with a prefix, e.g. request.jwt.claims.
+var gucNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$`)
+
+// roleNameRe matches the role names permitted in allowed_roles. This is
+// deliberately narrower than what PostgreSQL accepts as an identifier:
+// the allowlist is a security control, and an entry that needs quoting
+// is more likely a mistake than a real role.
+var roleNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$-]*$`)
+
+// validateIdentity validates the identity configuration. Nothing here
+// applies when identity is disabled, since none of the fields are read
+// in that case and rejecting them would break configurations that carry
+// a prepared-but-off identity block.
+func (c *Config) validateIdentity() ValidationErrors {
+	var errs ValidationErrors
+
+	if !c.Identity.Enabled {
+		return errs
+	}
+
+	id := c.Identity.WithDefaults()
+
+	if !httpTokenRe.MatchString(id.ClaimsHeader) {
+		errs = append(errs, ValidationError{
+			Field:   "identity.claims_header",
+			Message: fmt.Sprintf("not a valid HTTP header name: %q", id.ClaimsHeader),
+		})
+	}
+
+	if id.SubjectHeader != Disabled && !httpTokenRe.MatchString(id.SubjectHeader) {
+		errs = append(errs, ValidationError{
+			Field:   "identity.subject_header",
+			Message: fmt.Sprintf("not a valid HTTP header name: %q", id.SubjectHeader),
+		})
+	}
+
+	if !gucNameRe.MatchString(id.ClaimsSetting) {
+		errs = append(errs, ValidationError{
+			Field: "identity.claims_setting",
+			Message: fmt.Sprintf(
+				"must be a qualified PostgreSQL parameter name such as %q, got %q",
+				DefaultClaimsSetting, id.ClaimsSetting),
+		})
+	}
+
+	if id.SubjectClaim == "" || id.SubjectClaim == Disabled {
+		errs = append(errs, ValidationError{
+			Field:   "identity.subject_claim",
+			Message: "must name a claim; it labels requests in the log and cannot be disabled",
+		})
+	}
+
+	for i, role := range id.AllowedRoles {
+		if !roleNameRe.MatchString(role) {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("identity.allowed_roles[%d]", i),
+				Message: fmt.Sprintf("not a valid role name: %q", role),
+			})
+		}
+	}
+
+	for i, cidr := range id.TrustedProxies {
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			errs = append(errs, ValidationError{
+				Field: fmt.Sprintf("identity.trusted_proxies[%d]", i),
+				Message: fmt.Sprintf(
+					"must be a CIDR block such as 10.0.0.0/8, got %q", cidr),
+			})
+		}
+	}
+
+	switch id.EnforcementCheck {
+	case EnforcementCheckError, EnforcementCheckWarn, EnforcementCheckOff:
+	default:
+		errs = append(errs, ValidationError{
+			Field: "identity.enforcement_check",
+			Message: fmt.Sprintf("must be one of %q, %q or %q, got %q",
+				EnforcementCheckError, EnforcementCheckWarn,
+				EnforcementCheckOff, id.EnforcementCheck),
+		})
 	}
 
 	return errs

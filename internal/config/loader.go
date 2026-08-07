@@ -123,6 +123,8 @@ func loadFromFile(path string) (*Config, error) {
 
 // applyDefaults applies default values to pipelines where not specified.
 func applyDefaults(cfg *Config) {
+	cfg.Identity = cfg.Identity.WithDefaults()
+
 	for i := range cfg.Pipelines {
 		p := &cfg.Pipelines[i]
 

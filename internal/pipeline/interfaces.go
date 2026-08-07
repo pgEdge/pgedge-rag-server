@@ -65,6 +65,15 @@ type SearchBackend interface {
 	) (map[string]string, error)
 }
 
+// enforcementVerifier is the narrow interface the manager needs to run
+// the startup identity-enforcement preflight. *database.Pool satisfies
+// it structurally. Narrowing it lets the manager's policy for handling
+// findings — abort, warn, or skip — be tested without standing up a
+// database in a particular state of misconfiguration.
+type enforcementVerifier interface {
+	VerifyEnforcement(ctx context.Context, tables []config.TableSource) []error
+}
+
 // QueryExecutor is the narrow interface the server needs from a
 // pipeline to run a query. *Pipeline satisfies it structurally. Server
 // tests provide a fake that can hang (respecting context cancellation),

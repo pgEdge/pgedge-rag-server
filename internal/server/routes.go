@@ -9,6 +9,8 @@
 
 package server
 
+import "net/http"
+
 // setupRoutes configures all HTTP routes.
 func (s *Server) setupRoutes() {
 	// API v1 routes
@@ -16,6 +18,10 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /v1/live", s.handleLive)
 	s.mux.HandleFunc("GET /v1/health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/pipelines", s.handleListPipelines)
-	s.mux.HandleFunc("POST /v1/pipelines/{name}", s.handlePipeline)
+	// The query endpoint is the only one that reads a corpus, so it is
+	// the only one that requires a caller identity. requireIdentity is a
+	// no-op when identity is disabled.
+	s.mux.Handle("POST /v1/pipelines/{name}",
+		s.requireIdentity(http.HandlerFunc(s.handlePipeline)))
 	s.mux.HandleFunc("GET /v1/stats", s.handleStats)
 }
