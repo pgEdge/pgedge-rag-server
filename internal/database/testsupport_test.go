@@ -128,14 +128,44 @@ func serviceRole(t *testing.T, pool *pgxpool.Pool) (name, password string) {
 	exec(t, pool, fmt.Sprintf("CREATE ROLE %s LOGIN PASSWORD %s",
 		pgx.Identifier{name}.Sanitize(), quoteLiteral(password)))
 
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		_, _ = pool.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s",
-			pgx.Identifier{name}.Sanitize()))
-	})
+	t.Cleanup(func() { dropRole(t, pool, name) })
 
 	return name, password
+}
+
+// dropRole removes a role created by a fixture, and reports a failure
+// to do so rather than swallowing it.
+//
+// The reassignment is not belt and braces. A role that owns a table
+// cannot be dropped, and t.Cleanup runs last-registered-first, so a role
+// created after the schema it goes on to own is dropped while that table
+// still exists: the DROP fails, and if the error is discarded the role
+// accumulates in the test database, one per run. That is exactly what
+// happened before this helper existed — four rag_claimable_* roles left
+// behind by the ownership subtests, found only because the discarded
+// error was looked for.
+//
+// REASSIGN OWNED BY hands anything the role owns to the current user and
+// DROP OWNED BY clears the privileges granted to it, so the role can
+// then go regardless of what a fixture gave it or of the order cleanups
+// happen to run in.
+func dropRole(t *testing.T, pool *pgxpool.Pool, name string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	quoted := pgx.Identifier{name}.Sanitize()
+	for _, stmt := range []string{
+		fmt.Sprintf("REASSIGN OWNED BY %s TO CURRENT_USER", quoted),
+		fmt.Sprintf("DROP OWNED BY %s", quoted),
+		fmt.Sprintf("DROP ROLE IF EXISTS %s", quoted),
+	} {
+		if _, err := pool.Exec(ctx, stmt); err != nil {
+			t.Errorf("failed to clean up role %s: %v\nSQL: %s", name, err, stmt)
+			return
+		}
+	}
 }
 
 // quoteLiteral quotes a string for use as an SQL literal in fixture

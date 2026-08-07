@@ -329,12 +329,7 @@ func TestIdentity_RoleIsAssumedAndReleased(t *testing.T) {
 	// The service role must be a member of the role it assumes.
 	exec(t, admin, fmt.Sprintf("GRANT %s TO %s",
 		pgx.Identifier{tenantRole}.Sanitize(), pgx.Identifier{role}.Sanitize()))
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		_, _ = admin.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s",
-			pgx.Identifier{tenantRole}.Sanitize()))
-	})
+	t.Cleanup(func() { dropRole(t, admin, tenantRole) })
 
 	idCfg := config.IdentityConfig{
 		Enabled:      true,

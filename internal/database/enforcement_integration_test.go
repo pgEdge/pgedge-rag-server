@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -370,12 +369,10 @@ func TestVerifyEnforcement_AllowedRolesThatBypassRLS(t *testing.T) {
 				exec(t, admin, fmt.Sprintf("GRANT SELECT ON %s TO %s",
 					chunks, pgx.Identifier{role}.Sanitize()))
 			}
-			t.Cleanup(func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				defer cancel()
-				_, _ = admin.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s",
-					pgx.Identifier{claimable}.Sanitize()))
-			})
+			// Registered after testSchema's cleanup and so run before it:
+			// this role may own the table at that point, which is why
+			// dropRole reassigns before dropping. See dropRole.
+			t.Cleanup(func() { dropRole(t, admin, claimable) })
 
 			idCfg := config.IdentityConfig{
 				Enabled:      true,

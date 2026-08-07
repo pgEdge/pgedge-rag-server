@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
+	"github.com/pgEdge/pgedge-rag-server/internal/identity"
 )
 
 // Corpus shape for the side-channel test. The numbers matter: the
@@ -94,9 +95,9 @@ func probeVector() []float32 {
 	return v
 }
 
-// explainAnalyze runs a query under EXPLAIN ANALYZE through the
-// identity-bearing path, and returns the plan text together with the
-// number of rows the query actually produced.
+// explainAnalyze runs a query under EXPLAIN ANALYZE in an
+// identity-bearing transaction, and returns the plan text together with
+// the number of rows the query actually produced.
 //
 // Plan and row count come from the same execution deliberately. Reading
 // the plan with one statement and the row count with another looks
@@ -106,30 +107,79 @@ func probeVector() []float32 {
 // assertion that pairs "the plan says index scan" with "this other
 // query returned n rows" is then asserting nothing in particular. One
 // statement cannot disagree with itself.
+//
+// forceIndexScan disables sequential scans for the query, which is how
+// the side-channel demonstration gets the approximate index to answer
+// the query on any PostgreSQL version. Without it the test is at the
+// mercy of a cost estimate: on PostgreSQL 16 with pgvector 0.6 the
+// planner picks the HNSW index for this corpus and the shortfall
+// appears, while on PostgreSQL 17 with pgvector 0.8 it picks a
+// sequential scan and the demonstration quietly does not happen. The
+// exposure is a property of the index answering the query, not of the
+// planner choosing to let it, so the test makes that condition hold
+// rather than hoping for it.
+//
+// This assembles the transaction itself rather than going through
+// withRows, because withRows runs exactly one statement and the planner
+// setting has to be established alongside the identity. It calls the
+// production applyIdentity so the session state under test is the same
+// state a real query would run with.
 func explainAnalyze(
 	ctx context.Context,
 	t *testing.T,
 	pool *Pool,
 	query string,
 	args []interface{},
+	forceIndexScan bool,
 ) (plan string, actualRows int) {
 	t.Helper()
 
-	var lines []string
-	err := pool.withRows(ctx, vectorQuery,
-		"EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) "+query, args,
-		func(rows pgx.Rows) error {
-			for rows.Next() {
-				var line string
-				if err := rows.Scan(&line); err != nil {
-					return err
-				}
-				lines = append(lines, line)
-			}
-			return rows.Err()
-		})
+	id, ok := identity.FromContext(ctx)
+	if !ok {
+		t.Fatal("explainAnalyze needs an identity in its context")
+	}
+
+	conn, err := pool.pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("failed to acquire a connection: %v", err)
+	}
+	defer conn.Release()
+
+	tx, err := conn.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		t.Fatalf("failed to begin a transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	if err := applyIdentity(ctx, tx, pool.identity.ClaimsSetting, id,
+		pool.exactSearch(vectorQuery)); err != nil {
+		t.Fatalf("failed to apply the request identity: %v", err)
+	}
+
+	if forceIndexScan {
+		if _, err := tx.Exec(ctx, "SET LOCAL enable_seqscan = off"); err != nil {
+			t.Fatalf("failed to disable sequential scans: %v", err)
+		}
+	}
+
+	rows, err := tx.Query(ctx,
+		"EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) "+query, args...)
 	if err != nil {
 		t.Fatalf("EXPLAIN ANALYZE failed: %v", err)
+	}
+
+	var lines []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			rows.Close()
+			t.Fatalf("failed to read the plan: %v", err)
+		}
+		lines = append(lines, line)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("failed to read the plan: %v", err)
 	}
 	if len(lines) == 0 {
 		t.Fatal("EXPLAIN ANALYZE returned no plan")
@@ -137,12 +187,12 @@ func explainAnalyze(
 
 	// The topmost node is the Limit, and its actual row count is what the
 	// caller would have received.
-	rows, err := parseActualRows(lines[0])
+	delivered, err := parseActualRows(lines[0])
 	if err != nil {
 		t.Fatalf("could not read the row count from plan line %q: %v", lines[0], err)
 	}
 
-	return strings.Join(lines, "\n"), rows
+	return strings.Join(lines, "\n"), delivered
 }
 
 // parseActualRows extracts n from an "(actual rows=n loops=...)"
@@ -166,11 +216,20 @@ func parseActualRows(line string) (int, error) {
 	return strconv.Atoi(rest[:end])
 }
 
-// usesIndexScan reports whether a plan answers the query from an index
-// rather than by scanning and sorting.
-func usesIndexScan(plan string) bool {
-	return strings.Contains(plan, "Index Scan") ||
-		strings.Contains(plan, "Index Only Scan")
+// answeredByVectorIndex reports whether the plan had the approximate
+// vector index produce the ordering, which is the only arrangement in
+// which the side channel arises.
+//
+// "Index Scan" alone is not enough, and assuming it was cost a wrong
+// failure: with sequential scans disabled the planner can instead read
+// the table through its primary key and sort the result, which is an
+// Index Scan that returns exact answers and no shortfall at all. The
+// distinguishing mark is the "Order By:" annotation — PostgreSQL emits
+// it only when the index itself supplies the ordering, which for this
+// query means pgvector walked the graph.
+func answeredByVectorIndex(plan string) bool {
+	return strings.Contains(plan, "Index Scan") &&
+		strings.Contains(plan, "Order By:")
 }
 
 // TestSharedVectorIndexLeaksAcrossIdentities documents, as an executable
@@ -236,10 +295,11 @@ func TestSharedVectorIndexLeaksAcrossIdentities(t *testing.T) {
 			t.Fatalf("failed to build the search query: %v", err)
 		}
 
-		// Plan and row count from one execution, through the same
-		// identity-bearing path the real query uses, so the planner
-		// settings this configuration applies are in force.
-		plan, delivered := explainAnalyze(ctx, t, pool, query, args)
+		// Plan and row count from one execution, with the approximate
+		// index forced to answer the query — see explainAnalyze for why
+		// leaving that to the planner makes the demonstration silently
+		// conditional on the PostgreSQL and pgvector versions in use.
+		plan, delivered := explainAnalyze(ctx, t, pool, query, args, true)
 		t.Logf("plan with a shared index:\n%s", plan)
 
 		// The rows that do come back are still correctly filtered. The
@@ -255,18 +315,16 @@ func TestSharedVectorIndexLeaksAcrossIdentities(t *testing.T) {
 			}
 		}
 
-		if !usesIndexScan(plan) {
-			// The planner costed the approximate index out of the query
-			// for this corpus. That is not a failure of the mitigation and
-			// not a contradiction of the exposure: the side channel exists
-			// only when the shared index is the thing answering the query.
-			// Reported rather than asserted, so this test never fails for
-			// a reason that has nothing to do with the code under test.
-			t.Logf("the planner did not choose the approximate index for this "+
-				"corpus (%d rows for the minority identity of %d total), so the "+
-				"shortfall cannot arise here; the exposure this test documents "+
-				"needs the index scan to be the thing answering the query",
-				leakMinorityRows, leakMajorityRows+leakMinorityRows)
+		if !answeredByVectorIndex(plan) {
+			// Sequential scans were disabled above, so the approximate
+			// index should have answered this. If it still did not, the
+			// demonstration cannot run — reported rather than asserted,
+			// because that is a fact about the planner rather than about
+			// the code under test.
+			t.Logf("the approximate index did not answer the query even with " +
+				"sequential scans disabled, so the shortfall cannot arise here; " +
+				"the exposure this test documents needs the index scan to be " +
+				"the thing answering the query")
 			return
 		}
 
