@@ -315,17 +315,22 @@ func TestSharedVectorIndexLeaksAcrossIdentities(t *testing.T) {
 			}
 		}
 
+		// Failing rather than reporting-and-returning is deliberate. An
+		// earlier version of this arm logged its excuse and passed, which
+		// is how it came to demonstrate nothing at all on PostgreSQL 17
+		// for a while. The demonstration is the point of the subtest, so
+		// being unable to run it is a failure of the subtest, not a
+		// detail to note in passing. With sequential scans disabled the
+		// vector index answers this on every version tried — PostgreSQL
+		// 16 with pgvector 0.6 and PostgreSQL 17 with pgvector 0.8 — so
+		// reaching here means something changed that a person should
+		// look at.
 		if !answeredByVectorIndex(plan) {
-			// Sequential scans were disabled above, so the approximate
-			// index should have answered this. If it still did not, the
-			// demonstration cannot run — reported rather than asserted,
-			// because that is a fact about the planner rather than about
-			// the code under test.
-			t.Logf("the approximate index did not answer the query even with " +
-				"sequential scans disabled, so the shortfall cannot arise here; " +
-				"the exposure this test documents needs the index scan to be " +
-				"the thing answering the query")
-			return
+			t.Fatalf("the vector index did not supply the ordering even with "+
+				"sequential scans disabled — the query was answered some other "+
+				"way, such as by reading the primary key and sorting, so the "+
+				"exposure this subtest exists to demonstrate cannot arise. "+
+				"Plan:\n%s", plan)
 		}
 
 		if delivered >= leakWantedRows {
@@ -422,23 +427,31 @@ func TestExactSearchDisablesIndexScans(t *testing.T) {
 					indexScan, bitmapScan, tc.wantIndexScanOn)
 			}
 
-			// And the setting must not outlive the transaction either.
+			// And neither setting may outlive the transaction. Both are
+			// read, not just the first: they are applied together, but
+			// "applied together" is an assumption about the code rather
+			// than an observation of it, and this is the assertion that
+			// the connection carries nothing forward.
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			conn, err := pool.pool.Acquire(ctx)
 			if err != nil {
 				t.Fatalf("failed to acquire the pooled connection: %v", err)
 			}
-			var after string
-			err = conn.QueryRow(ctx, "SELECT current_setting('enable_indexscan')").
-				Scan(&after)
+			var afterIndexScan, afterBitmapScan string
+			err = conn.QueryRow(ctx,
+				"SELECT current_setting('enable_indexscan'), "+
+					"current_setting('enable_bitmapscan')").
+				Scan(&afterIndexScan, &afterBitmapScan)
 			conn.Release()
 			if err != nil {
 				t.Fatalf("failed to inspect the pooled connection: %v", err)
 			}
-			if after != "on" {
-				t.Errorf("enable_indexscan is %q on the pooled connection after "+
-					"the request, want the session default \"on\"", after)
+			if afterIndexScan != "on" || afterBitmapScan != "on" {
+				t.Errorf("planner settings survived on the pooled connection "+
+					"after the request: enable_indexscan=%q enable_bitmapscan=%q, "+
+					"want both back at the session default \"on\"",
+					afterIndexScan, afterBitmapScan)
 			}
 		})
 	}
