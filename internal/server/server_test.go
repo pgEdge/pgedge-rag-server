@@ -995,7 +995,7 @@ func serverWithRetrievalFailure(kind database.FailureKind) *Server {
 			return chunkChan, errChan
 		},
 	}
-	return New(testConfig(), pm, nil)
+	return mustNewServer(nil, testConfig(), pm)
 }
 
 func postQuery(t *testing.T, srv *Server, body string) *httptest.ResponseRecorder {
@@ -1139,7 +1139,7 @@ func TestPipelineEndpoint_EmptyCorpusStillAnswers200(t *testing.T) {
 			return &pipeline.QueryResponse{Answer: emptyAnswer, TokensUsed: 0}, nil
 		},
 	}
-	srv := New(testConfig(), pm, nil)
+	srv := mustNewServer(t, testConfig(), pm)
 
 	w := postQuery(t, srv, `{"query": "test query"}`)
 
@@ -1172,7 +1172,7 @@ func TestPipelineEndpoint_NonRetrievalErrorKeepsExecutionError(t *testing.T) {
 			return nil, providerAuthFailure()
 		},
 	}
-	srv := New(testConfig(), pm, nil)
+	srv := mustNewServer(t, testConfig(), pm)
 
 	w := postQuery(t, srv, `{"query": "test query"}`)
 
