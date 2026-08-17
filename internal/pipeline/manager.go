@@ -410,7 +410,17 @@ func (p *Pipeline) Usage() Usage {
 
 // DefaultPingTimeout bounds how long a single provider's connectivity
 // check is allowed to take before Ping reports it unreachable.
-const DefaultPingTimeout = 3 * time.Second
+//
+// Ping goes through the same client the pipeline uses for real
+// requests, so it inherits that client's retry policy: the
+// pgedge-go-llm-lib default is up to 5 retries with a 2-second initial
+// backoff. A perfectly healthy provider that just happens to need one
+// ordinary retry can therefore burn 2+ seconds on backoff alone before
+// its second attempt even starts. A 3-second budget left no room for
+// that, so a single routine retry was enough to report a healthy
+// provider as "unreachable" (issue #55). 10 seconds comfortably covers
+// one retry cycle whilst still keeping /v1/health responsive.
+const DefaultPingTimeout = 10 * time.Second
 
 // Ping checks connectivity for this pipeline's embedding and
 // completion providers concurrently, each bounded by
