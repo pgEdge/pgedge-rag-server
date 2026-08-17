@@ -563,16 +563,12 @@ func (o *Orchestrator) applyRerankOrder(
 // Anthropic, Gemini, OpenAI and Ollama all continue to receive the same
 // structure as each other.
 //
-// Temperature is intentionally left unset here: pgedge-go-llm-lib's
-// Options.WithDefaults() always fills an unset per-request Temperature
-// with a client-level default (0.7), so no pgedge-rag-server-side value
-// (including omitting it, as here) prevents a temperature field from
-// reaching the wire. Some newer models (observed: claude-sonnet-5)
-// reject any temperature value outright ("400: `temperature` is
-// deprecated for this model"). This is a pgedge-go-llm-lib limitation,
-// not something fixable from this layer without hand-rolling
-// provider-specific HTTP handling — tracked upstream instead of worked
-// around here.
+// Temperature is intentionally left unset here, so the provider's own
+// default applies. pgedge-go-llm-lib (from v0.2.0) genuinely omits an
+// unset Temperature from the wire rather than substituting a
+// client-level default, which matters because some newer models
+// (observed: claude-sonnet-5) reject any temperature value outright
+// ("400: `temperature` is deprecated for this model").
 func (o *Orchestrator) buildChatRequest(
 	req QueryRequest,
 	contextDocs []ragllm.ContextDoc,
