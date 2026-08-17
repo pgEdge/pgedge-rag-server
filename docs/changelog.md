@@ -59,8 +59,10 @@ and this project adheres to
   default we do not pin and a later change to the simple protocol would
   silently reintroduce the exposure.
 
-- Updated `golang.org/x/text` from 0.35.0 to 0.39.0, fixing GO-2026-5970,
-  an infinite loop on invalid input. This one is reachable from
+- Updated `golang.org/x/text` from 0.35.0 to 0.41.0, fixing GO-2026-5970,
+  an infinite loop on invalid input (fixed at 0.39.0; carried further to
+  0.41.0 by the routine dependency refresh ahead of this release). This
+  one is reachable from
   `database.NewPool` by way of `pgxpool.NewWithConfig`, so it sits on
   the startup path of every pipeline rather than on a rare branch. A
   container image scan may or may not detect the vulnerable module
@@ -78,9 +80,11 @@ and this project adheres to
   stale local toolchain producing a binary with a vulnerable standard
   library.
 
-- Updated `golang.org/x/sys` from 0.26.0 to 0.44.0 for GO-2026-5024.
-  That advisory affects Windows only and so did not apply to any
-  supported deployment target, but the upgrade is free.
+- Updated `golang.org/x/sys` from 0.26.0 to 0.47.0 for GO-2026-5024
+  (fixed at 0.44.0; carried further to 0.47.0 by the routine
+  dependency refresh ahead of this release). That advisory affects
+  Windows only and so did not apply to any supported deployment
+  target, but the upgrade is free.
 
 - The BM25 keyword arm no longer reads a table without a bound. Its
   query had no `LIMIT`, so every request fetched the content of every

@@ -564,11 +564,11 @@ func (o *Orchestrator) applyRerankOrder(
 // structure as each other.
 //
 // Temperature is intentionally left unset here, so the provider's own
-// default applies. pgedge-go-llm-lib (from v0.2.0) genuinely omits an
-// unset Temperature from the wire rather than substituting a
-// client-level default, which matters because some newer models
-// (observed: claude-sonnet-5) reject any temperature value outright
-// ("400: `temperature` is deprecated for this model").
+// default applies. pgedge-go-llm-lib genuinely omits an unset
+// Temperature from the wire rather than substituting a client-level
+// default, which matters because some newer models (observed:
+// claude-sonnet-5) reject any temperature value outright ("400:
+// `temperature` is deprecated for this model").
 func (o *Orchestrator) buildChatRequest(
 	req QueryRequest,
 	contextDocs []ragllm.ContextDoc,
