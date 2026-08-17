@@ -117,7 +117,7 @@ func BuildOpenAPISpec() OpenAPISpec {
 		Info: OpenAPIInfo{
 			Title:       "pgEdge RAG Server API",
 			Description: "REST API for querying RAG (Retrieval-Augmented Generation) pipelines",
-			Version:     "1.0.0",
+			Version:     "2.0.0-beta1",
 		},
 		Servers: []OpenAPIServer{
 			{

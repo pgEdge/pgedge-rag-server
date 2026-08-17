@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0-beta1] - 2026-08-17
 
 ### Security
 
@@ -226,6 +226,31 @@ and this project adheres to
   fuses into one result instead of appearing twice (and unstable
   `ROW_NUMBER()` ids no longer cause false merges)
   ([#27](https://github.com/pgEdge/pgedge-rag-server/issues/27)).
+
+- `GET /v1/health` no longer reports a healthy provider as
+  `"unreachable"` when its first ping attempt happens to need one
+  ordinary retry. Ping reuses the same client (and therefore the same
+  retry policy) as real requests, and the default policy backs off for
+  2 seconds before a retry, which alone could consume most of a
+  3-second ping budget and leave no time for the retry to complete.
+  `DefaultPingTimeout` is now 10 seconds, comfortably covering one
+  retry cycle
+  ([#55](https://github.com/pgEdge/pgedge-rag-server/issues/55)).
+
+### Dependencies
+
+- Updated `pgedge-go-llm-lib` from 0.1.0 to 0.3.1. Most notably,
+  `Options.WithDefaults()` no longer forces an unset per-request
+  `Temperature` to a client-level default of 0.7; some newer models
+  (observed: `claude-sonnet-5`) reject any temperature value outright,
+  so a request built without one now actually reaches the provider
+  without one. Also included: Gemini tool-calling no longer fails on a
+  conversation's second turn, tool failures are now signalled to
+  Gemini instead of silently retried, and `ListModels` no longer offers
+  Gemini models (text-to-speech, image generation, and similar) that
+  cannot hold a conversation.
+
+- Updated `jackc/pgx/v5` from 5.9.2 to 5.10.0.
 
 ### Documentation
 
