@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0-beta1] - 2026-08-17
 
 ### Security
 
@@ -59,8 +59,10 @@ and this project adheres to
   default we do not pin and a later change to the simple protocol would
   silently reintroduce the exposure.
 
-- Updated `golang.org/x/text` from 0.35.0 to 0.39.0, fixing GO-2026-5970,
-  an infinite loop on invalid input. This one is reachable from
+- Updated `golang.org/x/text` from 0.35.0 to 0.41.0, fixing GO-2026-5970,
+  an infinite loop on invalid input (fixed at 0.39.0; carried further to
+  0.41.0 by the routine dependency refresh ahead of this release). This
+  one is reachable from
   `database.NewPool` by way of `pgxpool.NewWithConfig`, so it sits on
   the startup path of every pipeline rather than on a rare branch. A
   container image scan may or may not detect the vulnerable module
@@ -78,9 +80,11 @@ and this project adheres to
   stale local toolchain producing a binary with a vulnerable standard
   library.
 
-- Updated `golang.org/x/sys` from 0.26.0 to 0.44.0 for GO-2026-5024.
-  That advisory affects Windows only and so did not apply to any
-  supported deployment target, but the upgrade is free.
+- Updated `golang.org/x/sys` from 0.26.0 to 0.47.0 for GO-2026-5024
+  (fixed at 0.44.0; carried further to 0.47.0 by the routine
+  dependency refresh ahead of this release). That advisory affects
+  Windows only and so did not apply to any supported deployment
+  target, but the upgrade is free.
 
 - The BM25 keyword arm no longer reads a table without a bound. Its
   query had no `LIMIT`, so every request fetched the content of every
@@ -226,6 +230,31 @@ and this project adheres to
   fuses into one result instead of appearing twice (and unstable
   `ROW_NUMBER()` ids no longer cause false merges)
   ([#27](https://github.com/pgEdge/pgedge-rag-server/issues/27)).
+
+- `GET /v1/health` no longer reports a healthy provider as
+  `"unreachable"` when its first ping attempt happens to need one
+  ordinary retry. Ping reuses the same client (and therefore the same
+  retry policy) as real requests, and the default policy backs off for
+  2 seconds before a retry, which alone could consume most of a
+  3-second ping budget and leave no time for the retry to complete.
+  `DefaultPingTimeout` is now 10 seconds, comfortably covering one
+  retry cycle
+  ([#55](https://github.com/pgEdge/pgedge-rag-server/issues/55)).
+
+### Dependencies
+
+- Updated `pgedge-go-llm-lib` from 0.1.0 to 0.3.1. Most notably,
+  `Options.WithDefaults()` no longer forces an unset per-request
+  `Temperature` to a client-level default of 0.7; some newer models
+  (observed: `claude-sonnet-5`) reject any temperature value outright,
+  so a request built without one now actually reaches the provider
+  without one. Also included: Gemini tool-calling no longer fails on a
+  conversation's second turn, tool failures are now signalled to
+  Gemini instead of silently retried, and `ListModels` no longer offers
+  Gemini models (text-to-speech, image generation, and similar) that
+  cannot hold a conversation.
+
+- Updated `jackc/pgx/v5` from 5.9.2 to 5.10.0.
 
 ### Documentation
 
