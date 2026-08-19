@@ -1,0 +1,64 @@
+# TEMPORARY cross-repo readiness spike (PEP -> RAG integration, Plan 3 Task 1).
+#
+# Proves that pgedge-rag-server can call pgEdge/pgedge-pep-test's reusable
+# integration workflow CROSS-REPO, in PREVIEW mode only: no package install, no
+# build, no publish, and no release side effects. It exists to validate the
+# wiring (the call reaches PEP, PEP self-checks-out at a pinned SHA, and the
+# declared outputs come back), not to run any real test.
+#
+# SCOPE / SAFETY:
+#   * Branch-scoped to feature/pep-test-integration, so it runs ONLY when that
+#     branch is pushed. It does not react to main, tags, or pull requests, and
+#     therefore never triggers ci.yml / docker.yml / release.yml.
+#   * Does NOT modify release.yml, create a tag, or publish RPMs/DEBs.
+#   * PEP is a public repo pinned to an immutable commit SHA; the reusable
+#     workflow requires no read secret, so this caller passes none.
+#   * Delete this file and the branch once the spike has been confirmed.
+name: PEP preview spike (temporary)
+
+on:
+    push:
+        branches:
+            - feature/pep-test-integration
+
+permissions:
+    contents: read
+
+jobs:
+    pep-preview:
+        # Immutable pin: the uses: ref and pep_implementation_ref are the SAME
+        # PEP commit SHA (pep-integration.yml self-checks-out at that ref).
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-integration.yml@8cea73c75b2145d602a65aa05fd1c1d69229cfbc
+        with:
+            component: rag
+            package_name: pgedge-rag-server
+            channel: staging
+            expected_version: "2.0.0"
+            expected_buildnum: beta1_1
+            effective_tag: v2.0.0-beta1
+            expected_deb: 2.0.0~beta1-1.trixie
+            expected_binary: 2.0.0-beta1
+            family: deb
+            arch: amd64
+            pg_major: "17"
+            container_alias: debian13-amd64
+            scenario: certification
+            mode: observe
+            execution_mode: preview
+            invocation_id: rag-preview-spike
+            pep_implementation_ref: 8cea73c75b2145d602a65aa05fd1c1d69229cfbc
+
+    assert-preview:
+        needs: pep-preview
+        runs-on: ubuntu-latest
+        steps:
+            - name: Assert cross-repo preview outputs
+              env:
+                  EXECUTION_STATUS: ${{ needs.pep-preview.outputs.execution_status }}
+                  TEST_VERDICT: ${{ needs.pep-preview.outputs.test_verdict }}
+              run: |
+                  echo "execution_status=$EXECUTION_STATUS test_verdict=$TEST_VERDICT"
+                  test "$EXECUTION_STATUS" = "preview" \
+                      || { echo "expected execution_status=preview, got '$EXECUTION_STATUS'"; exit 1; }
+                  test "$TEST_VERDICT" = "not_run" \
+                      || { echo "expected test_verdict=not_run, got '$TEST_VERDICT'"; exit 1; }
