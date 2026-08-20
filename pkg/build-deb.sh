@@ -45,6 +45,13 @@ prepare() {
   echo "Moving Debian packaging into source directory..."
   cp -rp "${CWD}/${COMPONENT_NAME}/deb/debian" "$SRC_DIR/"
   cp "${COMPONENT_NAME}"/common/pgedge-rag-server.* "$SRC_DIR/debian/"
+  expand_pkg_templates "$SRC_DIR/debian"
+  # dh_installsystemd resolves the unit by the --name it is passed.
+  mv "$SRC_DIR/debian/pgedge-rag-server.service" \
+     "$SRC_DIR/debian/${RAG_SERVER_PKGNAME}.service"
+
+  echo "Generating the packaged config from the repo's sample..."
+  stage_packaged_yaml "$SRC_DIR/debian/pgedge-rag-server.yaml"
 
   echo "Staging LICENCE.md..."
   # GoReleaser archive globs LICENSE* and so omits the repo's LICENCE.md.
@@ -66,14 +73,17 @@ build() {
   echo "Building Debian package..."
   DISTRO=$(lsb_release -cs)
   rm -f debian/changelog
+  # Must match debian/control's Source field or dpkg-buildpackage aborts.
 cat > debian/changelog <<EOF
-pgedge-rag-server (${RAG_SERVER_VERSION}-${RAG_SERVER_BUILDNUM}.${DISTRO}) ${DISTRO}; urgency=medium
+${RAG_SERVER_PKGNAME} (${RAG_SERVER_VERSION}-${RAG_SERVER_BUILDNUM}.${DISTRO}) ${DISTRO}; urgency=medium
 
-  * Update pgedge-rag-server package.
+  * Update ${RAG_SERVER_PKGNAME} package.
 
  -- pgEdge Build Team <support@pgedge.com>  $(date -R)
 EOF
 
+  # debian/rules reads this to build the package name and install root.
+  export RAG_SERVER_MAJOR
   dpkg-buildpackage -us -uc -b
 }
 

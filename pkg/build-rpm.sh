@@ -41,6 +41,10 @@ prepare() {
   fi
 
   cp "${COMPONENT_NAME}"/common/pgedge-rag-server.* ~/rpmbuild/SOURCES/
+  expand_pkg_templates ~/rpmbuild/SOURCES
+
+  echo "Generating the packaged config from the repo's sample..."
+  stage_packaged_yaml ~/rpmbuild/SOURCES/pgedge-rag-server.yaml
 
   # This function is for debugging purpose if you have your own keys. GH workflow does not need it.
   #import_gpg_keys
@@ -49,6 +53,7 @@ prepare() {
   dnf builddep -y \
     --define "rag_server_version ${RAG_SERVER_VERSION}" \
     --define "rag_server_buildnum ${RAG_SERVER_BUILDNUM}" \
+    --define "rag_server_major ${RAG_SERVER_MAJOR}" \
     --define "arch ${ARCH}" \
     ~/rpmbuild/SPECS/pgedge-rag-server.spec
 }
@@ -58,6 +63,7 @@ build() {
   QA_RPATHS=$(( 0xffff )) rpmbuild -ba ~/rpmbuild/SPECS/pgedge-rag-server.spec \
     --define "rag_server_version ${RAG_SERVER_VERSION}" \
     --define "rag_server_buildnum ${RAG_SERVER_BUILDNUM}" \
+    --define "rag_server_major ${RAG_SERVER_MAJOR}" \
     --define "arch ${ARCH}"
 }
 
