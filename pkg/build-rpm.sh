@@ -43,8 +43,8 @@ prepare() {
   cp "${COMPONENT_NAME}"/common/pgedge-rag-server.* ~/rpmbuild/SOURCES/
   expand_pkg_templates ~/rpmbuild/SOURCES
 
-  echo "Generating the packaged config from the repo's sample..."
-  stage_packaged_yaml ~/rpmbuild/SOURCES/pgedge-rag-server.yaml
+  # The shipped config is the repo's sample, so there is only one to maintain.
+  cp "${COMPONENT_DIR}/../pgedge-rag-server.yaml" ~/rpmbuild/SOURCES/
 
   # This function is for debugging purpose if you have your own keys. GH workflow does not need it.
   #import_gpg_keys

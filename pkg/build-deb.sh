@@ -50,8 +50,8 @@ prepare() {
   mv "$SRC_DIR/debian/pgedge-rag-server.service" \
      "$SRC_DIR/debian/${RAG_SERVER_PKGNAME}.service"
 
-  echo "Generating the packaged config from the repo's sample..."
-  stage_packaged_yaml "$SRC_DIR/debian/pgedge-rag-server.yaml"
+  # The shipped config is the repo's sample, so there is only one to maintain.
+  cp "${COMPONENT_DIR}/../pgedge-rag-server.yaml" "$SRC_DIR/debian/"
 
   echo "Staging LICENCE.md..."
   # GoReleaser archive globs LICENSE* and so omits the repo's LICENCE.md.
