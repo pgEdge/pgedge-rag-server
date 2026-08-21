@@ -34,6 +34,17 @@ server:
 #     trusted_proxies:
 #         - "10.0.0.0/8"
 
+# API key locations (optional). Uncomment to read each key from a file
+# instead of the provider environment variable. Note that setting a path
+# here replaces the environment variable rather than adding to it: the
+# server fails to start if the file is missing.
+#
+# api_keys:
+#     openai: "/var/lib/pgedge/.openai-api-key"
+#     anthropic: "/var/lib/pgedge/.anthropic-api-key"
+#     voyage: "/var/lib/pgedge/.voyage-api-key"
+#     gemini: "/var/lib/pgedge/.gemini-api-key"
+
 # Define one or more RAG pipelines
 pipelines:
     - name: "example-docs"

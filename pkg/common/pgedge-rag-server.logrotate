@@ -1,4 +1,4 @@
-/var/log/pgedge/rag-server/*.log {
+/var/log/pgedge/rag-server@MAJOR@/*.log {
     daily
     missingok
     rotate 7
@@ -8,7 +8,6 @@
     create 0640 pgedge pgedge
     sharedscripts
     postrotate
-        /bin/systemctl kill -s HUP pgedge-rag-server.service >/dev/null 2>&1 || true
+        /bin/systemctl kill -s HUP @PKGNAME@.service >/dev/null 2>&1 || true
     endscript
 }
-

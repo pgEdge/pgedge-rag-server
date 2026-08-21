@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+# Created here rather than in debian/rules because Rules-Requires-Root: no
+# makes dpkg-deb record every archived path as root:root.
 case "$1" in
     install|upgrade)
 
@@ -18,10 +20,10 @@ case "$1" in
         fi
 
         # Create directories
-        mkdir -p /var/log/pgedge/rag-server
-        mkdir -p /var/lib/pgedge/rag-server
-        chown -R pgedge:pgedge /var/log/pgedge/rag-server
-        chown -R pgedge:pgedge /var/lib/pgedge/rag-server
+        mkdir -p /var/log/pgedge/rag-server2
+        mkdir -p /var/lib/pgedge/rag-server2
+        chown -R pgedge:pgedge /var/log/pgedge/rag-server2
+        chown -R pgedge:pgedge /var/lib/pgedge/rag-server2
         ;;
 esac
 
