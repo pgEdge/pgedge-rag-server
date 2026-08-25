@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-08-25
+
+### Added
+
+- Packaging now supports side-by-side installation of different major
+  versions of the RAG server on the same host. Debian and RPM packages
+  install under a major-version-qualified path, the service unit,
+  logrotate config and tmpfiles config are named accordingly, and the
+  sample configuration ships with the repo rather than being baked
+  into a shared package file, so upgrading a major version no longer
+  overwrites or removes an existing install.
+
 ## [2.0.0-beta1] - 2026-08-17
 
 ### Security
