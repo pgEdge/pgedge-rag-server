@@ -23,6 +23,34 @@ and this project adheres to
 
 ### Security
 
+- Three of the entries below link to a published security advisory.
+  Each of those advisories carries the current identifiers for the
+  issue it describes, including a CVE once one is assigned; none had
+  been assigned at the time of writing.
+
+- The BM25 keyword index is now built per request instead of being a
+  single per-pipeline object mutated in place. Each request used to
+  clear the shared index, refill it from its own filtered documents and
+  then search it; those three steps were individually locked but not
+  locked as a unit, so concurrent requests interleaved and a search
+  could run against a corpus that a different request's filter had
+  populated. Where an application uses the `filter` parameter to scope
+  results to a customer or tenant, ordinary concurrent traffic could
+  therefore return rows from outside the caller's scope, with no
+  malicious input involved; it also explains non-deterministic or
+  simply wrong keyword results under load. Widening the lock to cover
+  all three steps would have fixed correctness whilst serialising every
+  request on a pipeline behind one mutex, so a per-request index was
+  used instead, which is both correct and better under concurrency.
+
+  Covered by advisory
+  [GHSA-w437-9mwm-j6vq](https://github.com/pgEdge/pgedge-rag-server/security/advisories/GHSA-w437-9mwm-j6vq).
+  Affected responses cannot be identified from the server's own logs,
+  so a deployment that relied on the `filter` parameter to separate
+  tenants should treat responses served under concurrent load on any
+  affected version as potentially having included another tenant's
+  documents.
+
 - **Breaking:** `include_sources` on a query is now honoured only when
   the pipeline sets the new `allow_include_sources: true` option, which
   defaults to `false`. Previously any client could ask for the raw
@@ -109,7 +137,11 @@ and this project adheres to
   `search.bm25_max_documents` option, defaulting to 10000, and requests
   that hit the cap are logged because keyword recall is then partial.
   Vector search is unaffected and continues to rank across the whole
-  table via its index.
+  table via its index. Covered by advisory
+  [GHSA-5qg5-rgp6-j5m5](https://github.com/pgEdge/pgedge-rag-server/security/advisories/GHSA-5qg5-rgp6-j5m5),
+  which also asks operators to review the default cap of 10000 against
+  the size of their corpus after upgrading, since a cap far below
+  corpus size silently reduces keyword recall.
 
 - API error responses no longer relay upstream provider error text, which
   could disclose part of the configured provider API key. The query
@@ -136,6 +168,13 @@ and this project adheres to
   the point; operators should consult the server log. The `error` field
   of a health response and the `error` event of a streaming response are
   affected in the same way.
+
+  Covered by advisory
+  [GHSA-68g8-gh8f-7rhg](https://github.com/pgEdge/pgedge-rag-server/security/advisories/GHSA-68g8-gh8f-7rhg),
+  which notes that upgrading does not undo a disclosure that has
+  already happened: any provider credential configured on an affected
+  version, whilst the endpoint was reachable by an untrusted caller,
+  should be rotated.
 
 ### Added
 
@@ -215,21 +254,6 @@ and this project adheres to
   a sibling table's failure, which is the case that produced the false
   empty result above
   ([#49](https://github.com/pgEdge/pgedge-rag-server/issues/49)).
-
-- The BM25 keyword index is now built per request instead of being a
-  single per-pipeline object mutated in place. Each request used to
-  clear the shared index, refill it from its own filtered documents and
-  then search it; those three steps were individually locked but not
-  locked as a unit, so concurrent requests interleaved and a search
-  could run against a corpus that a different request's filter had
-  populated. Where an application uses the `filter` parameter to scope
-  results to a customer or tenant, ordinary concurrent traffic could
-  therefore return rows from outside the caller's scope, with no
-  malicious input involved; it also explains non-deterministic or
-  simply wrong keyword results under load. Widening the lock to cover
-  all three steps would have fixed correctness whilst serialising every
-  request on a pipeline behind one mutex, so a per-request index was
-  used instead, which is both correct and better under concurrency.
 
 - Vector search now selects the configured `id_column`, so vector
   results carry an id. Previously the vector arm returned empty
