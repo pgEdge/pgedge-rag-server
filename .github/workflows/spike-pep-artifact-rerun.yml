@@ -1,0 +1,366 @@
+# TEMPORARY spike (Spike 0) — artifact / rerun resolution behavior.
+#
+# Home: the throwaway branch `spike/pep-artifact-rerun` ONLY. Push-triggered on that
+# branch alone (a branch-scoped workflow_dispatch cannot run until the file exists on
+# the default branch, so we use push). It does NOT use tags, build real packages,
+# publish anything, or call PEP. Delete the branch after the spike. Nothing here
+# touches release.yml or any production workflow.
+#
+# It models BOTH rerun experiments in ONE run using four scenario-qualified cells,
+# then lets an IN-WORKFLOW resolver (and an independent LOCAL oracle) read the run's
+# jobs-BY-ATTEMPT API + artifacts and prove which resolution strategy is safe.
+#
+# ONLY the producer cells carry a `[pep-cell:<cell_id>]` marker in their job name
+# (the resolver + probe jobs deliberately do NOT), so nothing but a real producer
+# cell can enter resolution. Resolution begins from the PLANNED set
+# {fj-A, fj-B, full-A, full-B}; a planned cell with no mapped execution stays in the
+# report as never_ran (missing_job), it does not silently disappear.
+#
+# Deterministic outcome schedule (fail = exit BEFORE upload, i.e. no artifact):
+#   cell     scenario      fails on attempt(s)   demonstrates
+#   -------  ------------  -------------------   --------------------------------
+#   fj-A     failed_jobs   (never)               not rerun by "re-run failed jobs"
+#   fj-B     failed_jobs   1                     failed leg, fixed on rerun
+#   full-A   full          3                     stale stable artifact after a full
+#                                                re-run where the leg fails
+#   full-B   full          (never)               control
+#
+# Intended MANUAL sequence on the branch (NOT run this pass):
+#   attempt 1  push branch      -> fj-A ok, fj-B FAIL, full-A ok, full-B ok
+#   attempt 2  Re-run failed    -> only fj-B reruns (ok); fj-A/full-* not rerun
+#   attempt 3  Re-run all       -> full-A FAIL (stale a1 artifact persists),
+#                                  full-B ok, fj-A/fj-B rerun ok
+name: spike-pep-artifact-rerun
+
+on:
+  push:
+    branches: [spike/pep-artifact-rerun]
+
+# Least privilege at the top; individual jobs widen only where they must.
+permissions:
+  contents: read
+
+jobs:
+  # ---- producer cells (ONLY these carry the [pep-cell:<id>] marker) ----------
+  cell:
+    name: cell ${{ matrix.cell_id }} [pep-cell:${{ matrix.cell_id }}]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false          # a failed leg must NOT cancel the others
+      matrix:
+        include:
+          - cell_id: fj-A
+            fail_on: ""          # never fails
+          - cell_id: fj-B
+            fail_on: "1"         # fails on attempt 1 only
+          - cell_id: full-A
+            fail_on: "3"         # fails on attempt 3 only (the stale-artifact trap)
+          - cell_id: full-B
+            fail_on: ""          # never fails
+    steps:
+      - name: Decide outcome (deterministic on cell + attempt)
+        id: decide
+        env:
+          CELL: ${{ matrix.cell_id }}
+          FAIL_ON: ${{ matrix.fail_on }}
+          ATT: ${{ github.run_attempt }}
+        run: |
+          fail=false
+          for a in $FAIL_ON; do
+            if [ "$a" = "$ATT" ]; then fail=true; fi
+          done
+          echo "fail=$fail" >> "$GITHUB_OUTPUT"
+          echo "cell=$CELL attempt=$ATT fail_on='$FAIL_ON' -> fail=$fail"
+
+      - name: Fail BEFORE upload (models a build cell that produced no artifact)
+        if: steps.decide.outputs.fail == 'true'
+        run: |
+          echo "::notice::simulated failure for [pep-cell:${{ matrix.cell_id }}] at attempt ${{ github.run_attempt }} (no artifact uploaded)"
+          exit 1
+
+      - name: Produce a tiny payload recording the producing attempt
+        run: |
+          mkdir -p out
+          printf '{"cell_id":"%s","run_attempt":"%s","sha":"%s"}\n' \
+            "${{ matrix.cell_id }}" "${{ github.run_attempt }}" "${{ github.sha }}" > out/payload.json
+          cat out/payload.json
+
+      # Strategy under test #1: STABLE name + overwrite:true (presence-based).
+      # If a later attempt fails BEFORE this step, the prior attempt's stable
+      # artifact persists -> the stale-artifact trap.
+      - name: Upload stable-named artifact (overwrite)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pkg-${{ matrix.cell_id }}
+          path: out/
+          overwrite: true
+          retention-days: 1
+          if-no-files-found: error
+
+      # Strategy under test #2: ATTEMPT-QUALIFIED name (immutable per attempt).
+      - name: Upload attempt-qualified artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pkg-${{ matrix.cell_id }}-a${{ github.run_attempt }}
+          path: out/
+          retention-days: 1
+          if-no-files-found: error
+
+  # ---- in-workflow resolver (NO marker in its name) --------------------------
+  # needs:cell + if:always() so it runs AFTER the cells, including after a failed
+  # leg. Whether GitHub reruns THIS dependent job on "Re-run failed jobs" is one of
+  # the questions the spike answers: if it reruns at attempt 2 we get a
+  # resolver-report-a2 artifact; if not, only a1 (+ a3 after the full rerun). The
+  # report preserves resolve-job metadata across attempts so a later absence of a2
+  # can be diagnosed (did resolve not rerun / fail / succeed-without-artifact).
+  resolve:
+    name: resolve
+    needs: cell
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read            # used to page jobs-by-attempt + artifacts with the built-in token
+    env:
+      GH_TOKEN: ${{ github.token }}
+      R: ${{ github.repository }}
+      RUN: ${{ github.run_id }}
+      ATT: ${{ github.run_attempt }}
+    steps:
+      - name: Collect jobs BY INDIVIDUAL ATTEMPT (paginated, with job id) + filter=all + artifacts
+        run: |
+          set -euo pipefail
+          : > jobs.ndjson
+          for a in $(seq 1 "$ATT"); do
+            # --paginate follows Link headers; --jq emits one job object per line.
+            gh api --paginate \
+              "repos/$R/actions/runs/$RUN/attempts/$a/jobs?per_page=100" \
+              --jq ".jobs[] | {id: .id, endpoint_attempt: $a, name: .name, run_attempt: .run_attempt, status: .status, conclusion: .conclusion}" \
+              >> jobs.ndjson
+          done
+          # The simpler single-call alternative (each job already carries run_attempt).
+          # The resolver does a REAL normalized comparison of the two sources below.
+          gh api --paginate \
+            "repos/$R/actions/runs/$RUN/jobs?filter=all&per_page=100" \
+            --jq '.jobs[] | {id: .id, name: .name, run_attempt: .run_attempt, status: .status, conclusion: .conclusion}' > filter_all.ndjson
+          gh api --paginate \
+            "repos/$R/actions/runs/$RUN/artifacts?per_page=100" \
+            --jq '.artifacts[] | {name: .name, expired: .expired}' > arts.ndjson
+          echo "per-attempt job lines: $(wc -l < jobs.ndjson)   filter=all lines: $(wc -l < filter_all.ndjson)   artifact lines: $(wc -l < arts.ndjson)"
+
+      - name: Resolve per PLANNED cell (job metadata authoritative; presence never overrides)
+        run: |
+          set -euo pipefail
+          python3 - jobs.ndjson arts.ndjson filter_all.ndjson "$ATT" > "resolver-report-a$ATT.json" <<'PY'
+          import json, sys, re
+          jobs_path, arts_path, filterall_path, att = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+          PLANNED = ["fj-A", "fj-B", "full-A", "full-B"]           # resolution begins here
+          MARKER = re.compile(r'\[pep-cell:([^\]]+)\]')
+
+          def ndjson(p):
+              rows = []
+              try:
+                  with open(p) as fh:
+                      for line in fh:
+                          line = line.strip()
+                          if line:
+                              rows.append(json.loads(line))
+              except FileNotFoundError:
+                  pass
+              return rows
+
+          def cell_of(j):
+              m = MARKER.search(j.get("name") or "")
+              return m.group(1) if m else None
+
+          jobs_raw = ndjson(jobs_path)
+          arts = {a["name"] for a in ndjson(arts_path) if not a.get("expired")}
+          filter_all = ndjson(filterall_path)
+
+          # Dedup an identical job (same id) exposed through more than one attempt
+          # endpoint; remember how many endpoints each id appeared in.
+          by_id, endpoints_per_id = {}, {}
+          for j in jobs_raw:
+              by_id[j.get("id")] = j
+              endpoints_per_id.setdefault(j.get("id"), set()).add(j.get("endpoint_attempt"))
+
+          # Group completed PRODUCER jobs by (cell, run_attempt) using each job's OWN
+          # run_attempt. Two DISTINCT ids for one (cell, attempt) is an ambiguity we
+          # surface AND that blocks the cell from being authoritatively observed.
+          group, ambiguous_keys, ambiguities = {}, set(), []
+          for jid, j in by_id.items():
+              c = cell_of(j)
+              if c not in PLANNED or j.get("status") != "completed":
+                  continue
+              g = group.setdefault((c, j.get("run_attempt")), {"ids": set(), "conclusions": set()})
+              g["ids"].add(jid)
+              g["conclusions"].add(j.get("conclusion"))
+          execs = {}
+          for (c, ra), g in group.items():
+              if len(g["ids"]) > 1:
+                  ambiguities.append({"cell": c, "run_attempt": ra,
+                                      "job_ids": sorted(g["ids"]), "conclusions": sorted(g["conclusions"])})
+                  ambiguous_keys.add((c, ra))
+              non_success = g["conclusions"] - {"success"}
+              execs.setdefault(c, {})[ra] = "success" if not non_success else sorted(non_success)[0]
+
+          def qualified_attempts(cell):
+              # Anchored full match so one cell_id cannot match another sharing its prefix.
+              out = []
+              for n in arts:
+                  mm = re.fullmatch(r"pkg-" + re.escape(cell) + r"-a(\d+)", n)
+                  if mm:
+                      out.append(int(mm.group(1)))
+              return sorted(out)
+
+          def normalize(records):
+              # id -> {id, cell_id, run_attempt, status, conclusion} for PLANNED producers
+              out = {}
+              for j in records:
+                  c = j.get("cell_id") or cell_of(j)
+                  if c not in PLANNED:
+                      continue
+                  out[j.get("id")] = {"id": j.get("id"), "cell_id": c, "run_attempt": j.get("run_attempt"),
+                                      "status": j.get("status"), "conclusion": j.get("conclusion")}
+              return out
+
+          # Real normalized comparison of the two job sources (not counts).
+          na, nb = normalize(jobs_raw), normalize(filter_all)
+          missing_ids = sorted(set(na) - set(nb))
+          extra_ids = sorted(set(nb) - set(na))
+          field_mismatches = [{"id": i, "per_attempt": na[i], "filter_all": nb[i]}
+                              for i in sorted(set(na) & set(nb)) if na[i] != nb[i]]
+          filter_all_comparison = {"missing_ids": missing_ids, "extra_ids": extra_ids,
+                                   "field_mismatches": field_mismatches,
+                                   "equivalent": not missing_ids and not extra_ids and not field_mismatches}
+
+          # Preserve resolve-job metadata across attempts (name == "resolve", no marker).
+          resolver_job_attempts = {}
+          for jid, j in by_id.items():
+              if (j.get("name") or "") == "resolve":
+                  resolver_job_attempts[str(j.get("run_attempt"))] = {"status": j.get("status"), "conclusion": j.get("conclusion")}
+
+          report = {"resolver_attempt": att, "planned_cells": PLANNED,
+                    "ambiguities": ambiguities, "cells": {}}
+          for cell in PLANNED:                                     # every planned cell reported
+              ex = execs.get(cell, {})
+              stable = ("pkg-" + cell) in arts                     # exact (anchored by equality)
+              qual = qualified_attempts(cell)
+              if not ex:
+                  latest, concl, art_latest, ambiguous, final = None, None, False, False, "never_ran"
+              else:
+                  latest = max(ex)
+                  concl = ex[latest]
+                  ambiguous = (cell, latest) in ambiguous_keys
+                  art_latest = latest in qual
+                  # observed ONLY when latest execution succeeded AND its OWN
+                  # attempt-qualified artifact exists AND the mapping is unambiguous.
+                  if ambiguous:
+                      final = "ambiguous"
+                  elif concl != "success":
+                      final = "failed"
+                  elif art_latest:
+                      final = "observed"
+                  else:
+                      final = "missing_artifact"
+              naive_stable = "observed" if stable else "failed"
+              naive_qual_any = "observed" if qual else "failed"
+              report["cells"][cell] = {
+                  "latest_executed_attempt": latest,
+                  "latest_conclusion": concl,
+                  "missing_job": not ex,
+                  "ambiguous": ambiguous,
+                  "executions": {str(k): ex[k] for k in sorted(ex)},
+                  "artifact_stable_present": stable,
+                  "artifact_qualified_attempts": qual,
+                  "artifact_for_latest_attempt_present": art_latest,
+                  "final_state": final,                            # AUTHORITATIVE candidate state
+                  "naive_stable_presence_verdict": naive_stable,
+                  "naive_qualified_any_verdict": naive_qual_any,
+                  "stale_trap_would_mislead":
+                      final == "failed" and (naive_stable == "observed" or naive_qual_any == "observed"),
+              }
+
+          report["diagnostics"] = {
+              "per_attempt_records": len(jobs_raw),
+              "deduped_jobs": len(by_id),
+              "jobs_seen_via_multiple_endpoints": sum(1 for s in endpoints_per_id.values() if len(s) > 1),
+              "filter_all_records": len(filter_all),
+              "filter_all_comparison": filter_all_comparison,
+              "resolver_job_attempts": resolver_job_attempts,
+          }
+          json.dump(report, sys.stdout, indent=2)
+          print()
+          PY
+          echo "----- resolver-report-a$ATT.json -----"
+          cat "resolver-report-a$ATT.json"
+
+      - name: Upload attempt-qualified resolution report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: resolver-report-a${{ github.run_attempt }}
+          path: resolver-report-a${{ github.run_attempt }}.json
+          retention-days: 1
+          if-no-files-found: error
+
+  # ---- permission probes (public-repo behavior, measured not assumed) --------
+  # These do NOT prove actions:read is universally required. RAG is PUBLIC, so
+  # Actions metadata may be readable with a narrower token or even anonymously.
+  # We measure three conditions and report exactly what this public repo returns;
+  # PRIVATE-repo behavior must be confirmed separately. NO marker in these names.
+  probe-contents-only:
+    name: probe contents-read only
+    needs: cell
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read           # actions scope intentionally omitted -> 'none'
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Authenticated with contents:read only (NON-gating measurement)
+        run: |
+          set +e
+          out=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/1/jobs?per_page=1" 2>&1)
+          code=$?
+          echo "exit=$code"
+          echo "$out" | head -c 400; echo
+          if [ $code -eq 0 ]; then
+            echo "RESULT: jobs-by-attempt READABLE with contents:read only (no actions scope) on this public repo"
+          else
+            echo "RESULT: jobs-by-attempt NOT readable without actions:read (blocked)"
+          fi
+          exit 0                # public repo: measuring, never gating
+      - name: Anonymous (no token) — is public Actions metadata readable at all? (NON-gating)
+        run: |
+          set +e
+          status=$(curl -s -o anon.json -w '%{http_code}' \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/1/jobs?per_page=1")
+          echo "anonymous http_status=$status"
+          head -c 300 anon.json; echo
+          exit 0
+
+  probe-actions-read:
+    name: probe actions-read
+    needs: cell
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Authenticated with actions:read (baseline — MUST succeed or the job fails)
+        run: |
+          set -euo pipefail
+          if out=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/1/jobs?per_page=1" 2>err.txt); then
+            echo "RESULT: readable WITH actions:read (baseline)"
+            echo "$out" | head -c 400; echo
+          else
+            echo "RESULT: baseline FAILED with actions:read"; cat err.txt; exit 1
+          fi
