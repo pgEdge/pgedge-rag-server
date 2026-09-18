@@ -5,12 +5,11 @@ After=network.target postgresql.service
 [Service]
 User=pgedge
 Group=pgedge
-WorkingDirectory=/var/lib/pgedge/rag-server
-ExecStart=/usr/bin/pgedge-rag-server -config /etc/pgedge/pgedge-rag-server.yaml
-StandardOutput=append:/var/log/pgedge/rag-server/pgedge-rag-server.log
-StandardError=append:/var/log/pgedge/rag-server/pgedge-rag-server.log
+WorkingDirectory=/var/lib/pgedge/rag-server@MAJOR@
+ExecStart=@INSTALLROOT@/bin/pgedge-rag-server -config /etc/pgedge/@PKGNAME@.yaml
+StandardOutput=append:/var/log/pgedge/rag-server@MAJOR@/pgedge-rag-server.log
+StandardError=append:/var/log/pgedge/rag-server@MAJOR@/pgedge-rag-server.log
 Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
-

@@ -2,6 +2,14 @@
 
 export DH_VERBOSE = 1
 
+# Exported by pkg/build-deb.sh; the default keeps a manual build here working.
+# A major bump also needs debian/control's Source and Package updated.
+RAG_SERVER_MAJOR ?= 2
+PKG := pgedge-rag-server$(RAG_SERVER_MAJOR)
+# Hardcoded, matching the RPM: the unit file embeds this path.
+INSTALLROOT := /usr/pgedge/rag-server$(RAG_SERVER_MAJOR)
+DESTROOT := debian/$(PKG)$(INSTALLROOT)
+
 %:
 	dh $@
 
@@ -19,13 +27,15 @@ override_dh_auto_install:
 	gpg --armor --detach-sign --local-user "$$KEY_ID" \
 		--output debian/tmp/sbom/pgedge-rag-server-sbom.json.asc \
 		debian/tmp/sbom/pgedge-rag-server-sbom.json || exit 1
-	install -D -m 0755 pgedge-rag-server debian/pgedge-rag-server/usr/bin/pgedge-rag-server
-	install -D -m 0644 debian/pgedge-rag-server.tmpfiles.conf debian/pgedge-rag-server/usr/lib/tmpfiles.d/pgedge-rag-server.conf
-	install -D -m 0644 debian/pgedge-rag-server.logrotate debian/pgedge-rag-server/etc/logrotate.d/pgedge-rag-server
-	install -D -m 0644 debian/pgedge-rag-server.yaml debian/pgedge-rag-server/etc/pgedge/pgedge-rag-server.yaml
-	install -D -m 0644 debian/tmp/sbom/pgedge-rag-server-sbom.json debian/pgedge-rag-server/usr/share/pgedge-rag-server/pgedge-rag-server-sbom.json
-	install -D -m 0644 debian/tmp/sbom/pgedge-rag-server-sbom.json.asc debian/pgedge-rag-server/usr/share/pgedge-rag-server/pgedge-rag-server-sbom.json.asc
+	# Source filenames stay unsuffixed; only the destinations carry the
+	# major. No usr/bin entry: 1.x owns /usr/bin/pgedge-rag-server.
+	install -D -m 0755 pgedge-rag-server $(DESTROOT)/bin/pgedge-rag-server
+	install -D -m 0644 debian/pgedge-rag-server.yaml debian/$(PKG)/etc/pgedge/$(PKG).yaml
+	install -D -m 0644 debian/tmp/sbom/pgedge-rag-server-sbom.json $(DESTROOT)/sbom/pgedge-rag-server-sbom.json
+	install -D -m 0644 debian/tmp/sbom/pgedge-rag-server-sbom.json.asc $(DESTROOT)/sbom/pgedge-rag-server-sbom.json.asc
+	install -D -m 0644 debian/pgedge-rag-server.tmpfiles.conf debian/$(PKG)/usr/lib/tmpfiles.d/$(PKG).conf
+	install -D -m 0644 debian/pgedge-rag-server.logrotate debian/$(PKG)/etc/logrotate.d/$(PKG)
 	rm -rf debian/tmp/sbom
 
 override_dh_installsystemd:
-	dh_installsystemd --name=pgedge-rag-server --no-stop-on-upgrade
+	dh_installsystemd --name=$(PKG) --no-stop-on-upgrade

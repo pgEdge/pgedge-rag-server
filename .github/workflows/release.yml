@@ -5,7 +5,7 @@
 #   1. GoReleaser cross-builds the binary for all platforms and publishes the
 #      GitHub release (tag pushes only; --snapshot under simulate_tag).
 #   2. Build RPMs (almalinux 9/10, amd64+arm64) and DEBs (jammy / noble /
-#      bullseye / bookworm / trixie, amd64+arm64) via pgedge-builder-action.
+#      bookworm / trixie, amd64+arm64) via pgedge-builder-action.
 #      Package cells stage the linux tarball (+ LICENCE.md) from workflow
 #      artifacts, so they run in parallel with the release and work under
 #      simulate_tag on branches.
@@ -75,7 +75,7 @@ jobs:
                   component_name: pkg
                   archs: '["amd64","arm64"]'
                   rpm_images: '["almalinux:9","almalinux:10"]'
-                  deb_images: '["ubuntu:jammy","ubuntu:noble","ubuntu:resolute","debian:bullseye","debian:bookworm","debian:trixie"]'
+                  deb_images: '["ubuntu:jammy","ubuntu:noble","ubuntu:resolute","debian:bookworm","debian:trixie"]'
 
     # =========================================================================
     # Tag parsing → repo routing
