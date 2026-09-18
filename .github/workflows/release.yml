@@ -163,7 +163,9 @@ jobs:
     # RPM build matrix — one cell per (EL major, arch).
     # =========================================================================
     package-rpm:
-        name: Package RPM (${{ matrix.image }} ${{ matrix.arch }})
+        # The [pep-cell:<cell_id>] marker in the job DISPLAY NAME is how the PEP
+        # capture step associates this cell's build outcome to the detector cell.
+        name: Package RPM (${{ matrix.image }} ${{ matrix.arch }}) [pep-cell:${{ matrix.cell_id }}]
         needs: [detect-matrix, determine-repo-type, build]
         if: |
             always() &&
@@ -238,11 +240,26 @@ jobs:
                   gpg_public_key: ${{ secrets.GPG_FIPS_RPM_PUBLIC_KEY }}
                   pgedge_builder_token: ${{ secrets.PGEDGE_BUILDER_TOKEN }}
             - name: Upload RPM cell artifact
+              id: up_pkg
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
               with:
                   name: rpm__el-${{ steps.cell.outputs.os_version }}__${{ matrix.arch }}
                   path: output/el${{ steps.cell.outputs.os_version }}-${{ matrix.arch }}/
                   retention-days: 7
+            # PEP evidence: bind THIS package artifact to the detector cell with a
+            # pep-receipt/2. It inspects the SAME flat directory that was just
+            # uploaded (runtime rpm + its .src.rpm sidecar are both supported; the
+            # PEP reducer selects the runtime member and excludes source/debug).
+            # rpm tooling is provided by the action on the ubuntu runner if absent.
+            - name: Generate pep-receipt/2 for the RPM cell
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@1081b32fcefdcf07a9f1d23e4c9cdf73bc9e121c
+              with:
+                  cell_id: ${{ matrix.cell_id }}
+                  family: rpm
+                  package_dir: output/el${{ steps.cell.outputs.os_version }}-${{ matrix.arch }}
+                  package_artifact_id: ${{ steps.up_pkg.outputs.artifact-id }}
+                  package_artifact_name: rpm__el-${{ steps.cell.outputs.os_version }}__${{ matrix.arch }}
+                  package_artifact_digest: ${{ steps.up_pkg.outputs.artifact-digest }}
 
     # =========================================================================
     # DNF push
@@ -331,7 +348,9 @@ jobs:
     # DEB build matrix — one cell per (distro, arch).
     # =========================================================================
     package-deb:
-        name: Package DEB (${{ matrix.image }} ${{ matrix.arch }})
+        # The [pep-cell:<cell_id>] marker in the job DISPLAY NAME is how the PEP
+        # capture step associates this cell's build outcome to the detector cell.
+        name: Package DEB (${{ matrix.image }} ${{ matrix.arch }}) [pep-cell:${{ matrix.cell_id }}]
         needs: [detect-matrix, determine-repo-type, build]
         if: |
             always() &&
@@ -404,11 +423,25 @@ jobs:
                   gpg_public_key: ${{ secrets.GPG_FIPS_DEB_PUBLIC_KEY }}
                   pgedge_builder_token: ${{ secrets.PGEDGE_BUILDER_TOKEN }}
             - name: Upload DEB cell artifact
+              id: up_pkg
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
               with:
                   name: deb__${{ steps.cell.outputs.distro }}__${{ matrix.arch }}
                   path: output/${{ steps.cell.outputs.distro }}-${{ matrix.arch }}/
                   retention-days: 7
+            # PEP evidence: bind THIS package artifact to the detector cell with a
+            # pep-receipt/2. It inspects the SAME flat directory that was just
+            # uploaded (the runtime .deb plus any renamed -dbgsym .deb are both
+            # supported; the PEP reducer selects the runtime member only).
+            - name: Generate pep-receipt/2 for the DEB cell
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@1081b32fcefdcf07a9f1d23e4c9cdf73bc9e121c
+              with:
+                  cell_id: ${{ matrix.cell_id }}
+                  family: deb
+                  package_dir: output/${{ steps.cell.outputs.distro }}-${{ matrix.arch }}
+                  package_artifact_id: ${{ steps.up_pkg.outputs.artifact-id }}
+                  package_artifact_name: deb__${{ steps.cell.outputs.distro }}__${{ matrix.arch }}
+                  package_artifact_digest: ${{ steps.up_pkg.outputs.artifact-digest }}
 
     # =========================================================================
     # APT push
@@ -493,6 +526,145 @@ jobs:
                   targets: ${{ steps.targets.outputs.backup }}
                   aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
                   aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+    # =========================================================================
+    # PEP certification — downstream release evidence, NOT a prerequisite for
+    # publishing packages or the manifest. RAG passes detector evidence + release
+    # intent; PEP owns the platform / PostgreSQL / component universe (catalog
+    # driven), fans out per its own catalog, and applies report-only policy.
+    # =========================================================================
+    pep-evidence:
+        name: Build PEP certification inputs
+        # After every evidence-producing job so build states AND push outcomes are
+        # final and truthful. always() keeps it running under partial builds,
+        # skipped pushes (simulate_tag) and failures.
+        needs: [detect-matrix, determine-repo-type, build, package-rpm, package-deb, push-dnf, push-apt]
+        if: always() && needs.determine-repo-type.result == 'success'
+        permissions: {}      # local shell + step-summary only; no GitHub token needed
+        runs-on: ubuntu-latest
+        outputs:
+            release_intent:      ${{ steps.evidence.outputs.release_intent }}
+            publication_results: ${{ steps.evidence.outputs.publication_results }}
+            execution_mode:      ${{ steps.evidence.outputs.execution_mode }}
+            enforcement:         ${{ steps.evidence.outputs.enforcement }}
+        env:
+            VERSION:       ${{ needs.determine-repo-type.outputs.component-version }}
+            BUILDNUM:      ${{ needs.determine-repo-type.outputs.component-buildnum }}
+            EFFECTIVE_TAG: ${{ needs.determine-repo-type.outputs.effective-tag }}
+            REPO_TYPE:     ${{ needs.determine-repo-type.outputs.repo-type }}
+            SIMULATED:     ${{ needs.determine-repo-type.outputs.simulated }}
+            PUSH_DNF:      ${{ needs.push-dnf.result }}
+            PUSH_APT:      ${{ needs.push-apt.result }}
+        steps:
+            - name: Compose validated PEP inputs (truthful intent + publication)
+              id: evidence
+              run: |
+                  set -euo pipefail
+                  # Fail closed on unexpected/blank inputs: an unknown SIMULATED must NOT
+                  # accidentally select full mode, and a non-vocabulary push result must
+                  # not be forwarded as truth. Reject rather than guess.
+                  case "${SIMULATED}" in
+                      true|false) : ;;
+                      *) echo "::error::SIMULATED must be exactly 'true' or 'false' (got '${SIMULATED}')"; exit 1 ;;
+                  esac
+                  for r in "${PUSH_DNF}" "${PUSH_APT}"; do
+                      case "$r" in
+                          success|failure|cancelled|skipped) : ;;
+                          *) echo "::error::push result must be one of success|failure|cancelled|skipped (got '$r')"; exit 1 ;;
+                      esac
+                  done
+                  for v in VERSION BUILDNUM EFFECTIVE_TAG REPO_TYPE; do
+                      if [ -z "${!v}" ]; then echo "::error::${v} must be nonblank"; exit 1; fi
+                  done
+                  # A simulated release is a dry-run preview; a real tag is full
+                  # certification. Enforcement stays observe (report-only).
+                  if [ "${SIMULATED}" = "true" ]; then mode=preview; else mode=full; fi
+                  # publication_results carries the REAL push job conclusions verbatim.
+                  # GitHub results (success|failure|cancelled|skipped) are exactly the
+                  # states the PEP reducer accepts, so no remapping is needed: under
+                  # simulate_tag the push jobs are skipped -> "skipped"; on a real tag
+                  # they carry the true per-family outcome.
+                  pub=$(jq -nc --arg rpm "${PUSH_DNF}" --arg deb "${PUSH_APT}" \
+                        '{rpm:$rpm, deb:$deb}')
+                  # release_intent: logical component + version identity + channel +
+                  # the simulated flag as a real JSON boolean.
+                  intent=$(jq -nc \
+                        --arg component "rag" \
+                        --arg version "${VERSION}" \
+                        --arg buildnum "${BUILDNUM}" \
+                        --arg tag "${EFFECTIVE_TAG}" \
+                        --arg channel "${REPO_TYPE}" \
+                        --argjson simulated "${SIMULATED}" \
+                        '{logical_component:$component, intended_version:$version, intended_buildnum:$buildnum, effective_tag:$tag, channel:$channel, simulated:$simulated}')
+                  {
+                    echo "release_intent=${intent}"
+                    echo "publication_results=${pub}"
+                    echo "execution_mode=${mode}"
+                    echo "enforcement=observe"
+                  } >> "$GITHUB_OUTPUT"
+                  echo "release_intent=${intent}"
+                  echo "publication_results=${pub}"
+                  echo "execution_mode=${mode} enforcement=observe"
+
+    certify:
+        name: Certify packages (PEP)
+        needs: [detect-matrix, pep-evidence]
+        if: always() && needs.pep-evidence.result == 'success'
+        permissions:
+            contents: read      # nested checkouts of the pinned PEP implementation
+            actions: read       # capture lists THIS run's jobs + downloads its artifacts by id
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-certify.yml@1081b32fcefdcf07a9f1d23e4c9cdf73bc9e121c
+        with:
+            rpm_matrix:          ${{ needs.detect-matrix.outputs.rpm_matrix }}
+            deb_matrix:          ${{ needs.detect-matrix.outputs.deb_matrix }}
+            release_intent:      ${{ needs.pep-evidence.outputs.release_intent }}
+            publication_results: ${{ needs.pep-evidence.outputs.publication_results }}
+            enforcement:         ${{ needs.pep-evidence.outputs.enforcement }}
+            execution_mode:      ${{ needs.pep-evidence.outputs.execution_mode }}
+        # Preview must not expose DockerHub creds to the reusable workflow. One call
+        # for both modes: each secret is passed ONLY in full mode; in preview it is an
+        # empty string, so the coordinator (secrets required:false) never receives the
+        # credential and pulls anonymously. These creds only raise the image-pull rate
+        # limit for FULL-mode real-tag legs.
+        secrets:
+            DOCKERHUB_USERNAME: ${{ needs.pep-evidence.outputs.execution_mode == 'full' && secrets.DOCKERHUB_USERNAME || '' }}
+            DOCKERHUB_TOKEN:    ${{ needs.pep-evidence.outputs.execution_mode == 'full' && secrets.DOCKERHUB_TOKEN || '' }}
+
+    pep-report:
+        name: PEP certification report
+        needs: certify
+        # Report on coordinator success OR failure, but not when it was skipped
+        # (unrelated/manual runs) — avoids an empty, meaningless summary.
+        if: always() && needs.certify.result != 'skipped'
+        permissions: {}      # writes only $GITHUB_STEP_SUMMARY; no GitHub token needed
+        runs-on: ubuntu-latest
+        steps:
+            - name: Summarize PEP certification for developers
+              env:
+                  JOB_RESULT: ${{ needs.certify.result }}
+                  STATE:      ${{ needs.certify.outputs.certification_state }}
+                  CONCLUSION: ${{ needs.certify.outputs.certification_conclusion }}
+                  ES:         ${{ needs.certify.outputs.execution_status }}
+                  TV:         ${{ needs.certify.outputs.test_verdict }}
+                  COV:        ${{ needs.certify.outputs.coverage_status }}
+                  REASON:     ${{ needs.certify.outputs.reason_code }}
+                  EVIDENCE:   ${{ needs.certify.outputs.evidence_artifact_name }}
+              run: |
+                  set -euo pipefail
+                  {
+                    echo "## PEP certification"
+                    echo ""
+                    echo "| field | value |"
+                    echo "| --- | --- |"
+                    echo "| coordinator job | \`${JOB_RESULT}\` |"
+                    echo "| certification_state | \`${STATE:-—}\` |"
+                    echo "| workflow_conclusion | \`${CONCLUSION:-—}\` |"
+                    echo "| execution_status | \`${ES:-—}\` |"
+                    echo "| test_verdict | \`${TV:-—}\` |"
+                    echo "| coverage_status | \`${COV:-—}\` |"
+                    echo "| reason_code | \`${REASON:-—}\` |"
+                    echo "| evidence_artifact | \`${EVIDENCE:-—}\` |"
+                  } >> "$GITHUB_STEP_SUMMARY"
 
     # =========================================================================
     # Aggregated manifest + Slack
