@@ -1,0 +1,155 @@
+# =============================================================================
+#  RAG2 PUBLISHED-PACKAGE REPLAY  --  NOT A BUILD OR RELEASE  (temporary spike)
+# =============================================================================
+#
+#  THIS IS NOT the release pipeline. It builds nothing, packages nothing,
+#  publishes nothing, tags nothing, cuts no GitHub release, and sends no Slack.
+#
+#  Purpose: certify the ALREADY-PUBLISHED RAG2 2.0.0 (build 1, staging) packages
+#  through the normal PEP coordinator, exactly as if they had just been built and
+#  published by our own run -- WITHOUT rebuilding or re-publishing them.
+#
+#  This caller has exactly two responsibilities:
+#    1. obtain the REAL RAG detector build matrices (reusing release.yml's
+#       detector job verbatim -- same action, pin, inputs and outputs), and
+#    2. invoke the pinned PEP published-package replay reusable workflow with
+#       those matrices plus the verified replay identity.
+#
+#  Everything else -- package retrieval from the channel, pep-receipt/2
+#  generation, per-family reconciliation, parallel certification fan-out across
+#  the PEP catalog, coverage/policy, aggregation and reporting -- belongs to PEP
+#  and lives ONLY in the pinned reusable workflow. This file deliberately copies
+#  NO PEP orchestration, NO platform/OS/arch/PG universe, NO package-fetch logic
+#  and NO aggregation logic. The active runtime package name (pgedge-rag-server2)
+#  is resolved PEP-side from PEP's capture policy; it is not named here.
+#
+#  Trigger: a push to the throwaway spike branch only. There is no
+#  workflow_dispatch, no tag, no release, no pull_request and no schedule, so it
+#  can never fire from a real release event.
+# =============================================================================
+
+name: RAG2 Published-Package Replay (NOT A BUILD OR RELEASE)
+
+on:
+    push:
+        branches:
+            - spike/pep-published-replay
+
+# Least privilege: only the checkout in the detector job needs read. The replay
+# job re-grants exactly what the pinned PEP workflow needs (see below); the
+# banner job needs no token at all.
+permissions:
+    contents: read
+
+concurrency:
+    group: rag-published-replay-${{ github.ref_name }}
+    cancel-in-progress: false
+
+jobs:
+    # -------------------------------------------------------------------------
+    # Prominent banner in THIS run's summary: make unmistakable that this is a
+    # replay of published packages, not a build or release. No token required.
+    # -------------------------------------------------------------------------
+    announce:
+        name: Published-package replay banner (NOT A RELEASE)
+        runs-on: ubuntu-latest
+        permissions: {}
+        steps:
+            - name: Announce replay intent
+              run: |
+                  set -euo pipefail
+                  {
+                    echo "## RAG2 published-package REPLAY -- NOT a build or release"
+                    echo ""
+                    echo "This run does **not** build, package, tag, publish, release or notify."
+                    echo "It obtains the real RAG detector matrices and hands them to the pinned"
+                    echo "PEP published-package replay, which retrieves the already-published"
+                    echo "RAG2 2.0.0 (build 1, staging) packages and certifies them through the"
+                    echo "normal PEP coordinator."
+                    echo ""
+                    echo "| replay identity | value |"
+                    echo "| --- | --- |"
+                    echo "| logical_component | \`rag\` |"
+                    echo "| intended_version | \`2.0.0\` |"
+                    echo "| intended_buildnum | \`1\` |"
+                    echo "| effective_tag | \`v2.0.0\` |"
+                    echo "| channel | \`staging\` |"
+                    echo "| PEP replay workflow | \`pep-published-replay.yml@5ae9d0e\` |"
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+    # -------------------------------------------------------------------------
+    # Detect build matrix -- reused VERBATIM from release.yml's detector job:
+    # same checkout pin, same private detector clone, same detector action and
+    # inputs, same matrix outputs. This is the ONLY source of the real RAG cells.
+    # The publish-only timestamp outputs (dnf_ts/apt_ts) are intentionally
+    # dropped: this workflow never pushes, so they have no meaning here.
+    # -------------------------------------------------------------------------
+    detect-matrix:
+        name: Detect build matrix
+        runs-on: ubuntu-latest
+        outputs:
+            rpm_matrix: ${{ steps.detect.outputs.rpm_matrix }}
+            deb_matrix: ${{ steps.detect.outputs.deb_matrix }}
+            has_rpm:    ${{ steps.detect.outputs.has_rpm }}
+            has_deb:    ${{ steps.detect.outputs.has_deb }}
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+            - name: Checkout pgedge-detect-build-matrix
+              env:
+                  TOKEN: ${{ secrets.PGEDGE_BUILDER_TOKEN }}
+              run: |
+                  set -euo pipefail
+                  mkdir -p .github/actions
+                  git clone --depth 1 \
+                      "https://x-access-token:${TOKEN}@github.com/pgEdge/pgedge-detect-build-matrix.git" \
+                      ".github/actions/pgedge-detect-build-matrix"
+            - name: Detect build matrix
+              id: detect
+              uses: ./.github/actions/pgedge-detect-build-matrix
+              with:
+                  component_name: pkg
+                  archs: '["amd64","arm64"]'
+                  rpm_images: '["almalinux:9","almalinux:10"]'
+                  deb_images: '["ubuntu:jammy","ubuntu:noble","ubuntu:resolute","debian:bookworm","debian:trixie"]'
+
+    # -------------------------------------------------------------------------
+    # Replay: hand the real detector matrices + the verified replay identity to
+    # the pinned PEP published-package replay reusable workflow. PEP owns package
+    # retrieval, receipts, reconciliation, parallel certification, aggregation,
+    # policy and reporting -- none of it is reproduced here.
+    #
+    # Two independent pins, by design:
+    #   - the reusable workflow (and, inside it, its own helpers) is pinned to the
+    #     reviewed PEP spike SHA 5ae9d0e...;
+    #   - inside that workflow the certification implementation is pinned
+    #     absolutely to 1081b32... (not visible or overridable from here).
+    # -------------------------------------------------------------------------
+    replay:
+        name: Replay published packages through PEP certification (NOT A RELEASE)
+        needs: detect-matrix
+        if: ${{ needs.detect-matrix.result == 'success' }}
+        # The token handed to the reusable workflow: contents:read for its nested
+        # checkouts of the pinned PEP implementation; actions:read so its capture
+        # step can list THIS run's jobs and download their artifacts by id.
+        permissions:
+            contents: read
+            actions: read
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-published-replay.yml@5ae9d0e91f878eb2f068996d05f5616b0eb1b048
+        with:
+            rpm_matrix:        ${{ needs.detect-matrix.outputs.rpm_matrix }}
+            deb_matrix:        ${{ needs.detect-matrix.outputs.deb_matrix }}
+            # Verified replay identity for the already-published RAG2 2.0.0 build 1.
+            # 'rag' is the logical component; the concrete runtime package name is
+            # resolved PEP-side from its capture policy, not supplied here.
+            logical_component: rag
+            intended_version:  '2.0.0'
+            intended_buildnum: '1'
+            effective_tag:     'v2.0.0'
+            channel:           staging
+        # Only the optional Docker Hub credentials the reusable workflow declares
+        # (required:false). They merely raise the image-pull rate limit; if unset
+        # in this repo they resolve empty and PEP pulls anonymously.
+        secrets:
+            DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+            DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
