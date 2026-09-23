@@ -74,7 +74,7 @@ jobs:
                     echo "| intended_buildnum | \`1\` |"
                     echo "| effective_tag | \`v2.0.0\` |"
                     echo "| channel | \`staging\` |"
-                    echo "| PEP replay workflow | \`pep-published-replay.yml@5ae9d0e\` |"
+                    echo "| PEP replay workflow | \`pep-published-replay.yml@83c19f2\` |"
                   } >> "$GITHUB_STEP_SUMMARY"
 
     # -------------------------------------------------------------------------
@@ -121,9 +121,9 @@ jobs:
     #
     # Two independent pins, by design:
     #   - the reusable workflow (and, inside it, its own helpers) is pinned to the
-    #     reviewed PEP spike SHA 5ae9d0e...;
+    #     reviewed PEP spike SHA 83c19f2...;
     #   - inside that workflow the certification implementation is pinned
-    #     absolutely to 1081b32... (not visible or overridable from here).
+    #     absolutely to 6854a7b... (not visible or overridable from here).
     # -------------------------------------------------------------------------
     replay:
         name: Replay published packages through PEP certification (NOT A RELEASE)
@@ -135,7 +135,7 @@ jobs:
         permissions:
             contents: read
             actions: read
-        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-published-replay.yml@5ae9d0e91f878eb2f068996d05f5616b0eb1b048
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-published-replay.yml@83c19f2d3eabd3b5725c851b56352d67eaab0889
         with:
             rpm_matrix:        ${{ needs.detect-matrix.outputs.rpm_matrix }}
             deb_matrix:        ${{ needs.detect-matrix.outputs.deb_matrix }}
