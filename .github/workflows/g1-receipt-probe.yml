@@ -1,0 +1,106 @@
+name: G1 receipt-failure probe (spike)
+
+# Temporary, branch-only probe of the G1 release pattern: it checks that a
+# receipt-step execution failure leaves the package job successful, so the job
+# that publishes still runs. It reproduces the pattern with no build, packages,
+# secrets, publication, tag, release or notification:
+#
+#   package  One matrix cell, like package-rpm / package-deb. Its pinned PEP
+#            receipt step (continue-on-error: true, as in release.yml) is given
+#            a package directory that does not exist, so the action fails while
+#            running. The next step asserts that outcome.
+#   publish  A no-op stand-in for push-dnf / push-apt, gated on the same
+#            needs.<package job>.result == 'success' dependency. The real jobs
+#            also require a tag, which a branch push never has.
+#   verdict  Always runs and fails the run unless package succeeded and publish
+#            ran and succeeded, so the run's conclusion is the probe's answer.
+#
+# It cannot show a failure to download the pinned action: GitHub resolves
+# actions while setting up the job, before any step runs, where
+# continue-on-error does not apply.
+#
+# The only trigger is a push to this spike branch.
+
+on:
+    push:
+        branches: [spike/g1-receipt-probe]
+
+permissions: {}
+
+concurrency:
+    group: g1-receipt-probe-${{ github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    package:
+        name: Package (probe cell ${{ matrix.cell_id }})
+        if: github.repository == 'pgEdge/pgedge-rag-server' && github.ref == 'refs/heads/spike/g1-receipt-probe'
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - cell_id: g1-probe.deb.none.amd64
+        steps:
+            - name: Generate pep-receipt/2 (deliberately failing, no package directory)
+              id: receipt
+              continue-on-error: true
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@a9471be76f08dc5a20d93f796477691bfd9a8ff7
+              with:
+                  cell_id: ${{ matrix.cell_id }}
+                  family: deb
+                  package_dir: g1-probe-nonexistent-package-dir
+                  package_artifact_id: "1"
+                  package_artifact_name: g1-probe-package
+                  package_artifact_digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            - name: Assert the receipt action failed while running and was tolerated
+              env:
+                  OUTCOME: ${{ steps.receipt.outcome }}
+                  CONCLUSION: ${{ steps.receipt.conclusion }}
+                  RECEIPT_NAME: ${{ steps.receipt.outputs.receipt_artifact_name }}
+              run: |
+                  set -euo pipefail
+                  echo "receipt step: outcome=${OUTCOME} conclusion=${CONCLUSION} receipt_artifact_name='${RECEIPT_NAME}'"
+                  fail() { echo "::error::$1"; exit 1; }
+                  [ "${OUTCOME}" = "failure" ] || fail "receipt step outcome is '${OUTCOME}', expected failure"
+                  [ "${CONCLUSION}" = "success" ] || fail "receipt step conclusion is '${CONCLUSION}', expected success under continue-on-error"
+                  [ -z "${RECEIPT_NAME}" ] || fail "the receipt step produced a receipt artifact name"
+                  # Attribute the failure to the receipt build, not to missing tooling:
+                  # the action's tooling check needs python3 and dpkg-deb, both present.
+                  command -v python3 >/dev/null || fail "python3 missing; failure not attributable"
+                  command -v dpkg-deb >/dev/null || fail "dpkg-deb missing; failure not attributable"
+                  [ ! -e g1-probe-nonexistent-package-dir ] || fail "the probe package directory unexpectedly exists"
+                  echo "OK: the pinned receipt action ran, failed, and was tolerated; this job continues"
+
+    publish:
+        name: Publish (no-op stand-in for push-dnf / push-apt)
+        needs: [package]
+        if: always() && needs.package.result == 'success'
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - name: Stand-in for publication (no-op)
+              env:
+                  PACKAGE_RESULT: ${{ needs.package.result }}
+              run: echo "publication would run here (needs.package.result=${PACKAGE_RESULT}); nothing is published"
+
+    verdict:
+        name: Verdict
+        needs: [package, publish]
+        if: always()
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - name: Require package success and publish to have run
+              env:
+                  PACKAGE_RESULT: ${{ needs.package.result }}
+                  PUBLISH_RESULT: ${{ needs.publish.result }}
+              run: |
+                  set -euo pipefail
+                  echo "package=${PACKAGE_RESULT} publish=${PUBLISH_RESULT}"
+                  if [ "${PACKAGE_RESULT}" != "success" ] || [ "${PUBLISH_RESULT}" != "success" ]; then
+                      echo "::error::the G1 pattern did not hold: a tolerated receipt failure should leave the package job successful and let publication run"
+                      exit 1
+                  fi
+                  echo "G1 pattern holds: receipt failure tolerated, package job succeeded, publication ran"
