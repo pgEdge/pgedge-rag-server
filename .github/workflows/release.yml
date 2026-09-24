@@ -251,8 +251,14 @@ jobs:
             # uploaded (runtime rpm + its .src.rpm sidecar are both supported; the
             # PEP reducer selects the runtime member and excludes source/debug).
             # rpm tooling is provided by the action on the ubuntu runner if absent.
+            # Receipt-step execution failures do not block publication: if this
+            # step fails, the job still succeeds and push-dnf still runs. If no
+            # valid receipt is available, PEP records this cell as a coverage gap.
+            # continue-on-error cannot help if the pinned action itself fails to
+            # download; GitHub resolves it while setting up the job, before any step.
             - name: Generate pep-receipt/2 for the RPM cell
-              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@1081b32fcefdcf07a9f1d23e4c9cdf73bc9e121c
+              continue-on-error: true
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@a9471be76f08dc5a20d93f796477691bfd9a8ff7
               with:
                   cell_id: ${{ matrix.cell_id }}
                   family: rpm
@@ -433,8 +439,14 @@ jobs:
             # pep-receipt/2. It inspects the SAME flat directory that was just
             # uploaded (the runtime .deb plus any renamed -dbgsym .deb are both
             # supported; the PEP reducer selects the runtime member only).
+            # Receipt-step execution failures do not block publication: if this
+            # step fails, the job still succeeds and push-apt still runs. If no
+            # valid receipt is available, PEP records this cell as a coverage gap.
+            # continue-on-error cannot help if the pinned action itself fails to
+            # download; GitHub resolves it while setting up the job, before any step.
             - name: Generate pep-receipt/2 for the DEB cell
-              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@1081b32fcefdcf07a9f1d23e4c9cdf73bc9e121c
+              continue-on-error: true
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@a9471be76f08dc5a20d93f796477691bfd9a8ff7
               with:
                   cell_id: ${{ matrix.cell_id }}
                   family: deb
@@ -613,7 +625,7 @@ jobs:
         permissions:
             contents: read      # nested checkouts of the pinned PEP implementation
             actions: read       # capture lists THIS run's jobs + downloads its artifacts by id
-        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-certify.yml@1081b32fcefdcf07a9f1d23e4c9cdf73bc9e121c
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-certify.yml@a9471be76f08dc5a20d93f796477691bfd9a8ff7
         with:
             rpm_matrix:          ${{ needs.detect-matrix.outputs.rpm_matrix }}
             deb_matrix:          ${{ needs.detect-matrix.outputs.deb_matrix }}
