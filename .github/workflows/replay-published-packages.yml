@@ -1,6 +1,17 @@
 # =============================================================================
-#  RAG2 PUBLISHED-PACKAGE REPLAY  --  NOT A BUILD OR RELEASE  (temporary spike)
+#  RAG2 BYTE-PROOF SUBSET PROBE  --  4 OF THE DETECTOR CELLS, NOT A BUILD,
+#  RELEASE OR FULL CERTIFICATION  (temporary spike)
 # =============================================================================
+#
+#  This branch runs the published-package replay below on FOUR of the real
+#  detector cells only, to prove installed-package bytes live before another
+#  full replay: el-9 arm64, el-10 amd64, bookworm arm64 and noble amd64 (one per
+#  family and architecture; dnf 4.14 / 4.20 and apt 2.6 / 2.7). pep-certify runs
+#  each on PG 16, 17 and 18: 12 test runs. The PEP replay selects the cells from
+#  the detector output (failing closed if one is absent or duplicated) and
+#  records the run as a subset probe; any complete coverage is relative to these
+#  four cells. el-9 amd64 (OEL9) is left out only to isolate byte proof from its
+#  known product failures; it stays in the full replay and is not unsupported.
 #
 #  THIS IS NOT the release pipeline. It builds nothing, packages nothing,
 #  publishes nothing, tags nothing, cuts no GitHub release, and sends no Slack.
@@ -28,12 +39,12 @@
 #  can never fire from a real release event.
 # =============================================================================
 
-name: RAG2 Published-Package Replay (NOT A BUILD OR RELEASE)
+name: RAG2 Byte-Proof Subset Probe, 4 cells (NOT A BUILD, RELEASE OR FULL CERTIFICATION)
 
 on:
     push:
         branches:
-            - spike/pep-published-replay
+            - spike/pep-byte-proof-replay
 
 # Least privilege: only the checkout in the detector job needs read. The replay
 # job re-grants exactly what the pinned PEP workflow needs (see below); the
@@ -59,6 +70,13 @@ jobs:
               run: |
                   set -euo pipefail
                   {
+                    echo "## RAG2 BYTE-PROOF SUBSET PROBE -- 4 detector cells, NOT full certification"
+                    echo ""
+                    echo "Only four of the detector cells are retrieved and certified (12 test runs:"
+                    echo "each cell on PG 16, 17 and 18). Any complete coverage is relative to these"
+                    echo "four cells. el-9 amd64 (OEL9) is left out only to isolate byte proof; it stays"
+                    echo "in the full replay and is not declared unsupported."
+                    echo ""
                     echo "## RAG2 published-package REPLAY -- NOT a build or release"
                     echo ""
                     echo "This run does **not** build, package, tag, publish, release or notify."
@@ -74,7 +92,9 @@ jobs:
                     echo "| intended_buildnum | \`1\` |"
                     echo "| effective_tag | \`v2.0.0\` |"
                     echo "| channel | \`staging\` |"
-                    echo "| PEP replay workflow | \`pep-published-replay.yml@ab5bc87\` |"
+                    echo "| PEP replay workflow | \`pep-published-replay.yml@b216635\` |"
+                    echo "| certification implementation | \`pep-certify.yml@c61ece5\` |"
+                    echo "| selected cells | el-9 arm64, el-10 amd64, bookworm arm64, noble amd64 |"
                   } >> "$GITHUB_STEP_SUMMARY"
 
     # -------------------------------------------------------------------------
@@ -121,12 +141,12 @@ jobs:
     #
     # Two independent pins, by design:
     #   - the reusable workflow (and, inside it, its own helpers) is pinned to the
-    #     reviewed PEP spike SHA ab5bc87...;
+    #     reviewed PEP probe SHA b216635...;
     #   - inside that workflow the certification implementation is pinned
-    #     absolutely to a448072... (not visible or overridable from here).
+    #     absolutely to c61ece5... (not visible or overridable from here).
     # -------------------------------------------------------------------------
     replay:
-        name: Replay published packages through PEP certification (NOT A RELEASE)
+        name: Four-cell byte-proof subset probe through PEP certification (NOT A RELEASE)
         needs: detect-matrix
         if: ${{ needs.detect-matrix.result == 'success' }}
         # The token handed to the reusable workflow: contents:read for its nested
@@ -135,7 +155,7 @@ jobs:
         permissions:
             contents: read
             actions: read
-        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-published-replay.yml@ab5bc87c606ce6a64cba5b1d1feb7c3f57c07d17
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-published-replay.yml@b216635f004bc919a8e42780cf22e7b027cd73eb
         with:
             rpm_matrix:        ${{ needs.detect-matrix.outputs.rpm_matrix }}
             deb_matrix:        ${{ needs.detect-matrix.outputs.deb_matrix }}
@@ -147,6 +167,9 @@ jobs:
             intended_buildnum: '1'
             effective_tag:     'v2.0.0'
             channel:           staging
+            # SUBSET PROBE: the four cells to retrieve and certify, selected by PEP from
+            # the real detector matrices above (never synthesized).
+            select_cells: '["pepcell.v1.rpm.el-9.arm64.pkg","pepcell.v1.rpm.el-10.amd64.pkg","pepcell.v1.deb.bookworm.arm64.pkg","pepcell.v1.deb.noble.amd64.pkg"]'
         # Only the optional Docker Hub credentials the reusable workflow declares
         # (required:false). They merely raise the image-pull rate limit; if unset
         # in this repo they resolve empty and PEP pulls anonymously.
