@@ -70,8 +70,10 @@ jobs:
                   {
                     echo "## RAG2 published-package REPLAY with byte proof -- NOT a build or release"
                     echo ""
-                    echo "Every cell the real detector reports is retrieved and certified (no cell"
-                    echo "selection). Package-digest proof and test outcomes are reported separately."
+                    echo "Every cell the real detector reports is submitted unfiltered (no cell"
+                    echo "selection) for attempted retrieval and certification; the final evidence"
+                    echo "determines what succeeded. Package-digest proof and test outcomes are"
+                    echo "reported separately."
                     echo ""
                     echo "This run does **not** build, package, tag, publish, release or notify."
                     echo "It obtains the real RAG detector matrices and hands them to the pinned"
