@@ -258,7 +258,7 @@ jobs:
             # download; GitHub resolves it while setting up the job, before any step.
             - name: Generate pep-receipt/2 for the RPM cell
               continue-on-error: true
-              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@9b4b95e336716a4a99be38e80a3c47a72b453258
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@a2a3c5f3216df1f149a76724fb1071bfe87bb593
               with:
                   cell_id: ${{ matrix.cell_id }}
                   family: rpm
@@ -446,7 +446,7 @@ jobs:
             # download; GitHub resolves it while setting up the job, before any step.
             - name: Generate pep-receipt/2 for the DEB cell
               continue-on-error: true
-              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@9b4b95e336716a4a99be38e80a3c47a72b453258
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@a2a3c5f3216df1f149a76724fb1071bfe87bb593
               with:
                   cell_id: ${{ matrix.cell_id }}
                   family: deb
@@ -559,7 +559,7 @@ jobs:
         permissions:
             contents: read      # nested checkouts of the pinned PEP implementation
             actions: read       # capture lists THIS run's jobs + downloads its artifacts by id
-        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@9b4b95e336716a4a99be38e80a3c47a72b453258
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@a2a3c5f3216df1f149a76724fb1071bfe87bb593
         with:
             rpm_matrix:      ${{ needs.detect-matrix.outputs.rpm_matrix }}
             deb_matrix:      ${{ needs.detect-matrix.outputs.deb_matrix }}
