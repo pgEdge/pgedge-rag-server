@@ -252,13 +252,15 @@ jobs:
             # PEP reducer selects the runtime member and excludes source/debug).
             # rpm tooling is provided by the action on the ubuntu runner if absent.
             # Receipt-step execution failures do not block publication: if this
-            # step fails, the job still succeeds and push-dnf still runs. If no
-            # valid receipt is available, PEP records this cell as a coverage gap.
+            # step fails, the job still succeeds and push-dnf still runs. If this
+            # cell's receipt or package upload is missing or expired, PEP records
+            # a coverage gap; if either is present but invalid (malformed,
+            # ambiguous or contradictory), PEP blocks certification.
             # continue-on-error cannot help if the pinned action itself fails to
             # download; GitHub resolves it while setting up the job, before any step.
             - name: Generate pep-receipt/2 for the RPM cell
               continue-on-error: true
-              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@a2a3c5f3216df1f149a76724fb1071bfe87bb593
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@7c785197dbac792eabfb69a1c80d139491fdd716
               with:
                   cell_id: ${{ matrix.cell_id }}
                   family: rpm
@@ -440,13 +442,15 @@ jobs:
             # uploaded (the runtime .deb plus any renamed -dbgsym .deb are both
             # supported; the PEP reducer selects the runtime member only).
             # Receipt-step execution failures do not block publication: if this
-            # step fails, the job still succeeds and push-apt still runs. If no
-            # valid receipt is available, PEP records this cell as a coverage gap.
+            # step fails, the job still succeeds and push-apt still runs. If this
+            # cell's receipt or package upload is missing or expired, PEP records
+            # a coverage gap; if either is present but invalid (malformed,
+            # ambiguous or contradictory), PEP blocks certification.
             # continue-on-error cannot help if the pinned action itself fails to
             # download; GitHub resolves it while setting up the job, before any step.
             - name: Generate pep-receipt/2 for the DEB cell
               continue-on-error: true
-              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@a2a3c5f3216df1f149a76724fb1071bfe87bb593
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@7c785197dbac792eabfb69a1c80d139491fdd716
               with:
                   cell_id: ${{ matrix.cell_id }}
                   family: deb
@@ -559,7 +563,7 @@ jobs:
         permissions:
             contents: read      # nested checkouts of the pinned PEP implementation
             actions: read       # capture lists THIS run's jobs + downloads its artifacts by id
-        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@a2a3c5f3216df1f149a76724fb1071bfe87bb593
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@7c785197dbac792eabfb69a1c80d139491fdd716
         with:
             rpm_matrix:      ${{ needs.detect-matrix.outputs.rpm_matrix }}
             deb_matrix:      ${{ needs.detect-matrix.outputs.deb_matrix }}
