@@ -163,7 +163,9 @@ jobs:
     # RPM build matrix — one cell per (EL major, arch).
     # =========================================================================
     package-rpm:
-        name: Package RPM (${{ matrix.image }} ${{ matrix.arch }})
+        # The [pep-cell:<cell_id>] marker in the job DISPLAY NAME is how the PEP
+        # capture step associates this cell's build outcome to the detector cell.
+        name: Package RPM (${{ matrix.image }} ${{ matrix.arch }}) [pep-cell:${{ matrix.cell_id }}]
         needs: [detect-matrix, determine-repo-type, build]
         if: |
             always() &&
@@ -238,11 +240,34 @@ jobs:
                   gpg_public_key: ${{ secrets.GPG_FIPS_RPM_PUBLIC_KEY }}
                   pgedge_builder_token: ${{ secrets.PGEDGE_BUILDER_TOKEN }}
             - name: Upload RPM cell artifact
+              id: up_pkg
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
               with:
                   name: rpm__el-${{ steps.cell.outputs.os_version }}__${{ matrix.arch }}
                   path: output/el${{ steps.cell.outputs.os_version }}-${{ matrix.arch }}/
                   retention-days: 7
+            # PEP evidence: bind THIS package artifact to the detector cell with a
+            # pep-receipt/2. It inspects the SAME flat directory that was just
+            # uploaded (runtime rpm + its .src.rpm sidecar are both supported; the
+            # PEP reducer selects the runtime member and excludes source/debug).
+            # rpm tooling is provided by the action on the ubuntu runner if absent.
+            # Receipt-step execution failures do not block publication: if this
+            # step fails, the job still succeeds and push-dnf still runs. If this
+            # cell's receipt or package upload is missing or expired, PEP records
+            # a coverage gap; if either is present but invalid (malformed,
+            # ambiguous or contradictory), PEP blocks certification.
+            # continue-on-error cannot help if the pinned action itself fails to
+            # download; GitHub resolves it while setting up the job, before any step.
+            - name: Generate pep-receipt/2 for the RPM cell
+              continue-on-error: true
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@52cd787341f719191e817d3f1c134fc210fbcc53
+              with:
+                  cell_id: ${{ matrix.cell_id }}
+                  family: rpm
+                  package_dir: output/el${{ steps.cell.outputs.os_version }}-${{ matrix.arch }}
+                  package_artifact_id: ${{ steps.up_pkg.outputs.artifact-id }}
+                  package_artifact_name: rpm__el-${{ steps.cell.outputs.os_version }}__${{ matrix.arch }}
+                  package_artifact_digest: ${{ steps.up_pkg.outputs.artifact-digest }}
 
     # =========================================================================
     # DNF push
@@ -331,7 +356,9 @@ jobs:
     # DEB build matrix — one cell per (distro, arch).
     # =========================================================================
     package-deb:
-        name: Package DEB (${{ matrix.image }} ${{ matrix.arch }})
+        # The [pep-cell:<cell_id>] marker in the job DISPLAY NAME is how the PEP
+        # capture step associates this cell's build outcome to the detector cell.
+        name: Package DEB (${{ matrix.image }} ${{ matrix.arch }}) [pep-cell:${{ matrix.cell_id }}]
         needs: [detect-matrix, determine-repo-type, build]
         if: |
             always() &&
@@ -404,11 +431,33 @@ jobs:
                   gpg_public_key: ${{ secrets.GPG_FIPS_DEB_PUBLIC_KEY }}
                   pgedge_builder_token: ${{ secrets.PGEDGE_BUILDER_TOKEN }}
             - name: Upload DEB cell artifact
+              id: up_pkg
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
               with:
                   name: deb__${{ steps.cell.outputs.distro }}__${{ matrix.arch }}
                   path: output/${{ steps.cell.outputs.distro }}-${{ matrix.arch }}/
                   retention-days: 7
+            # PEP evidence: bind THIS package artifact to the detector cell with a
+            # pep-receipt/2. It inspects the SAME flat directory that was just
+            # uploaded (the runtime .deb plus any renamed -dbgsym .deb are both
+            # supported; the PEP reducer selects the runtime member only).
+            # Receipt-step execution failures do not block publication: if this
+            # step fails, the job still succeeds and push-apt still runs. If this
+            # cell's receipt or package upload is missing or expired, PEP records
+            # a coverage gap; if either is present but invalid (malformed,
+            # ambiguous or contradictory), PEP blocks certification.
+            # continue-on-error cannot help if the pinned action itself fails to
+            # download; GitHub resolves it while setting up the job, before any step.
+            - name: Generate pep-receipt/2 for the DEB cell
+              continue-on-error: true
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@52cd787341f719191e817d3f1c134fc210fbcc53
+              with:
+                  cell_id: ${{ matrix.cell_id }}
+                  family: deb
+                  package_dir: output/${{ steps.cell.outputs.distro }}-${{ matrix.arch }}
+                  package_artifact_id: ${{ steps.up_pkg.outputs.artifact-id }}
+                  package_artifact_name: deb__${{ steps.cell.outputs.distro }}__${{ matrix.arch }}
+                  package_artifact_digest: ${{ steps.up_pkg.outputs.artifact-digest }}
 
     # =========================================================================
     # APT push
@@ -493,6 +542,46 @@ jobs:
                   targets: ${{ steps.targets.outputs.backup }}
                   aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
                   aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+    # =========================================================================
+    # PEP certification — downstream release evidence, NOT a prerequisite for
+    # publishing packages or the manifest. RAG passes only facts it owns (the
+    # detector matrices, the release identity, whether this run is simulated,
+    # and each publication job's result) to PEP's release adapter. PEP validates
+    # them, certifies with pep-certify at the same pinned commit (PEP owns the
+    # platform / PostgreSQL / component universe) and always writes the summary.
+    # A failed certification can turn this run red, but it never changes
+    # publication, which has already happened.
+    # =========================================================================
+    certify:
+        name: Certify packages (PEP)
+        # After every build and publication job, so the publication results are
+        # final and truthful. always() keeps it running under partial builds,
+        # skipped pushes (simulate_tag) and failures.
+        needs: [detect-matrix, determine-repo-type, build, package-rpm, package-deb, push-dnf, push-apt]
+        if: always() && needs.determine-repo-type.result == 'success'
+        permissions:
+            contents: read      # nested checkouts of the pinned PEP implementation
+            actions: read       # capture lists THIS run's jobs + downloads its artifacts by id
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@52cd787341f719191e817d3f1c134fc210fbcc53
+        with:
+            rpm_matrix:      ${{ needs.detect-matrix.outputs.rpm_matrix }}
+            deb_matrix:      ${{ needs.detect-matrix.outputs.deb_matrix }}
+            component:       rag
+            version:         ${{ needs.determine-repo-type.outputs.component-version }}
+            buildnum:        ${{ needs.determine-repo-type.outputs.component-buildnum }}
+            effective_tag:   ${{ needs.determine-repo-type.outputs.effective-tag }}
+            channel:         ${{ needs.determine-repo-type.outputs.repo-type }}
+            simulated:       ${{ needs.determine-repo-type.outputs.simulated }}
+            rpm_publication: ${{ needs.push-dnf.result }}
+            deb_publication: ${{ needs.push-apt.result }}
+            enforcement:     observe      # report-only: product test failures do not fail the run
+        # Preview must not expose Docker Hub creds: each secret is passed only for a real
+        # (non-simulated) release and is an empty string otherwise; PEP forwards them only
+        # for full certification. They only raise the image-pull rate limit.
+        secrets:
+            DOCKERHUB_USERNAME: ${{ needs.determine-repo-type.outputs.simulated == 'false' && secrets.DOCKERHUB_USERNAME || '' }}
+            DOCKERHUB_TOKEN:    ${{ needs.determine-repo-type.outputs.simulated == 'false' && secrets.DOCKERHUB_TOKEN || '' }}
 
     # =========================================================================
     # Aggregated manifest + Slack
