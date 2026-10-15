@@ -1,0 +1,333 @@
+name: Replay certification of v2.0.0-test2 (spike)
+# SPIKE. Re-certifies, with a fixed PEP, the exact packages that Release run 38242831031 (tag
+# v2.0.0-test2 on 2f69f9a) built and published. This run builds nothing and publishes nothing.
+#
+#   * Each cell job copies that run's original package artifact and refuses it unless its files are
+#     exactly the members of the original receipt, sha256 for sha256 (.github/pep-replay/*.json,
+#     re-checked against the original receipt artifacts in `source`). It then uploads the copy under
+#     the original name and records a NEW receipt for the copy; the original receipts are untouched.
+#   * pep-certify.yml is called directly, not through pep-release-certify.yml, whose contract is that
+#     publication results come from the caller's own publication jobs. Here they are read from the
+#     source run's push jobs, and the summary says so.
+#   * Build/publication provenance (the source run) stays separate from this run's test provenance:
+#     PEP's evidence records this run; replay-source-provenance records the source run.
+#
+# Fires only on a push to its own branch.
+on:
+    push:
+        branches: [spike/pep-replay-v2.0.0-test2]
+
+permissions:
+    contents: read
+
+env:
+    REPLAY_DATA: .github/pep-replay/v2.0.0-test2.json
+    PEP_SHA: e6037b04bc5719cc322979c22b05f61b4e1495a1   # must match the pep-certify and receipt pins below
+
+jobs:
+    source:
+        name: Source release evidence
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            actions: read       # reads the source run, its jobs and its artifacts
+        outputs:
+            run_id:              ${{ steps.verify.outputs.run_id }}
+            rpm_matrix:          ${{ steps.verify.outputs.rpm_matrix }}
+            deb_matrix:          ${{ steps.verify.outputs.deb_matrix }}
+            cells:               ${{ steps.verify.outputs.cells }}
+            release_intent:      ${{ steps.verify.outputs.release_intent }}
+            publication_results: ${{ steps.verify.outputs.publication_results }}
+        steps:
+            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+            - name: Verify the source run, its publication jobs and every original artifact
+              id: verify
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  python3 - <<'PY'
+                  import hashlib, io, json, os, subprocess, sys, zipfile
+
+                  d = json.load(open(os.environ["REPLAY_DATA"], encoding="utf-8"))
+                  src = d["source"]; repo, rid = src["repository"], src["run_id"]
+                  problems = []
+
+                  def api(path, raw=False):
+                      out = subprocess.run(["gh", "api", path], check=True, capture_output=True).stdout
+                      return out if raw else json.loads(out)
+
+                  run = api("repos/%s/actions/runs/%d" % (repo, rid))
+                  for key, want in (("event", src["event"]), ("head_branch", src["tag"]), ("head_sha", src["sha"]),
+                                    ("run_attempt", src["run_attempt"]), ("status", "completed"),
+                                    ("conclusion", "success")):
+                      if run.get(key) != want:
+                          problems.append("source run %s is %r, expected %r" % (key, run.get(key), want))
+
+                  # The publication results passed to pep-certify are these jobs' own conclusions, as recorded.
+                  pubs, pub_jobs = {}, {}
+                  for fam, want in src["publication_jobs"].items():
+                      j = api("repos/%s/actions/jobs/%d" % (repo, want["id"]))
+                      if (j.get("run_id"), j.get("name"), j.get("status")) != (rid, want["name"], "completed"):
+                          problems.append("%s publication job %d is not the expected completed job" % (fam, want["id"]))
+                      pubs[fam] = j.get("conclusion")
+                      pub_jobs[fam] = {"id": j.get("id"), "name": j.get("name"), "conclusion": j.get("conclusion"),
+                                       "completed_at": j.get("completed_at"), "html_url": j.get("html_url")}
+
+                  listing = subprocess.run(["gh", "api", "--paginate", "repos/%s/actions/runs/%d/artifacts?per_page=100"
+                                            % (repo, rid), "--jq", ".artifacts[]"],
+                                           check=True, capture_output=True, text=True).stdout
+                  arts = {a["id"]: a for a in map(json.loads, listing.splitlines())}
+                  include = []
+                  for cell in json.loads(d["rpm_matrix"])["include"] + json.loads(d["deb_matrix"])["include"]:
+                      cid = cell["cell_id"]; want = d["cells"].get(cid)
+                      if want is None:
+                          problems.append("%s: no expected members" % cid); continue
+                      for kind in ("package_artifact", "receipt_artifact"):
+                          a, w = arts.get(want[kind]["id"]), want[kind]
+                          if not a or a["name"] != w["name"] or a["expired"] or a.get("digest") != "sha256:" + w["archive_digest"]:
+                              problems.append("%s: %s %s is missing, expired or changed" % (cid, kind, w["name"]))
+                      # Anchor: the original receipt itself must still state exactly the expected members.
+                      blob = api("repos/%s/actions/artifacts/%d/zip" % (repo, want["receipt_artifact"]["id"]), raw=True)
+                      if hashlib.sha256(blob).hexdigest() != want["receipt_artifact"]["archive_digest"]:
+                          problems.append("%s: original receipt archive digest differs" % cid); continue
+                      r = json.loads(zipfile.ZipFile(io.BytesIO(blob)).read("receipt.json"))
+                      members = sorted(({"path": m["artifact_member_path"], "sha256": m["sha256"],
+                                         "package_class": m["package_class"]} for m in r["members"]), key=lambda m: m["path"])
+                      if (r["cell_id"], r["artifact_name"], r["artifact_id"], r["archive_digest"], members) != (
+                              cid, want["package_artifact"]["name"], want["package_artifact"]["id"],
+                              want["package_artifact"]["archive_digest"], want["members"]):
+                          problems.append("%s: original receipt does not match the expected members" % cid)
+                      include.append(dict(cell, package_artifact=want["package_artifact"]["name"]))
+
+                  record = {"label": d["label"], "source_run": {k: run.get(k) for k in (
+                                "id", "run_attempt", "event", "head_branch", "head_sha", "conclusion", "html_url")},
+                            "publication_jobs": pub_jobs,
+                            "original_artifacts": {c: {"package": v["package_artifact"], "receipt": v["receipt_artifact"]}
+                                                   for c, v in d["cells"].items()},
+                            "replay_run": {"id": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+                                           "sha": os.environ["GITHUB_SHA"], "pep_sha": os.environ["PEP_SHA"]}}
+                  os.makedirs("replay-source", exist_ok=True)
+                  json.dump(record, open("replay-source/replay-source.json", "w"), indent=2, ensure_ascii=False)
+                  if problems:
+                      print("\n".join(problems), file=sys.stderr); sys.exit(1)
+                  compact = lambda o: json.dumps(o, separators=(",", ":"), ensure_ascii=False)
+                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+                      f.write("run_id=%d\n" % rid)
+                      f.write("rpm_matrix=%s\ndeb_matrix=%s\n" % (d["rpm_matrix"], d["deb_matrix"]))
+                      f.write("cells=%s\n" % compact({"include": include}))
+                      f.write("release_intent=%s\n" % compact(d["release_intent"]))
+                      f.write("publication_results=%s\n" % compact(pubs))
+                  print("source run, %d cells and publication jobs %s verified" % (len(include), pubs))
+                  PY
+            - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+              if: always()
+              with:
+                  name: replay-source-provenance
+                  path: replay-source/
+                  if-no-files-found: ignore
+
+    cell:
+        # The [pep-cell:<cell_id>] marker is how PEP capture associates this job with the detector cell.
+        name: Replay package (${{ matrix.image }} ${{ matrix.arch }}) [pep-cell:${{ matrix.cell_id }}]
+        needs: source
+        runs-on: ubuntu-latest      # receipt inspection reads package headers; it is arch-independent
+        permissions:
+            contents: read
+            actions: read           # downloads the source run's artifact
+        strategy:
+            fail-fast: false
+            matrix: ${{ fromJSON(needs.source.outputs.cells) }}
+        steps:
+            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+            - name: Download the original package artifact
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+              with:
+                  name: ${{ matrix.package_artifact }}
+                  run-id: ${{ needs.source.outputs.run_id }}
+                  github-token: ${{ github.token }}
+                  path: pkg
+            - name: Refuse the copy unless it is exactly the original receipt's members
+              env:
+                  CELL_ID: ${{ matrix.cell_id }}
+              run: |
+                  python3 - <<'PY'
+                  import hashlib, json, os, sys
+                  from pathlib import Path
+                  want = {m["path"]: m["sha256"] for m in
+                          json.load(open(os.environ["REPLAY_DATA"]))["cells"][os.environ["CELL_ID"]]["members"]}
+                  entries = list(Path("pkg").iterdir())
+                  odd = [p.name for p in entries if p.is_symlink() or not p.is_file()]
+                  got = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in entries if p.name not in odd}
+                  if odd or got != want:
+                      print("copy differs from the original receipt: odd=%r got=%r want=%r" % (odd, got, want), file=sys.stderr)
+                      sys.exit(1)
+                  print("%d member(s) match the original receipt" % len(got))
+                  PY
+            - name: Upload the verified copy under the original name
+              id: up_pkg
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+              with:
+                  name: ${{ matrix.package_artifact }}
+                  path: pkg/
+                  if-no-files-found: error
+                  retention-days: 7
+            - name: Generate pep-receipt/2 for the copy
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@e6037b04bc5719cc322979c22b05f61b4e1495a1
+              with:
+                  cell_id: ${{ matrix.cell_id }}
+                  family: ${{ matrix.family }}
+                  package_dir: pkg
+                  package_artifact_id: ${{ steps.up_pkg.outputs.artifact-id }}
+                  package_artifact_name: ${{ matrix.package_artifact }}
+                  package_artifact_digest: ${{ steps.up_pkg.outputs.artifact-digest }}
+
+    certify:
+        name: Certify replayed packages (PEP)
+        needs: [source, cell]
+        if: always() && needs.source.result == 'success'
+        permissions:
+            contents: read      # nested checkouts of the pinned PEP implementation
+            actions: read       # capture lists THIS run's jobs + downloads its artifacts by id
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-certify.yml@e6037b04bc5719cc322979c22b05f61b4e1495a1
+        with:
+            rpm_matrix:          ${{ needs.source.outputs.rpm_matrix }}
+            deb_matrix:          ${{ needs.source.outputs.deb_matrix }}
+            release_intent:      ${{ needs.source.outputs.release_intent }}
+            publication_results: ${{ needs.source.outputs.publication_results }}
+            enforcement:         observe
+            execution_mode:      full
+        secrets:
+            DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+            DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+
+    accept:
+        # Observe mode can leave product failures green, so the evidence is checked, not the colour.
+        name: Accept replay evidence
+        needs: [source, cell, certify]
+        if: always() && needs.source.result == 'success'
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        steps:
+            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+            - name: Download this run's receipts
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+              with:
+                  pattern: pep-receipt-*
+                  path: evidence
+            - name: Download this run's certification evidence
+              if: needs.certify.outputs.evidence_artifact_name != ''
+              continue-on-error: true     # a missing evidence artifact is reported by the check below
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+              with:
+                  name: ${{ needs.certify.outputs.evidence_artifact_name }}
+                  path: evidence/certification
+            - name: Check receipts, plan, digests and provenance
+              env:
+                  CERT_EVIDENCE:    ${{ needs.certify.outputs.evidence_artifact_name }}
+                  CERT_STATE:       ${{ needs.certify.outputs.certification_state }}
+                  CERT_CONCLUSION:  ${{ needs.certify.outputs.certification_conclusion }}
+                  CERT_EXECUTION:   ${{ needs.certify.outputs.execution_status }}
+                  CERT_TESTS:       ${{ needs.certify.outputs.test_verdict }}
+                  CERT_COVERAGE:    ${{ needs.certify.outputs.coverage_status }}
+                  CERT_REASON:      ${{ needs.certify.outputs.reason_code }}
+                  PUBLICATION:      ${{ needs.source.outputs.publication_results }}
+              run: |
+                  python3 - <<'PY'
+                  import json, os, sys
+                  from pathlib import Path
+                  env = os.environ
+                  d = json.load(open(env["REPLAY_DATA"], encoding="utf-8"))
+                  ev, problems = Path("evidence"), []
+                  runtime = {}
+                  for cid, want in d["cells"].items():
+                      f = ev / ("pep-receipt-" + cid) / "receipt.json"
+                      if not f.is_file():
+                          problems.append("%s: no receipt from this run" % cid); continue
+                      r = json.loads(f.read_text())
+                      members = sorted(({"path": m["artifact_member_path"], "sha256": m["sha256"],
+                                         "package_class": m["package_class"]} for m in r["members"]), key=lambda m: m["path"])
+                      if members != want["members"] or r["artifact_name"] != want["package_artifact"]["name"]:
+                          problems.append("%s: this run's receipt differs from the original members" % cid)
+                      if r["artifact_id"] == want["package_artifact"]["id"]:
+                          problems.append("%s: receipt points at the original artifact, not this run's copy" % cid)
+                      runtime[cid] = [m["sha256"] for m in want["members"] if m["package_class"] == "runtime"]
+                  cr_file = ev / "certification" / "cert-result.json"
+                  if not cr_file.is_file():
+                      problems.append("no cert-result.json in the certification evidence %r" % env.get("CERT_EVIDENCE"))
+                      cr = {"legs": [], "provenance": {}, "counts": {}, "coverage_gaps": None, "release": {}}
+                  else:
+                      cr = json.loads(cr_file.read_text())
+                  prov = cr.get("provenance") or {}
+                  if (prov.get("run_id"), prov.get("sha"), prov.get("pep_resolved_sha")) != (
+                          env["GITHUB_RUN_ID"], env["GITHUB_SHA"], env["PEP_SHA"]):
+                      problems.append("cert-result provenance %r is not this replay run at the pinned PEP" % prov)
+                  want_release = {k: v for k, v in d["release_intent"].items() if k != "simulated"}
+                  if cr.get("release") != want_release:
+                      problems.append("cert-result release %r differs from %r" % (cr.get("release"), want_release))
+                  if cr.get("coverage_gaps") != []:
+                      problems.append("coverage gaps: %r" % cr.get("coverage_gaps"))
+                  legs, verdicts = cr.get("legs") or [], {}
+                  for leg in legs:
+                      pi = leg.get("planned_invocation") or {}
+                      cid, planned = pi.get("source_cell_id"), (pi.get("package") or {}).get("sha256")
+                      if not (planned in runtime.get(cid, []) and leg.get("installed_package_sha256") == planned
+                              and leg.get("package_digest") == "match"
+                              and (leg.get("provenance") or {}).get("caller_run_id") == env["GITHUB_RUN_ID"]):
+                          problems.append("%s: installed %r / planned %r / original %r / digest %r"
+                                          % (leg.get("invocation_id"), leg.get("installed_package_sha256"), planned,
+                                             runtime.get(cid), leg.get("package_digest")))
+                      verdicts[leg.get("test_verdict")] = verdicts.get(leg.get("test_verdict"), 0) + 1
+                  # Product success: matching evidence alone is not enough; the replay must certify cleanly.
+                  expected = d["expected_runs"]
+                  runs = sorted("%s/%s" % ((l.get("planned_invocation") or {}).get("container_alias"),
+                                           (l.get("planned_invocation") or {}).get("pg_major")) for l in legs)
+                  if runs != expected:
+                      problems.append("test runs differ from the %d expected platform/PG runs: missing %r, extra or repeated %r"
+                                      % (len(expected), sorted(set(expected) - set(runs)),
+                                         sorted({r for r in runs if r not in expected or runs.count(r) > 1})))
+                  for leg in legs:
+                      c = leg.get("counts") or {}
+                      if (leg.get("execution_status"), leg.get("test_verdict"), c.get("failures"), c.get("errors")) != (
+                              "completed", "pass", 0, 0):
+                          problems.append("%s: %s/%s, %r failures, %r errors" % (leg.get("invocation_id"),
+                                          leg.get("execution_status"), leg.get("test_verdict"), c.get("failures"), c.get("errors")))
+                  n = len(expected)
+                  want_counts = {"expected_invocations": n, "matched": n, "completed": n, "pass": n, "fail": 0,
+                                 "incomplete": 0, "infra_failure": 0, "missing": 0, "not_run": 0, "preview": 0,
+                                 "planner_gaps": 0, "unexpected_results": 0}
+                  if {k: (cr.get("counts") or {}).get(k) for k in want_counts} != want_counts:
+                      problems.append("cert-result counts %r, expected %r" % (cr.get("counts"), want_counts))
+                  if (cr.get("execution_status"), cr.get("test_verdict"), cr.get("coverage_status"), cr.get("result_resolved"),
+                          cr.get("unexpected_results"), cr.get("errors")) != ("completed", "pass", "complete", True, [], []):
+                      problems.append("cert-result is %s/%s/%s (resolved %r, unexpected %r, errors %r), expected a complete pass"
+                                      % (cr.get("execution_status"), cr.get("test_verdict"), cr.get("coverage_status"),
+                                         cr.get("result_resolved"), cr.get("unexpected_results"), cr.get("errors")))
+                  dec_file = ev / "certification" / "cert-decision.json"
+                  dec = json.loads(dec_file.read_text()) if dec_file.is_file() else {}
+                  if (dec.get("certification_state"), dec.get("reason_code"), dec.get("workflow_conclusion")) != (
+                          "pass", "clean_pass", "success"):
+                      problems.append("decision is %r/%r/%r, expected pass/clean_pass/success" % (
+                          dec.get("certification_state"), dec.get("reason_code"), dec.get("workflow_conclusion")))
+                  if (env.get("CERT_STATE"), env.get("CERT_REASON"), env.get("CERT_CONCLUSION")) != (
+                          dec.get("certification_state"), dec.get("reason_code"), dec.get("workflow_conclusion")):
+                      problems.append("certify outputs %r/%r/%r do not match cert-decision.json" % (
+                          env.get("CERT_STATE"), env.get("CERT_REASON"), env.get("CERT_CONCLUSION")))
+                  with open(env["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+                      f.write("## Replay of v2.0.0-test2: not a release\n\n%s\n\n" % d["label"])
+                      f.write("- **Built and published by:** run %s (`%s` on `%s`); publication results %s are that run's "
+                              "push jobs' conclusions, not this run's.\n" % (d["source"]["run_id"], d["source"]["tag"],
+                              d["source"]["sha"][:7], env.get("PUBLICATION")))
+                      f.write("- **Re-certified by:** this run, PEP `%s`. Receipts here are new receipts for verified "
+                              "copies; the original receipts are unchanged.\n" % env["PEP_SHA"][:7])
+                      f.write("- **Certification:** state `%s`, conclusion `%s`, execution `%s`, tests `%s`, coverage `%s`, "
+                              "reason `%s`; leg verdicts %s; counts %s\n\n" % (env.get("CERT_STATE"), env.get("CERT_CONCLUSION"),
+                              env.get("CERT_EXECUTION"), env.get("CERT_TESTS"), env.get("CERT_COVERAGE"), env.get("CERT_REASON"),
+                              verdicts, cr.get("counts")))
+                      f.write(("**Evidence check FAILED**\n\n" + "\n".join("- " + p for p in problems)) if problems else
+                              "**Evidence check passed:** %d receipts match the original members; all %d expected test runs "
+                              "passed and installed the original runtime digests; decision clean_pass; provenance is this "
+                              "run.\n" % (len(runtime), len(legs)))
+                  if problems:
+                      print("\n".join(problems), file=sys.stderr); sys.exit(1)
+                  PY

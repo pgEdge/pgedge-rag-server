@@ -1,0 +1,364 @@
+{
+  "label": "Replay of the packages RAG Release run 38242831031 built and published for v2.0.0-test2. Not a release: the replay run builds and publishes nothing.",
+  "source": {
+    "repository": "pgEdge/pgedge-rag-server",
+    "run_id": 38242831031,
+    "run_attempt": 1,
+    "event": "push",
+    "tag": "v2.0.0-test2",
+    "sha": "2f69f9a6a0df530de128b9c2e5e869ba8ac21d45",
+    "publication_jobs": {
+      "rpm": {
+        "id": 114790888846,
+        "name": "Push DNF (all EL majors × archs, batched)"
+      },
+      "deb": {
+        "id": 114790690066,
+        "name": "Push APT (all distros × archs, batched)"
+      }
+    }
+  },
+  "release_intent": {
+    "logical_component": "rag",
+    "intended_version": "2.0.0",
+    "intended_buildnum": "test2_1",
+    "effective_tag": "v2.0.0-test2",
+    "channel": "daily",
+    "simulated": false
+  },
+  "rpm_matrix": "{\"include\":[{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"almalinux:9\",\"arch\":\"amd64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.rpm.el-9.amd64.pkg\",\"family\":\"rpm\",\"os\":\"el-9\",\"normalized_arch\":\"amd64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null},{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"almalinux:9\",\"arch\":\"arm64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.rpm.el-9.arm64.pkg\",\"family\":\"rpm\",\"os\":\"el-9\",\"normalized_arch\":\"arm64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null},{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"almalinux:10\",\"arch\":\"amd64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.rpm.el-10.amd64.pkg\",\"family\":\"rpm\",\"os\":\"el-10\",\"normalized_arch\":\"amd64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null},{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"almalinux:10\",\"arch\":\"arm64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.rpm.el-10.arm64.pkg\",\"family\":\"rpm\",\"os\":\"el-10\",\"normalized_arch\":\"arm64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null}]}",
+  "deb_matrix": "{\"include\":[{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"ubuntu:jammy\",\"arch\":\"amd64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.deb.jammy.amd64.pkg\",\"family\":\"deb\",\"os\":\"jammy\",\"normalized_arch\":\"amd64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null},{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"ubuntu:jammy\",\"arch\":\"arm64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.deb.jammy.arm64.pkg\",\"family\":\"deb\",\"os\":\"jammy\",\"normalized_arch\":\"arm64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null},{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"ubuntu:noble\",\"arch\":\"amd64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.deb.noble.amd64.pkg\",\"family\":\"deb\",\"os\":\"noble\",\"normalized_arch\":\"amd64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null},{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"ubuntu:noble\",\"arch\":\"arm64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.deb.noble.arm64.pkg\",\"family\":\"deb\",\"os\":\"noble\",\"normalized_arch\":\"arm64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null},{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"ubuntu:resolute\",\"arch\":\"amd64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.deb.resolute.amd64.pkg\",\"family\":\"deb\",\"os\":\"resolute\",\"normalized_arch\":\"amd64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null},{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"ubuntu:resolute\",\"arch\":\"arm64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.deb.resolute.arm64.pkg\",\"family\":\"deb\",\"os\":\"resolute\",\"normalized_arch\":\"arm64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null},{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"debian:bookworm\",\"arch\":\"amd64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.deb.bookworm.amd64.pkg\",\"family\":\"deb\",\"os\":\"bookworm\",\"normalized_arch\":\"amd64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null},{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"debian:bookworm\",\"arch\":\"arm64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.deb.bookworm.arm64.pkg\",\"family\":\"deb\",\"os\":\"bookworm\",\"normalized_arch\":\"arm64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null},{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"debian:trixie\",\"arch\":\"amd64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.deb.trixie.amd64.pkg\",\"family\":\"deb\",\"os\":\"trixie\",\"normalized_arch\":\"amd64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null},{\"component\":\"pkg\",\"pg_version\":\"\",\"pg_major\":\"\",\"image\":\"debian:trixie\",\"arch\":\"arm64\",\"per_pg\":\"false\",\"pg_in_name\":\"false\",\"cell_id\":\"pepcell.v1.deb.trixie.arm64.pkg\",\"family\":\"deb\",\"os\":\"trixie\",\"normalized_arch\":\"arm64\",\"pg_coupled\":false,\"build_pg_major\":null,\"build_pg_version\":null}]}",
+  "cells": {
+    "pepcell.v1.rpm.el-9.amd64.pkg": {
+      "package_artifact": {
+        "name": "rpm__el-9__amd64",
+        "id": 11743592021,
+        "archive_digest": "be69fa534cbb1a66656e6918490112899557890274d48b9dea77f2b22bec33a3"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.rpm.el-9.amd64.pkg",
+        "id": 11744381252,
+        "archive_digest": "10a5a27fb92960be3fc582c3f0c255d335e60b972d4acb3d7d6049333a40f2ef"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2-2.0.0-test2_1.el9.src.rpm",
+          "sha256": "7228cc935a253f2326472bf42fff097b2d4278c9c8ddbc766a763d946dc852a8",
+          "package_class": "source"
+        },
+        {
+          "path": "pgedge-rag-server2-2.0.0-test2_1.el9.x86_64.rpm",
+          "sha256": "85365ea0f62295435fb29c8cd49139e0cd3ab17c63767c53cd9772d6a4f5075d",
+          "package_class": "runtime"
+        }
+      ]
+    },
+    "pepcell.v1.rpm.el-9.arm64.pkg": {
+      "package_artifact": {
+        "name": "rpm__el-9__arm64",
+        "id": 11743567442,
+        "archive_digest": "4341ed242f187bd96dfc35d7c7a14dd1b9c735ced30db575727f6918554787ae"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.rpm.el-9.arm64.pkg",
+        "id": 11743637536,
+        "archive_digest": "190b8ef398781b17564977a309d10cd5d25204464d6ab0eea637968f893b5077"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2-2.0.0-test2_1.el9.aarch64.rpm",
+          "sha256": "ab9ce22a5a2c830b5c1f4001988174862b40da73cf524c1e5b6ebf7f22d0653e",
+          "package_class": "runtime"
+        },
+        {
+          "path": "pgedge-rag-server2-2.0.0-test2_1.el9.src.rpm",
+          "sha256": "4ff0f55a1b50a2371da3c317581230e66d10d9292f497e53af034444d66bf610",
+          "package_class": "source"
+        }
+      ]
+    },
+    "pepcell.v1.rpm.el-10.amd64.pkg": {
+      "package_artifact": {
+        "name": "rpm__el-10__amd64",
+        "id": 11744371205,
+        "archive_digest": "7ed45b7ee4368b91345d2b54c9ada3fe49d81e904387015828042ea1c4eff144"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.rpm.el-10.amd64.pkg",
+        "id": 11744046438,
+        "archive_digest": "027e93898cbdb8b14701f6a9e09e6692a71f3c0198f648c87ae04105e4734cd3"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2-2.0.0-test2_1.el10.src.rpm",
+          "sha256": "f0b51ac81a1d3adf631059d095b7c11ac7d1491dd23c632d86c9f0f9fdd16fbf",
+          "package_class": "source"
+        },
+        {
+          "path": "pgedge-rag-server2-2.0.0-test2_1.el10.x86_64.rpm",
+          "sha256": "6fc5cf5895d8f8ff4db677124f1803c3a79e463391d67be82c1e28f57dba3670",
+          "package_class": "runtime"
+        }
+      ]
+    },
+    "pepcell.v1.rpm.el-10.arm64.pkg": {
+      "package_artifact": {
+        "name": "rpm__el-10__arm64",
+        "id": 11743582350,
+        "archive_digest": "3977a1fd0650ae346508a1ef2e51a32190f895e2c893d053ddb6d9e1efc683e4"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.rpm.el-10.arm64.pkg",
+        "id": 11744191885,
+        "archive_digest": "ad5693fd656d2d4358b6fd6cca62f5345a50895c968514090a42fafdb5929ef7"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2-2.0.0-test2_1.el10.aarch64.rpm",
+          "sha256": "45fb67c5c428a0e8429a4c9c2238676f9d7f450ee5a35cb450df1482a20e34cb",
+          "package_class": "runtime"
+        },
+        {
+          "path": "pgedge-rag-server2-2.0.0-test2_1.el10.src.rpm",
+          "sha256": "724eba162032d8162da09d8850070eb059570acfdfd5f011d18be5ae8f5c4b18",
+          "package_class": "source"
+        }
+      ]
+    },
+    "pepcell.v1.deb.jammy.amd64.pkg": {
+      "package_artifact": {
+        "name": "deb__jammy__amd64",
+        "id": 11743931581,
+        "archive_digest": "b0587795d47a29a6ffb0ca27fe95c9d2e09d6b41d7039ecdc8e44e6c8dc513d1"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.deb.jammy.amd64.pkg",
+        "id": 11744121399,
+        "archive_digest": "0bc8495de3700da9659b6eb9f215396ee3e0dffa3f15309780df113b87efaed4"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2_2.0.0~test2-1.jammy_amd64.deb",
+          "sha256": "4260aa63453138b059490ac95256a472dcfc31ed1342fa88b6153b6a3cd47c62",
+          "package_class": "runtime"
+        }
+      ]
+    },
+    "pepcell.v1.deb.jammy.arm64.pkg": {
+      "package_artifact": {
+        "name": "deb__jammy__arm64",
+        "id": 11743158271,
+        "archive_digest": "e6bdddbf072adf3e62803e3e791db5b0d5a8ec2f2c066d4a7e981b4072d5dc1f"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.deb.jammy.arm64.pkg",
+        "id": 11744431422,
+        "archive_digest": "1cef18df23d5263c878c2d7ee853d7f1587990513a5a25b83509b49e682645c5"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2_2.0.0~test2-1.jammy_arm64.deb",
+          "sha256": "4f500032fcd4b024326c48677bb52be571566452903e4968d60fe38fb97a6a55",
+          "package_class": "runtime"
+        }
+      ]
+    },
+    "pepcell.v1.deb.noble.amd64.pkg": {
+      "package_artifact": {
+        "name": "deb__noble__amd64",
+        "id": 11743144124,
+        "archive_digest": "05a0443ec936e0504e76cc06ad233ac5e60bf9b2256b6b7376b530d0498c07d6"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.deb.noble.amd64.pkg",
+        "id": 11744366149,
+        "archive_digest": "d9480b70440cf256607c81105c044079641be5f4950af45579ac28c56177eb40"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2_2.0.0~test2-1.noble_amd64.deb",
+          "sha256": "3714c4f7e75ece62d7dafa213950054a83a14ef746a67019bd5b2d29c674899e",
+          "package_class": "runtime"
+        }
+      ]
+    },
+    "pepcell.v1.deb.noble.arm64.pkg": {
+      "package_artifact": {
+        "name": "deb__noble__arm64",
+        "id": 11743607522,
+        "archive_digest": "aa6c32e775cab4c3b5371394741234c31fe4fc27acdc9b1169dada0b40631e31"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.deb.noble.arm64.pkg",
+        "id": 11743672301,
+        "archive_digest": "c63459e1f4fc55959004699296252cee3b974b722aa07e8f3586a572798f90ef"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2_2.0.0~test2-1.noble_arm64.deb",
+          "sha256": "f77a4ff47dce52f833430ccef4fb906945d8535eed6fb302f18c9112ada22075",
+          "package_class": "runtime"
+        }
+      ]
+    },
+    "pepcell.v1.deb.resolute.amd64.pkg": {
+      "package_artifact": {
+        "name": "deb__resolute__amd64",
+        "id": 11744271408,
+        "archive_digest": "bda02986372ba3c9d68269295d7cbe1d966b87ecbb8cf81f44eca2fa1e13a844"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.deb.resolute.amd64.pkg",
+        "id": 11744196378,
+        "archive_digest": "3a21fcb3cd70b4cb56adb22868d4dbcf16e6a911c8b29add7011109309cabe42"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2_2.0.0~test2-1.resolute_amd64.deb",
+          "sha256": "3cc3a097532b25dd631b9cf2b5efb3e0c93e9b59fde3e02354441fa1bca188f4",
+          "package_class": "runtime"
+        }
+      ]
+    },
+    "pepcell.v1.deb.resolute.arm64.pkg": {
+      "package_artifact": {
+        "name": "deb__resolute__arm64",
+        "id": 11743656840,
+        "archive_digest": "fe2f5b89f0abbac05ba9888c3ba34d06b3780e61b279a6732d87d6aaa8dc9151"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.deb.resolute.arm64.pkg",
+        "id": 11743721865,
+        "archive_digest": "adb1baa900e318fd1788032446eeb2a57a485fd465d70836a52455b5386651b6"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2_2.0.0~test2-1.resolute_arm64.deb",
+          "sha256": "e9020e78d6b1d0f6a3239d65fb6005c225c52029829a775bbfb5c0d45eb36193",
+          "package_class": "runtime"
+        }
+      ]
+    },
+    "pepcell.v1.deb.bookworm.amd64.pkg": {
+      "package_artifact": {
+        "name": "deb__bookworm__amd64",
+        "id": 11743153323,
+        "archive_digest": "92b8529ac6737923e118ae89739fcf2d27a1e481a5e985b09c668e8cb61058a9"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.deb.bookworm.amd64.pkg",
+        "id": 11743452518,
+        "archive_digest": "4679fca57f6c2945e9fd00b4d2398ab9915b238b77a9bcd3de9d41ae16a6dc35"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2_2.0.0~test2-1.bookworm_amd64.deb",
+          "sha256": "e2e626c79fc60c2b90955e44ea4b66d36cf5a81a066b881a46b2eeb1149aae44",
+          "package_class": "runtime"
+        }
+      ]
+    },
+    "pepcell.v1.deb.bookworm.arm64.pkg": {
+      "package_artifact": {
+        "name": "deb__bookworm__arm64",
+        "id": 11743971521,
+        "archive_digest": "940a86eb97f97bcb9e0dfe22c6899aafcd62766bbe310512ded3af9f27a2bd1c"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.deb.bookworm.arm64.pkg",
+        "id": 11743556788,
+        "archive_digest": "fa58eec6ba2ad49ea2835e1bacecd61d6ec029ee8b88f6eaf080908589f681c0"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2_2.0.0~test2-1.bookworm_arm64.deb",
+          "sha256": "e7ab7d66909e5725b01154e7efc02f273deb434cdc20685ee4bffbb7e07ee25b",
+          "package_class": "runtime"
+        }
+      ]
+    },
+    "pepcell.v1.deb.trixie.amd64.pkg": {
+      "package_artifact": {
+        "name": "deb__trixie__amd64",
+        "id": 11743611789,
+        "archive_digest": "ad04d19806485a9b35ee4e4be7c45ff0f891be29ad8bfaea0ceb6c4f840cdb80"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.deb.trixie.amd64.pkg",
+        "id": 11744415995,
+        "archive_digest": "5ccbb27dc42ea08204ed7054011c878e2395f22cdbfd396aa1d7371407816d88"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2_2.0.0~test2-1.trixie_amd64.deb",
+          "sha256": "d2ea4dfe7a9ad3ec49e9e5cc42fe36d41d8ec9e9934662dc09be8cabf2b5a70c",
+          "package_class": "runtime"
+        }
+      ]
+    },
+    "pepcell.v1.deb.trixie.arm64.pkg": {
+      "package_artifact": {
+        "name": "deb__trixie__arm64",
+        "id": 11743702394,
+        "archive_digest": "ed43d1f0482b61f0abc49ff4940702846ae4cc68b8b1ec6bf6c5bb4ede3fc604"
+      },
+      "receipt_artifact": {
+        "name": "pep-receipt-pepcell.v1.deb.trixie.arm64.pkg",
+        "id": 11743542436,
+        "archive_digest": "4be6be2aa7c07a27a8be03b679977e7fcb12c14a7a3ecdffb46b3fb5dd478b18"
+      },
+      "members": [
+        {
+          "path": "pgedge-rag-server2_2.0.0~test2-1.trixie_arm64.deb",
+          "sha256": "c0cf7b5c56a6860d026c52ec5613bce4e154bf13e8c3728f0c0baf9fccb33396",
+          "package_class": "runtime"
+        }
+      ]
+    }
+  },
+  "expected_runs_source": "cert-result.json in artifact pep-certification-r25-a1 (id 11745577770) of run 38242831031: every container_alias/pg_major the original certification planned",
+  "expected_runs": [
+    "alma10-amd64/16",
+    "alma10-amd64/17",
+    "alma10-amd64/18",
+    "alma10-arm64/16",
+    "alma10-arm64/17",
+    "alma10-arm64/18",
+    "debian12-amd64/16",
+    "debian12-amd64/17",
+    "debian12-amd64/18",
+    "debian12-arm64/16",
+    "debian12-arm64/17",
+    "debian12-arm64/18",
+    "debian13-amd64/16",
+    "debian13-amd64/17",
+    "debian13-amd64/18",
+    "debian13-arm64/16",
+    "debian13-arm64/17",
+    "debian13-arm64/18",
+    "oel9-amd64/16",
+    "oel9-amd64/17",
+    "oel9-amd64/18",
+    "rocky9-arm64/16",
+    "rocky9-arm64/17",
+    "rocky9-arm64/18",
+    "ubuntu2204-amd64/16",
+    "ubuntu2204-amd64/17",
+    "ubuntu2204-amd64/18",
+    "ubuntu2204-arm64/16",
+    "ubuntu2204-arm64/17",
+    "ubuntu2204-arm64/18",
+    "ubuntu2404-amd64/16",
+    "ubuntu2404-amd64/17",
+    "ubuntu2404-amd64/18",
+    "ubuntu2404-arm64/16",
+    "ubuntu2404-arm64/17",
+    "ubuntu2404-arm64/18",
+    "ubuntu2604-amd64/16",
+    "ubuntu2604-amd64/17",
+    "ubuntu2604-amd64/18",
+    "ubuntu2604-arm64/16",
+    "ubuntu2604-arm64/17",
+    "ubuntu2604-arm64/18"
+  ]
+}
