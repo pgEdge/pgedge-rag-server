@@ -145,7 +145,7 @@ jobs:
                   name: ${{ matrix.package_artifact }}
                   run-id: ${{ needs.source.outputs.run_id }}
                   github-token: ${{ github.token }}
-                  path: pkg
+                  path: ${{ runner.temp }}/replay-package   # outside the checkout: RAG has its own pkg/
             - name: Refuse the copy unless it is exactly the original receipt's members
               env:
                   CELL_ID: ${{ matrix.cell_id }}
@@ -155,7 +155,7 @@ jobs:
                   from pathlib import Path
                   want = {m["path"]: m["sha256"] for m in
                           json.load(open(os.environ["REPLAY_DATA"]))["cells"][os.environ["CELL_ID"]]["members"]}
-                  entries = list(Path("pkg").iterdir())
+                  entries = list((Path(os.environ["RUNNER_TEMP"]) / "replay-package").iterdir())
                   odd = [p.name for p in entries if p.is_symlink() or not p.is_file()]
                   got = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in entries if p.name not in odd}
                   if odd or got != want:
@@ -168,7 +168,7 @@ jobs:
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
               with:
                   name: ${{ matrix.package_artifact }}
-                  path: pkg/
+                  path: ${{ runner.temp }}/replay-package/
                   if-no-files-found: error
                   retention-days: 7
             - name: Generate pep-receipt/2 for the copy
@@ -176,7 +176,7 @@ jobs:
               with:
                   cell_id: ${{ matrix.cell_id }}
                   family: ${{ matrix.family }}
-                  package_dir: pkg
+                  package_dir: ${{ runner.temp }}/replay-package
                   package_artifact_id: ${{ steps.up_pkg.outputs.artifact-id }}
                   package_artifact_name: ${{ matrix.package_artifact }}
                   package_artifact_digest: ${{ steps.up_pkg.outputs.artifact-digest }}
