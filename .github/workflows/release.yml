@@ -563,7 +563,7 @@ jobs:
         permissions:
             contents: read      # nested checkouts of the pinned PEP implementation
             actions: read       # capture lists THIS run's jobs + downloads its artifacts by id
-        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@52cd787341f719191e817d3f1c134fc210fbcc53
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@v1_STABLE
         with:
             rpm_matrix:      ${{ needs.detect-matrix.outputs.rpm_matrix }}
             deb_matrix:      ${{ needs.detect-matrix.outputs.deb_matrix }}
