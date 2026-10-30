@@ -239,4 +239,6 @@ jobs:
             # Expected receipts, legs, coverage, checksums and credential evidence live in the
             # script, which is exercised offline against fixtures before this branch is pushed.
             - name: Check the chain from evidence, not job colour
+              env:
+                  SELF_JOB_ID: ${{ job.check_run_id }}   # this job: still running, so the one log not read
               run: python3 .github/validation/verify_chain.py full evidence

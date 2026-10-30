@@ -9,6 +9,8 @@ The evidence directory holds this run's downloaded PEP artifacts (pep-certificat
 pep-invocation-plan-*, pep-capture-evidence-*, pep-summary-*). Run metadata, the attempt's jobs
 and their logs come from the GitHub API, or, when VERIFY_FIXTURES names a directory, from
 run.json, jobs.json and logs/<job id>.log there. NEEDS_JSON is the assert job's toJSON(needs).
+SELF_JOB_ID is the assert job's own id (job.check_run_id): that job is still running, so it is
+the one job whose log is not read; every other job must have completed with a readable log.
 Exit status 0 only if the evidence matches the mode's expectations.
 
 What the runs are: the packages are the already-published pgedge-rag-server2 2.0.0 release
@@ -43,13 +45,13 @@ EXPECT = {
                  counts={"expected_invocations": 6, "matched": 6, "completed": 6, "pass": 6, "fail": 0,
                          "incomplete": 0, "infra_failure": 0, "not_run": 0, "preview": 0, "missing": 0,
                          "unexpected_results": 0, "planner_gaps": 0},
-                 suffix=" / full test (install and product tests)"),
+                 suffix=" / full test (install and product tests)", assert_job="assert chain evidence (full)"),
     "preview": dict(outputs={"certification_state": "preview", "execution_status": "preview",
                              "test_verdict": "not_run", "coverage_status": "partial"},
                     counts={"expected_invocations": 6, "matched": 6, "completed": 0, "pass": 0, "fail": 0,
                             "incomplete": 0, "infra_failure": 0, "not_run": 6, "preview": 6, "missing": 0,
                             "unexpected_results": 0, "planner_gaps": 0},
-                    suffix=" / preview (no install, no product tests)"),
+                    suffix=" / preview (no install, no product tests)", assert_job="assert chain evidence (preview)"),
 }
 
 CONTROL = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-_]|[\x00-\x08\x0b-\x1f\x7f-\x9f]")
@@ -267,7 +269,18 @@ def verify(mode, evidence, source, env):
         jobs = []
     leg_jobs = [j for j in jobs if j.get("name", "").endswith(want["suffix"])]
     check(len(leg_jobs) == 6, "%d PEP test-leg jobs, expected 6" % len(leg_jobs))
+    # This assert job has no log until it finishes, so it alone is skipped, and only when
+    # SELF_JOB_ID names it exactly. Every other job is upstream of it: completed, log required.
+    own_id = env.get("SELF_JOB_ID", "")
+    own = [j for j in jobs if str(j.get("id")) == own_id]
+    if not check(own_id.isdigit() and len(own) == 1 and own[0].get("name") == want["assert_job"],
+                 "own assertion job: SELF_JOB_ID %r does not name %r in this attempt" % (own_id, want["assert_job"])):
+        own = []
     for j in jobs:
+        if j in own:
+            continue
+        if not check(j.get("status") == "completed", "%s: required job not completed (%r)" % (j.get("name"), j.get("status"))):
+            continue
         try:
             lines = CONTROL.sub("", source.log(j["id"])).splitlines()
         except (RuntimeError, OSError) as e:
