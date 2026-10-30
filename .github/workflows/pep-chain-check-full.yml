@@ -1,0 +1,242 @@
+# -------------------------------------------------------------------------
+# TEMPORARY VALIDATION HARNESS: branch-scoped, never merged, NOT a release.
+#
+# Checks that RAG's own repository client certificate reaches PEP's test runs
+# through the release adapter and certifier: this workflow -> pep-release-certify
+# (PEP main dde10a5) -> pep-certify -> pep-integration, in full certification.
+#
+# Validation fixtures, stated plainly:
+#   * Nothing is built and nothing is published. The two "package" jobs download
+#     the already-published pgedge-rag-server2 2.0.0 release packages and verify
+#     their repository sha256. The receipts recorded here bind those downloaded
+#     files to this run's cells only; they do NOT establish or re-establish the
+#     packages' original build provenance.
+#   * `simulated: false` and `rpm_publication` / `deb_publication: success` are
+#     SYNTHETIC test inputs that drive the adapter's full path. No publication
+#     occurred in this run; any "published" wording in PEP's report reflects
+#     these inputs, not an event.
+#   * No PEP acceptance rule is changed for this harness.
+# -------------------------------------------------------------------------
+
+name: PEP chain check, full (validation, no build or publication)
+
+on:
+    push:
+        branches: [validate/pep-dde10a5-chain]
+
+permissions:
+    contents: read
+
+jobs:
+    # Verbatim from release.yml: the real detector decides the cell identities.
+    detect-matrix:
+        name: Detect build matrix
+        runs-on: ubuntu-latest
+        outputs:
+            rpm_matrix: ${{ steps.detect.outputs.rpm_matrix }}
+            deb_matrix: ${{ steps.detect.outputs.deb_matrix }}
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+            - name: Checkout pgedge-detect-build-matrix
+              env:
+                  TOKEN: ${{ secrets.PGEDGE_BUILDER_TOKEN }}
+              run: |
+                  set -euo pipefail
+                  mkdir -p .github/actions
+                  git clone --depth 1 \
+                      "https://x-access-token:${TOKEN}@github.com/pgEdge/pgedge-detect-build-matrix.git" \
+                      ".github/actions/pgedge-detect-build-matrix"
+            - name: Detect build matrix
+              id: detect
+              uses: ./.github/actions/pgedge-detect-build-matrix
+              with:
+                  component_name: pkg
+                  archs: '["amd64","arm64"]'
+                  rpm_images: '["almalinux:9","almalinux:10"]'
+                  deb_images: '["ubuntu:jammy","ubuntu:noble","ubuntu:resolute","debian:bookworm","debian:trixie"]'
+
+    # Two cells only: el-9 amd64 (RPM) and bookworm amd64 (DEB).
+    select-cells:
+        name: Select the two validation cells
+        needs: detect-matrix
+        runs-on: ubuntu-latest
+        outputs:
+            rpm_matrix: ${{ steps.pick.outputs.rpm_matrix }}
+            deb_matrix: ${{ steps.pick.outputs.deb_matrix }}
+        steps:
+            - name: Keep el-9 amd64 and bookworm amd64
+              id: pick
+              env:
+                  RPM: ${{ needs.detect-matrix.outputs.rpm_matrix }}
+                  DEB: ${{ needs.detect-matrix.outputs.deb_matrix }}
+              run: |
+                  set -euo pipefail
+                  rpm=$(jq -c '{include: [.include[] | select(.image == "almalinux:9" and .arch == "amd64")]}' <<<"$RPM")
+                  deb=$(jq -c '{include: [.include[] | select(.image == "debian:bookworm" and .arch == "amd64")]}' <<<"$DEB")
+                  [ "$(jq '.include | length' <<<"$rpm")" = 1 ] || { echo "::error::expected exactly one el-9 amd64 cell"; exit 1; }
+                  [ "$(jq '.include | length' <<<"$deb")" = 1 ] || { echo "::error::expected exactly one bookworm amd64 cell"; exit 1; }
+                  echo "rpm_matrix=$rpm" >> "$GITHUB_OUTPUT"
+                  echo "deb_matrix=$deb" >> "$GITHUB_OUTPUT"
+
+    # Fixed identity of the already-published release. Synthetic inputs: see the header.
+    determine-repo-type:
+        name: Fixed validation identity (synthetic inputs; nothing is published)
+        runs-on: ubuntu-latest
+        outputs:
+            repo-type:          release
+            component-version:  "2.0.0"
+            component-buildnum: "1"
+            effective-tag:      v2.0.0
+            simulated:          "false"
+        steps:
+            - name: Label this run
+              run: |
+                  cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+                  ## Validation harness, not a release
+                  No build and no publication occur in this run. The packages are the already-published
+                  `pgedge-rag-server2` 2.0.0 release packages, downloaded and checksum-verified; the receipts
+                  bind those files to this run's cells only and do not establish their original build
+                  provenance. `simulated: false` and the `success` publication inputs are synthetic
+                  validation inputs.
+                  EOF
+
+    package-rpm:
+        name: Package RPM (${{ matrix.image }} ${{ matrix.arch }}) [pep-cell:${{ matrix.cell_id }}]
+        needs: [select-cells]
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix: ${{ fromJSON(needs.select-cells.outputs.rpm_matrix) }}
+        steps:
+            - name: Derive os_version from image
+              id: cell
+              env:
+                  IMAGE: ${{ matrix.image }}
+              run: |
+                  set -euo pipefail
+                  echo "os_version=${IMAGE##*:}" >> "$GITHUB_OUTPUT"
+            - name: Download the published package (validation fixture; nothing is built)
+              env:
+                  URL:    https://dnf.pgedge.com/release/9/RPMS/x86_64/pgedge-rag-server2-2.0.0-1.el9.x86_64.rpm
+                  SHA256: 01717af9c7ba89cebba85ec9399d9de6b144cf0a8183ba2d38cbb0e7d21bc617
+                  DIR:    output/el${{ steps.cell.outputs.os_version }}-${{ matrix.arch }}
+              run: |
+                  set -euo pipefail
+                  mkdir -p "$DIR"
+                  curl -fsSL --proto '=https' -o "$DIR/${URL##*/}" "$URL"
+                  echo "$SHA256  $DIR/${URL##*/}" | sha256sum -c -
+            - name: Upload RPM cell artifact
+              id: up_pkg
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+              with:
+                  name: rpm__el-${{ steps.cell.outputs.os_version }}__${{ matrix.arch }}
+                  path: output/el${{ steps.cell.outputs.os_version }}-${{ matrix.arch }}/
+                  retention-days: 7
+            - name: Generate pep-receipt/2 for the RPM cell
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@52cd787341f719191e817d3f1c134fc210fbcc53
+              with:
+                  cell_id: ${{ matrix.cell_id }}
+                  family: rpm
+                  package_dir: output/el${{ steps.cell.outputs.os_version }}-${{ matrix.arch }}
+                  package_artifact_id: ${{ steps.up_pkg.outputs.artifact-id }}
+                  package_artifact_name: rpm__el-${{ steps.cell.outputs.os_version }}__${{ matrix.arch }}
+                  package_artifact_digest: ${{ steps.up_pkg.outputs.artifact-digest }}
+
+    package-deb:
+        name: Package DEB (${{ matrix.image }} ${{ matrix.arch }}) [pep-cell:${{ matrix.cell_id }}]
+        needs: [select-cells]
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix: ${{ fromJSON(needs.select-cells.outputs.deb_matrix) }}
+        steps:
+            - name: Derive distro from image
+              id: cell
+              env:
+                  IMAGE: ${{ matrix.image }}
+              run: |
+                  set -euo pipefail
+                  echo "distro=${IMAGE##*:}" >> "$GITHUB_OUTPUT"
+            - name: Download the published package (validation fixture; nothing is built)
+              env:
+                  URL:    https://apt.pgedge.com/release/bookworm/pool/main/p/pgedge-rag-server2/pgedge-rag-server2_2.0.0-1.bookworm_amd64.deb
+                  SHA256: eba1a2c463ad2ad8ed392e953387a80353103fff144bb72b377d22dc51fe0754
+                  DIR:    output/${{ steps.cell.outputs.distro }}-${{ matrix.arch }}
+              run: |
+                  set -euo pipefail
+                  mkdir -p "$DIR"
+                  curl -fsSL --proto '=https' -o "$DIR/${URL##*/}" "$URL"
+                  echo "$SHA256  $DIR/${URL##*/}" | sha256sum -c -
+            - name: Upload DEB cell artifact
+              id: up_pkg
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+              with:
+                  name: deb__${{ steps.cell.outputs.distro }}__${{ matrix.arch }}
+                  path: output/${{ steps.cell.outputs.distro }}-${{ matrix.arch }}/
+                  retention-days: 7
+            - name: Generate pep-receipt/2 for the DEB cell
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@52cd787341f719191e817d3f1c134fc210fbcc53
+              with:
+                  cell_id: ${{ matrix.cell_id }}
+                  family: deb
+                  package_dir: output/${{ steps.cell.outputs.distro }}-${{ matrix.arch }}
+                  package_artifact_id: ${{ steps.up_pkg.outputs.artifact-id }}
+                  package_artifact_name: deb__${{ steps.cell.outputs.distro }}__${{ matrix.arch }}
+                  package_artifact_digest: ${{ steps.up_pkg.outputs.artifact-digest }}
+
+    # The same call as the patched release.yml, pinned to dde10a5 instead of @v1_STABLE;
+    # its `secrets:` lines are byte-identical to that patch.
+    certify:
+        name: Certify packages (PEP)
+        needs: [select-cells, determine-repo-type, package-rpm, package-deb]
+        if: always() && needs.determine-repo-type.result == 'success'
+        permissions:
+            contents: read      # nested checkouts of the pinned PEP implementation
+            actions: read       # capture lists THIS run's jobs + downloads its artifacts by id
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@dde10a527dfae56a3c85e278efb460f86275e16f
+        with:
+            rpm_matrix:      ${{ needs.select-cells.outputs.rpm_matrix }}
+            deb_matrix:      ${{ needs.select-cells.outputs.deb_matrix }}
+            component:       rag
+            version:         ${{ needs.determine-repo-type.outputs.component-version }}
+            buildnum:        ${{ needs.determine-repo-type.outputs.component-buildnum }}
+            effective_tag:   ${{ needs.determine-repo-type.outputs.effective-tag }}
+            channel:         ${{ needs.determine-repo-type.outputs.repo-type }}
+            simulated:       ${{ needs.determine-repo-type.outputs.simulated }}
+            rpm_publication: success      # SYNTHETIC validation input: nothing is published in this run
+            deb_publication: success      # SYNTHETIC validation input: nothing is published in this run
+            enforcement:     observe
+        secrets:
+            DOCKERHUB_USERNAME: ${{ needs.determine-repo-type.outputs.simulated == 'false' && secrets.DOCKERHUB_USERNAME || '' }}
+            DOCKERHUB_TOKEN:    ${{ needs.determine-repo-type.outputs.simulated == 'false' && secrets.DOCKERHUB_TOKEN || '' }}
+            PGEDGE_REPO_CLIENT_CRT: ${{ needs.determine-repo-type.outputs.simulated == 'false' && secrets.PGEDGE_REPO_CLIENT_CRT || '' }}
+            PGEDGE_REPO_CLIENT_KEY: ${{ needs.determine-repo-type.outputs.simulated == 'false' && secrets.PGEDGE_REPO_CLIENT_KEY || '' }}
+
+    assert:
+        name: assert chain evidence (full)
+        needs: [certify]
+        if: always()
+        runs-on: ubuntu-24.04
+        timeout-minutes: 15
+        permissions:
+            contents: read      # the verifier script on this branch
+            actions: read       # run metadata, this attempt's jobs and logs, this run's artifacts
+        env:
+            NEEDS_JSON: ${{ toJSON(needs) }}
+            GH_TOKEN:   ${{ github.token }}
+        steps:
+            - name: Check out the verifier
+              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+              with:
+                  sparse-checkout: .github/validation
+                  persist-credentials: false
+            - name: Download this run's PEP evidence (current attempt only)
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+              with:
+                  pattern: pep-*-r${{ github.run_number }}-a${{ github.run_attempt }}
+                  path: evidence
+            # Expected receipts, legs, coverage, checksums and credential evidence live in the
+            # script, which is exercised offline against fixtures before this branch is pushed.
+            - name: Check the chain from evidence, not job colour
+              run: python3 .github/validation/verify_chain.py full evidence
