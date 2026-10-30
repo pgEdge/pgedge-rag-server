@@ -1,0 +1,147 @@
+{
+  "note": "Validation fixture table, read-only: the already-published pgedge-rag-server2 2.0.0-1 release packages, one per detector cell, with the sha256 and size from the repository metadata (the independent source). The package jobs download these files and check them against it; verify_chain.py expects these sha256 values at every stage.",
+  "source_table_sha256": "711274e9de3ad2e91cce99ac7688d85d0aae1afe98dea8810b101ddf28b95f3f",
+  "channel": "release",
+  "cells": {
+    "pepcell.v1.deb.bookworm.amd64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.bookworm",
+        "file": "pgedge-rag-server2_2.0.0-1.bookworm_amd64.deb",
+        "url": "https://apt.pgedge.com/release/bookworm/pool/main/p/pgedge-rag-server2/pgedge-rag-server2_2.0.0-1.bookworm_amd64.deb",
+        "sha256": "eba1a2c463ad2ad8ed392e953387a80353103fff144bb72b377d22dc51fe0754",
+        "size": 4467974
+      }
+    ],
+    "pepcell.v1.deb.bookworm.arm64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.bookworm",
+        "file": "pgedge-rag-server2_2.0.0-1.bookworm_arm64.deb",
+        "url": "https://apt.pgedge.com/release/bookworm/pool/main/p/pgedge-rag-server2/pgedge-rag-server2_2.0.0-1.bookworm_arm64.deb",
+        "sha256": "26f98494b4eda6756ac07e4952fe904358df52926e9366a8ec392b35c45dc4d5",
+        "size": 4026448
+      }
+    ],
+    "pepcell.v1.deb.jammy.amd64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.jammy",
+        "file": "pgedge-rag-server2_2.0.0-1.jammy_amd64.deb",
+        "url": "https://apt.pgedge.com/release/jammy/pool/main/p/pgedge-rag-server2/pgedge-rag-server2_2.0.0-1.jammy_amd64.deb",
+        "sha256": "429dd6fd08cf0865cf5fdc02de24f2ba4c167cbdc1c8f9421363275ccaf61104",
+        "size": 4457350
+      }
+    ],
+    "pepcell.v1.deb.jammy.arm64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.jammy",
+        "file": "pgedge-rag-server2_2.0.0-1.jammy_arm64.deb",
+        "url": "https://apt.pgedge.com/release/jammy/pool/main/p/pgedge-rag-server2/pgedge-rag-server2_2.0.0-1.jammy_arm64.deb",
+        "sha256": "4b98dec099ad828b56af33c29d12d0eae7b4d1a387a331366d2ad8e46bde7691",
+        "size": 4015970
+      }
+    ],
+    "pepcell.v1.deb.noble.amd64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.noble",
+        "file": "pgedge-rag-server2_2.0.0-1.noble_amd64.deb",
+        "url": "https://apt.pgedge.com/release/noble/pool/main/p/pgedge-rag-server2/pgedge-rag-server2_2.0.0-1.noble_amd64.deb",
+        "sha256": "37873caaec638aa14053296faf4425f7cc9638fe6d825762c4ec0a0abea40afb",
+        "size": 4457318
+      }
+    ],
+    "pepcell.v1.deb.noble.arm64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.noble",
+        "file": "pgedge-rag-server2_2.0.0-1.noble_arm64.deb",
+        "url": "https://apt.pgedge.com/release/noble/pool/main/p/pgedge-rag-server2/pgedge-rag-server2_2.0.0-1.noble_arm64.deb",
+        "sha256": "a7bed7476bb429b4bb1e3d9a5867d7ee96ff188b8a190efc326deec238833858",
+        "size": 4015914
+      }
+    ],
+    "pepcell.v1.deb.resolute.amd64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.resolute",
+        "file": "pgedge-rag-server2_2.0.0-1.resolute_amd64.deb",
+        "url": "https://apt.pgedge.com/release/resolute/pool/main/p/pgedge-rag-server2/pgedge-rag-server2_2.0.0-1.resolute_amd64.deb",
+        "sha256": "bfdbc6a0061ae3f1c729ee1e676fe2cfe7c6924ef3943fd368ba3569e4e846cf",
+        "size": 4457330
+      }
+    ],
+    "pepcell.v1.deb.resolute.arm64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.resolute",
+        "file": "pgedge-rag-server2_2.0.0-1.resolute_arm64.deb",
+        "url": "https://apt.pgedge.com/release/resolute/pool/main/p/pgedge-rag-server2/pgedge-rag-server2_2.0.0-1.resolute_arm64.deb",
+        "sha256": "c363c9adafe3960c9325bcbb98a664dd712a74df2f0baea47a47acd35cdb2ad2",
+        "size": 4015918
+      }
+    ],
+    "pepcell.v1.deb.trixie.amd64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.trixie",
+        "file": "pgedge-rag-server2_2.0.0-1.trixie_amd64.deb",
+        "url": "https://apt.pgedge.com/release/trixie/pool/main/p/pgedge-rag-server2/pgedge-rag-server2_2.0.0-1.trixie_amd64.deb",
+        "sha256": "ee116737c00ea3d8ccef7c30f71672749f520c2b58ffb47773a39c4a8541c1b5",
+        "size": 4467972
+      }
+    ],
+    "pepcell.v1.deb.trixie.arm64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.trixie",
+        "file": "pgedge-rag-server2_2.0.0-1.trixie_arm64.deb",
+        "url": "https://apt.pgedge.com/release/trixie/pool/main/p/pgedge-rag-server2/pgedge-rag-server2_2.0.0-1.trixie_arm64.deb",
+        "sha256": "05f72a3e903eefdde14dbddcf5c6e533f1072cbab6205f64a24749caf0341e78",
+        "size": 4026424
+      }
+    ],
+    "pepcell.v1.rpm.el-10.amd64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.el10",
+        "file": "pgedge-rag-server2-2.0.0-1.el10.x86_64.rpm",
+        "url": "https://dnf.pgedge.com/release/10/RPMS/x86_64/pgedge-rag-server2-2.0.0-1.el10.x86_64.rpm",
+        "sha256": "68dd2971842bb458d8c77844d98a01dd63baa8697382589559ca89439658f5ba",
+        "size": 3744372
+      }
+    ],
+    "pepcell.v1.rpm.el-10.arm64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.el10",
+        "file": "pgedge-rag-server2-2.0.0-1.el10.aarch64.rpm",
+        "url": "https://dnf.pgedge.com/release/10/RPMS/aarch64/pgedge-rag-server2-2.0.0-1.el10.aarch64.rpm",
+        "sha256": "cf1fedfe6896fcb6d7a527bfa677f887096b3063037e549701514575d4f6dfb4",
+        "size": 3339485
+      }
+    ],
+    "pepcell.v1.rpm.el-9.amd64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.el9",
+        "file": "pgedge-rag-server2-2.0.0-1.el9.x86_64.rpm",
+        "url": "https://dnf.pgedge.com/release/9/RPMS/x86_64/pgedge-rag-server2-2.0.0-1.el9.x86_64.rpm",
+        "sha256": "01717af9c7ba89cebba85ec9399d9de6b144cf0a8183ba2d38cbb0e7d21bc617",
+        "size": 3744265
+      }
+    ],
+    "pepcell.v1.rpm.el-9.arm64.pkg": [
+      {
+        "name": "pgedge-rag-server2",
+        "version": "2.0.0-1.el9",
+        "file": "pgedge-rag-server2-2.0.0-1.el9.aarch64.rpm",
+        "url": "https://dnf.pgedge.com/release/9/RPMS/aarch64/pgedge-rag-server2-2.0.0-1.el9.aarch64.rpm",
+        "sha256": "f32828a2c5ef80b5595efcac1ec5d57530d310a28cebbb90fe9b914f20b7f8ec",
+        "size": 3339172
+      }
+    ]
+  }
+}
