@@ -48,7 +48,7 @@ To use the pgEdge RAG Server, you must:
 
 Before installing pgEdge RAG Server, you should install or obtain:
 
-- Go 1.22 or later
+- Go 1.26.10 or later
 - PostgreSQL 14 or later, with [pgvector installed](https://github.com/pgvector/pgvector)
 - [API keys](docs/keys.md) for your chosen LLM providers
 
