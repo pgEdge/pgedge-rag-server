@@ -594,12 +594,18 @@ jobs:
             rpm_publication: ${{ needs.push-dnf.result }}
             deb_publication: ${{ needs.push-apt.result }}
             enforcement:     observe      # report-only: product test failures do not fail the run
-        # Preview must not expose Docker Hub creds: each secret is passed only for a real
+        # Preview must not expose credentials: each secret is passed only for a real
         # (non-simulated) release and is an empty string otherwise; PEP forwards them only
-        # for full certification. They only raise the image-pull rate limit.
+        # for full certification. The Docker Hub pair only raises the image-pull rate
+        # limit. The repository client certificate and key are required for full
+        # certification: PEP installs the published packages from the gated pgEdge
+        # repositories, and reports a full run without them as an infrastructure failure.
+        # Only this pair goes to PEP; no signing, AWS or builder credentials do.
         secrets:
             DOCKERHUB_USERNAME: ${{ needs.determine-repo-type.outputs.simulated == 'false' && secrets.DOCKERHUB_USERNAME || '' }}
             DOCKERHUB_TOKEN:    ${{ needs.determine-repo-type.outputs.simulated == 'false' && secrets.DOCKERHUB_TOKEN || '' }}
+            PGEDGE_REPO_CLIENT_CRT: ${{ needs.determine-repo-type.outputs.simulated == 'false' && secrets.PGEDGE_REPO_CLIENT_CRT || '' }}
+            PGEDGE_REPO_CLIENT_KEY: ${{ needs.determine-repo-type.outputs.simulated == 'false' && secrets.PGEDGE_REPO_CLIENT_KEY || '' }}
 
     # =========================================================================
     # Aggregated manifest + Slack
