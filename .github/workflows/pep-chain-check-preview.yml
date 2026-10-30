@@ -2,7 +2,7 @@
 # TEMPORARY VALIDATION HARNESS: branch-scoped, never merged, NOT a release.
 #
 # Checks that PEP withholds RAG's repository client certificate from every step of
-# a preview: this workflow -> pep-release-certify (PEP main dde10a5) -> pep-certify
+# a preview: this workflow -> pep-release-certify (PEP v1_STABLE) -> pep-certify
 # -> pep-integration, with `simulated: true`. Unlike release.yml, which already sends
 # empty values on a simulated run, this caller passes the real pair UNCONDITIONALLY,
 # so the adapter's own withholding is what is tested.
@@ -22,7 +22,7 @@ name: PEP chain check, preview (validation, no build or publication)
 
 on:
     push:
-        branches: [validate/pep-dde10a5-chain]
+        branches: [validate/pep-v1-stable-chain]
 
 permissions:
     contents: read
@@ -194,7 +194,7 @@ jobs:
         permissions:
             contents: read      # nested checkouts of the pinned PEP implementation
             actions: read       # capture lists THIS run's jobs + downloads its artifacts by id
-        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@dde10a527dfae56a3c85e278efb460f86275e16f
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@v1_STABLE
         with:
             rpm_matrix:      ${{ needs.select-cells.outputs.rpm_matrix }}
             deb_matrix:      ${{ needs.select-cells.outputs.deb_matrix }}

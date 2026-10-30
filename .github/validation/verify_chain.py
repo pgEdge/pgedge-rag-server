@@ -13,6 +13,11 @@ SELF_JOB_ID is the assert job's own id (job.check_run_id): that job is still run
 the one job whose log is not read; every other job must have completed with a readable log.
 Exit status 0 only if the evidence matches the mode's expectations.
 
+The adapter is called through the branch reference @v1_STABLE. The reference and the commit it
+resolved to are checked separately: GitHub records the adapter as `...@v1_STABLE` (ref
+refs/heads/v1_STABLE) and each nested PEP workflow as `...@<commit>`; all must be STABLE_SHA, as
+must PEP's own provenance records and its checkouts.
+
 What the runs are: the packages are the already-published pgedge-rag-server2 2.0.0 release
 packages, downloaded and checksum-verified, and the receipts are recorded in the run. Nothing is
 built or published, and no original build provenance is established. In the full run the
@@ -30,7 +35,11 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
-FROZEN = "dde10a527dfae56a3c85e278efb460f86275e16f"
+STABLE_REF = "v1_STABLE"
+STABLE_SHA = "9b3c9e964487568a7b3f3a8f0a3c68000fe0d943"   # v1_STABLE after PEP #38 merged
+PEP_WF = "pgEdge/pgedge-pep-test/.github/workflows/"
+NESTED = ("pep-capture.yml", "pep-certify.yml", "pep-integration.yml")
+HEAD_LINE = re.compile(r"HEAD is now at ([0-9a-f]{7,40}) ")
 NAMES = ("PGEDGE_REPO_CLIENT_CRT", "PGEDGE_REPO_CLIENT_KEY")
 CELLS = {"rpm": "pepcell.v1.rpm.el-9.amd64.pkg", "deb": "pepcell.v1.deb.bookworm.amd64.pkg"}
 SHA256 = {"rpm": "01717af9c7ba89cebba85ec9399d9de6b144cf0a8183ba2d38cbb0e7d21bc617",
@@ -173,6 +182,9 @@ def verify(mode, evidence, source, env):
               "capture absent/rejected/ambiguous %r" % ((c.get("absent_receipt_cells"), c.get("rejected_receipt_cells"), c.get("ambiguous_receipt_cells")),))
         check(sorted((x.get("cell_id"), x.get("verdict")) for x in cap.get("cells") or []) ==
               sorted((cid, "accepted") for cid in CELLS.values()), "capture cells %r" % cap.get("cells"))
+        cp = cap.get("provenance") or {}
+        check((cp.get("pep_implementation_ref"), cp.get("pep_resolved_sha")) == (STABLE_SHA, STABLE_SHA),
+              "capture provenance %r" % ((cp.get("pep_implementation_ref"), cp.get("pep_resolved_sha")),))
     except (OSError, ValueError) as e:
         problems.append("capture evidence: %s" % e)
 
@@ -197,6 +209,9 @@ def verify(mode, evidence, source, env):
         for k in ("execution_status", "test_verdict", "coverage_status"):
             check(res.get(k) == want["outputs"][k], "result %s=%r" % (k, res.get(k)))
         check(res.get("result_resolved") is True, "result not resolved")
+        rp = res.get("provenance") or {}
+        check((rp.get("pep_requested_ref"), rp.get("pep_resolved_sha")) == (STABLE_SHA, STABLE_SHA),
+              "result provenance %r" % ((rp.get("pep_requested_ref"), rp.get("pep_resolved_sha")),))
         check(not res.get("coverage_gaps"), "result coverage_gaps %r" % res.get("coverage_gaps"))
         check(not res.get("unexpected_results"), "unexpected results %r" % res.get("unexpected_results"))
         rc = res.get("counts") or {}
@@ -214,6 +229,8 @@ def verify(mode, evidence, source, env):
             check((pi.get("package_name"), pkg.get("name"), pkg.get("version"), pi.get("channel")) == (PACKAGE, PACKAGE, "2.0.0", "release"),
                   tag + "planned package %r" % ((pi.get("package_name"), pkg.get("name"), pkg.get("version"), pi.get("channel")),))
             check(pkg.get("sha256") == SHA256.get(fam), tag + "receipt sha256 %r" % pkg.get("sha256"))
+            check((leg.get("provenance") or {}).get("pep_resolved_sha") == STABLE_SHA,
+                  tag + "provenance %r" % (leg.get("provenance") or {}).get("pep_resolved_sha"))
             if mode == "full":
                 check((leg.get("execution_status"), leg.get("test_verdict")) == ("completed", "pass"),
                       tag + "status/verdict %r" % ((leg.get("execution_status"), leg.get("test_verdict")),))
@@ -239,6 +256,8 @@ def verify(mode, evidence, source, env):
             problems.append(tag + "summary: %s" % e)
             continue
         fam = "rpm" if "-rpm-" in d.name else "deb" if "-deb-" in d.name else None
+        check((s.get("provenance") or {}).get("pep_resolved_sha") == STABLE_SHA,
+              tag + "summary provenance %r" % (s.get("provenance") or {}).get("pep_resolved_sha"))
         inst = d / "install-evidence.json"
         if mode == "full":
             check((s.get("execution_status"), s.get("test_verdict")) == ("completed", "pass"), tag + "summary %r" % ((s.get("execution_status"), s.get("test_verdict")),))
@@ -258,11 +277,18 @@ def verify(mode, evidence, source, env):
         for f in (p for p in d.rglob("*") if p.is_file()):
             check(b"PRIVATE KEY" not in f.read_bytes(), tag + "%s contains 'PRIVATE KEY'" % f.relative_to(d))
 
-    # 6. The logs: what the repository pair reached.
+    # 6. Which PEP code ran. The adapter's reference and the commit it resolved to are separate
+    #    checks; the nested workflows GitHub records under the resolved commit, not the branch.
     try:
-        refs = {r.get("path") for r in source.run().get("referenced_workflows") or []}
-        check("pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@" + FROZEN in refs,
-              "adapter not called at %s: %r" % (FROZEN, sorted(refs)))
+        refs = [(r.get("path"), r.get("ref"), r.get("sha")) for r in source.run().get("referenced_workflows") or []]
+        adapter = [r for r in refs if (r[0] or "").split("@")[0] == PEP_WF + "pep-release-certify.yml"]
+        nested = sorted((r for r in refs if r not in adapter), key=repr)
+        check([r[:2] for r in adapter] == [(PEP_WF + "pep-release-certify.yml@" + STABLE_REF, "refs/heads/" + STABLE_REF)],
+              "adapter not called through @%s: %r" % (STABLE_REF, adapter))
+        check([r[2] for r in adapter] == [STABLE_SHA],
+              "adapter resolved to %r, expected %s" % ([r[2] for r in adapter], STABLE_SHA))
+        check(nested == sorted(((PEP_WF + n + "@" + STABLE_SHA, "refs/heads/" + STABLE_REF, STABLE_SHA) for n in NESTED), key=repr),
+              "nested PEP workflows %r, expected %s at %s" % (nested, ", ".join(NESTED), STABLE_SHA))
         jobs = source.jobs()
     except (RuntimeError, OSError, ValueError) as e:
         problems.append("run metadata: %s" % e)
@@ -271,6 +297,7 @@ def verify(mode, evidence, source, env):
     check(len(leg_jobs) == 6, "%d PEP test-leg jobs, expected 6" % len(leg_jobs))
     # This assert job has no log until it finishes, so it alone is skipped, and only when
     # SELF_JOB_ID names it exactly. Every other job is upstream of it: completed, log required.
+    heads = set()
     own_id = env.get("SELF_JOB_ID", "")
     own = [j for j in jobs if str(j.get("id")) == own_id]
     if not check(own_id.isdigit() and len(own) == 1 and own[0].get("name") == want["assert_job"],
@@ -286,6 +313,10 @@ def verify(mode, evidence, source, env):
         except (RuntimeError, OSError) as e:
             problems.append("%s: %s" % (j.get("name"), e))
             continue
+        found = set(HEAD_LINE.findall("\n".join(lines)))
+        heads |= found
+        if j in leg_jobs:
+            check(found, "%s: no PEP checkout found" % j.get("name"))
         env_pairs = pair_env(lines)
         outside = [l for l in lines if not ENV_LINE.match(l)]
         check(not [l for l in outside if "PRIVATE KEY-----" in l],
@@ -307,6 +338,7 @@ def verify(mode, evidence, source, env):
             else:
                 ok = check("[repo-auth] client certificate:" not in log, "%s: repo-auth check ran in a preview" % j["name"])
             rows.append((j["name"], "ok" if ok else "PROBLEM"))
+    check(heads and all(STABLE_SHA.startswith(h) for h in heads), "PEP checkouts at %r, expected %s" % (sorted(heads), STABLE_SHA[:7]))
     return problems, rows, out
 
 
@@ -318,7 +350,7 @@ def main(argv):
     summary = env.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a") as f:
-            f.write("## Chain check (%s) at PEP %s\n\n" % (mode, FROZEN[:7]))
+            f.write("## Chain check (%s) through PEP @%s = %s\n\n" % (mode, STABLE_REF, STABLE_SHA[:7]))
             f.write("Validation harness: nothing built or published; the packages and receipts are validation "
                     "fixtures; %s\n\n" % ("the `success` publication inputs are synthetic." if mode == "full"
                                           else "simulated run, publication `skipped`."))

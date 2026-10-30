@@ -3,7 +3,7 @@
 #
 # Checks that RAG's own repository client certificate reaches PEP's test runs
 # through the release adapter and certifier: this workflow -> pep-release-certify
-# (PEP main dde10a5) -> pep-certify -> pep-integration, in full certification.
+# (PEP v1_STABLE) -> pep-certify -> pep-integration, in full certification.
 #
 # Validation fixtures, stated plainly:
 #   * Nothing is built and nothing is published. The two "package" jobs download
@@ -22,7 +22,7 @@ name: PEP chain check, full (validation, no build or publication)
 
 on:
     push:
-        branches: [validate/pep-dde10a5-chain]
+        branches: [validate/pep-v1-stable-chain]
 
 permissions:
     contents: read
@@ -185,7 +185,7 @@ jobs:
                   package_artifact_name: deb__${{ steps.cell.outputs.distro }}__${{ matrix.arch }}
                   package_artifact_digest: ${{ steps.up_pkg.outputs.artifact-digest }}
 
-    # The same call as the patched release.yml, pinned to dde10a5 instead of @v1_STABLE;
+    # The same call as RAG's release.yml, through @v1_STABLE;
     # its `secrets:` lines are byte-identical to that patch.
     certify:
         name: Certify packages (PEP)
@@ -194,7 +194,7 @@ jobs:
         permissions:
             contents: read      # nested checkouts of the pinned PEP implementation
             actions: read       # capture lists THIS run's jobs + downloads its artifacts by id
-        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@dde10a527dfae56a3c85e278efb460f86275e16f
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@v1_STABLE
         with:
             rpm_matrix:      ${{ needs.select-cells.outputs.rpm_matrix }}
             deb_matrix:      ${{ needs.select-cells.outputs.deb_matrix }}
