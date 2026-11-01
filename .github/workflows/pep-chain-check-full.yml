@@ -1,11 +1,13 @@
 # -------------------------------------------------------------------------
 # TEMPORARY VALIDATION HARNESS: branch-scoped, never merged, NOT a release.
 #
-# Full certification of all 14 detector cells (42 legs: each cell on PG16/17/18)
-# with RAG's own repository client certificate, through the release adapter and
-# certifier: this workflow -> pep-release-certify (PEP v1_STABLE) -> pep-certify
-# -> pep-integration. One push of its branch starts this one run; the assert job
-# checks this run's evidence only.
+# RAG regression check for a CANDIDATE PEP revision (pgEdge/pgedge-pep-test#39):
+# full certification of 2 of the 14 detector cells (6 legs: each cell on
+# PG16/17/18) with RAG's own repository client certificate, through the release
+# adapter and certifier: this workflow -> pep-release-certify (PEP candidate
+# commit) -> pep-certify -> pep-integration. Derived from the T3 harness
+# (validate/pep-v1-stable-rag-full14). One push of its branch starts this one run;
+# its evidence is checked offline after the run.
 #
 # Validation fixtures, stated plainly:
 #   * Nothing is built and nothing is published. The 14 "package" jobs download
@@ -20,11 +22,11 @@
 #   * No PEP acceptance rule is changed for this harness.
 # -------------------------------------------------------------------------
 
-name: PEP chain check, full, all 14 cells (validation, no build or publication)
+name: PEP chain check, PEP #39 candidate, 2 cells (validation, no build or publication)
 
 on:
     push:
-        branches: [validate/pep-v1-stable-rag-full14]
+        branches: [validate/pep39-rag-subset]
 
 permissions:
     contents: read
@@ -59,10 +61,10 @@ jobs:
                   rpm_images: '["almalinux:9","almalinux:10"]'
                   deb_images: '["ubuntu:jammy","ubuntu:noble","ubuntu:resolute","debian:bookworm","debian:trixie"]'
 
-    # Every detector cell, unchanged; the run stops here unless the detector reports
-    # exactly the 14 cells of the fixture table, each once and in its own family.
+    # The run stops here unless the detector reports exactly the 14 cells of the
+    # fixture table, each once and in its own family; then only KEEP is certified.
     select-cells:
-        name: Select all 14 detector cells
+        name: Select 2 of the 14 detector cells
         needs: detect-matrix
         runs-on: ubuntu-latest
         timeout-minutes: 10   # bounded: a stalled job fails instead of running for hours
@@ -75,12 +77,13 @@ jobs:
               with:
                   sparse-checkout: .github/validation
                   persist-credentials: false
-            - name: Keep every cell; require exactly the 14 expected cell ids
+            - name: Require exactly the 14 expected cell ids; keep 2
               id: pick
               env:
                   RPM: ${{ needs.detect-matrix.outputs.rpm_matrix }}
                   DEB: ${{ needs.detect-matrix.outputs.deb_matrix }}
                   FIXTURES: .github/validation/rag-fixtures.json
+                  KEEP: '["pepcell.v1.deb.noble.arm64.pkg","pepcell.v1.rpm.el-9.amd64.pkg"]'
               run: |
                   set -euo pipefail
                   rpm=$(jq -c . <<<"$RPM")
@@ -95,8 +98,14 @@ jobs:
                       diff <(echo "$want") <(echo "$got") || true
                       exit 1
                   fi
-                  echo "rpm_matrix=$rpm" >> "$GITHUB_OUTPUT"
-                  echo "deb_matrix=$deb" >> "$GITHUB_OUTPUT"
+                  rpm=$(jq -c --argjson k "$KEEP" '{include: [.include[] | select(.cell_id as $c | $k | index($c))]}' <<<"$rpm")
+                  deb=$(jq -c --argjson k "$KEEP" '{include: [.include[] | select(.cell_id as $c | $k | index($c))]}' <<<"$deb")
+                  n=$(jq -n --argjson r "$rpm" --argjson d "$deb" '($r.include | length) + ($d.include | length)')
+                  [ "$n" = 2 ] || { echo "::error::kept $n cells, expected 2"; exit 1; }
+                  {
+                    echo "rpm_matrix=$rpm"
+                    echo "deb_matrix=$deb"
+                  } >> "$GITHUB_OUTPUT"
 
     # Fixed identity of the already-published release. Synthetic inputs: see the header.
     determine-repo-type:
@@ -234,7 +243,7 @@ jobs:
         permissions:
             contents: read      # nested checkouts of the pinned PEP implementation
             actions: read       # capture lists THIS run's jobs + downloads its artifacts by id
-        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@v1_STABLE
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@ca5fb026bb2fec4427aa5bcc0891f64721a7be9c  # PEP #39 candidate
         with:
             rpm_matrix:      ${{ needs.select-cells.outputs.rpm_matrix }}
             deb_matrix:      ${{ needs.select-cells.outputs.deb_matrix }}
@@ -252,34 +261,3 @@ jobs:
             DOCKERHUB_TOKEN:    ${{ needs.determine-repo-type.outputs.simulated == 'false' && secrets.DOCKERHUB_TOKEN || '' }}
             PGEDGE_REPO_CLIENT_CRT: ${{ needs.determine-repo-type.outputs.simulated == 'false' && secrets.PGEDGE_REPO_CLIENT_CRT || '' }}
             PGEDGE_REPO_CLIENT_KEY: ${{ needs.determine-repo-type.outputs.simulated == 'false' && secrets.PGEDGE_REPO_CLIENT_KEY || '' }}
-
-    assert:
-        name: assert chain evidence (full)
-        needs: [certify]
-        if: always()
-        runs-on: ubuntu-24.04
-        timeout-minutes: 15
-        permissions:
-            contents: read      # the verifier script on this branch
-            actions: read       # run metadata, this attempt's jobs and logs, this run's artifacts
-        env:
-            NEEDS_JSON: ${{ toJSON(needs) }}
-            GH_TOKEN:   ${{ github.token }}
-        steps:
-            - name: Check out the verifier
-              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-              with:
-                  sparse-checkout: .github/validation
-                  persist-credentials: false
-            - name: Download this run's PEP evidence (current attempt only)
-              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-              with:
-                  pattern: pep-*-r${{ github.run_number }}-a${{ github.run_attempt }}
-                  path: evidence
-            # Expected receipts, legs, coverage, checksums and credential evidence live in the
-            # script and rag-fixtures.json, exercised offline against fixtures before this branch
-            # is pushed. It also writes the per-cell coverage table to the step summary.
-            - name: Check the chain from evidence, not job colour
-              env:
-                  SELF_JOB_ID: ${{ job.check_run_id }}   # this job: still running, so the one log not read
-              run: python3 .github/validation/verify_chain.py full evidence
