@@ -81,6 +81,7 @@ func TestMessage_ClassifiesSentinels(t *testing.T) {
 		{"authentication", llmlib.ErrAuthentication, MsgAuthentication},
 		{"rate limit", llmlib.ErrRateLimit, MsgRateLimit},
 		{"invalid request", llmlib.ErrInvalidRequest, MsgInvalidRequest},
+		{"not found", llmlib.ErrNotFound, MsgNotFound},
 		{"not supported", llmlib.ErrNotSupported, MsgNotSupported},
 		{"provider error", llmlib.ErrProviderError, MsgProvider},
 		{"deadline exceeded", context.DeadlineExceeded, MsgTimeout},

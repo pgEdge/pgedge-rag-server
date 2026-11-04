@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"net/http"
 
+	llmlib "github.com/pgEdge/pgedge-go-llm-lib/llm"
+
 	"github.com/pgEdge/pgedge-rag-server/internal/database"
 	"github.com/pgEdge/pgedge-rag-server/internal/identity"
 	"github.com/pgEdge/pgedge-rag-server/internal/pipeline"
@@ -98,6 +100,22 @@ func retrievalErrorResponse(err error) (status int, code string, ok bool) {
 	default:
 		return http.StatusInternalServerError, "RETRIEVAL_FAILED", true
 	}
+}
+
+// executionErrorStatus chooses the HTTP status for a pipeline failure
+// that is not a retrieval failure or a timeout (issue #61).
+//
+// A provider that rejected the server's credentials, or that does not
+// have the configured model (a retired name, or one the key's plan
+// cannot use), is 502: the upstream refused, because of how the server
+// is configured. Reporting either as 500 hid that from the caller and
+// invited retries that cannot succeed. Everything else stays 500.
+func executionErrorStatus(err error) int {
+	if errors.Is(err, llmlib.ErrAuthentication) ||
+		errors.Is(err, llmlib.ErrNotFound) {
+		return http.StatusBadGateway
+	}
+	return http.StatusInternalServerError
 }
 
 // isRequestTimeout reports whether ctx's Done() channel closed because
@@ -273,7 +291,7 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request) {
 			s.respondError(w, status, code, safeerr.Message(err))
 			return
 		}
-		s.respondError(w, http.StatusInternalServerError, "EXECUTION_ERROR",
+		s.respondError(w, executionErrorStatus(err), "EXECUTION_ERROR",
 			safeerr.Message(err))
 		return
 	}

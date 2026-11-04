@@ -5,7 +5,7 @@ go 1.26.10
 require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/pgEdge/pgedge-go-llm-lib v0.3.1
+	github.com/pgEdge/pgedge-go-llm-lib v0.6.1-0.20261104220425-88d2d2884c9c
 	gopkg.in/yaml.v3 v3.0.1
 )
 
