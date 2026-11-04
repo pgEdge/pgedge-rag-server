@@ -1,6 +1,6 @@
 module github.com/pgEdge/pgedge-rag-server
 
-go 1.26.5
+go 1.26.10
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1

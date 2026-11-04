@@ -2,7 +2,7 @@
 
 Before installing the RAG server, install or gather the following:
 
-- Go 1.22 or later
+- Go 1.26.10 or later
 - PostgreSQL, installed with the [`pgvector`](https://github.com/pgvector/pgvector "`pgvector`") extension created
 - API keys for your chosen LLM providers
 
