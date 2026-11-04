@@ -344,6 +344,19 @@ func BuildOpenAPISpec() OpenAPISpec {
 								},
 							},
 						},
+						"502": {
+							Description: "The LLM provider rejected the server's credentials, " +
+								"or does not have the configured model or it is not available " +
+								"to those credentials (error.code EXECUTION_ERROR). This is a " +
+								"server configuration problem, and retrying will not help",
+							Content: map[string]OpenAPIMediaType{
+								"application/json": {
+									Schema: OpenAPISchema{
+										Ref: "#/components/schemas/ErrorResponse",
+									},
+								},
+							},
+						},
 						"503": {
 							Description: "The document store could not be reached, so no search " +
 								"ran (error.code RETRIEVAL_UNAVAILABLE). Unlike a 500 this is " +
