@@ -3,8 +3,8 @@
 #
 # Full certification of all 14 detector cells (42 legs: each cell on PG16/17/18)
 # with RAG's own repository client certificate, through the release adapter and
-# certifier: this workflow -> pep-release-certify (PEP v1_STABLE) -> pep-certify
-# -> pep-integration. One push of its branch starts this one run; the assert job
+# certifier: this workflow -> pep-release-certify (PEP candidate 17584fd, every PEP
+# call pinned to its full SHA) -> pep-certify -> pep-integration. One push of its branch starts this one run; the assert job
 # checks this run's evidence only.
 #
 # Validation fixtures, stated plainly:
@@ -17,14 +17,16 @@
 #     SYNTHETIC test inputs that drive the adapter's full path. No publication
 #     occurred in this run; any "published" wording in PEP's report reflects
 #     these inputs, not an event.
-#   * No PEP acceptance rule is changed for this harness.
+#   * No PEP acceptance rule is changed for this harness. This is the regression of the
+#     proven T3 check (61f0cb3, run 41073307192) against the PEP candidate; only the PEP
+#     pins and the branch differ.
 # -------------------------------------------------------------------------
 
 name: PEP chain check, full, all 14 cells (validation, no build or publication)
 
 on:
     push:
-        branches: [validate/pep-v1-stable-rag-full14]
+        branches: [validate/pep-17584fd-rag-full14]
 
 permissions:
     contents: read
@@ -164,7 +166,7 @@ jobs:
                   path: output/el${{ steps.cell.outputs.os_version }}-${{ matrix.arch }}/
                   retention-days: 7
             - name: Generate pep-receipt/2 for the RPM cell
-              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@52cd787341f719191e817d3f1c134fc210fbcc53
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@17584fd4efab8ed82ae89cf58bc3cb0bee880278
               with:
                   cell_id: ${{ matrix.cell_id }}
                   family: rpm
@@ -216,7 +218,7 @@ jobs:
                   path: output/${{ steps.cell.outputs.distro }}-${{ matrix.arch }}/
                   retention-days: 7
             - name: Generate pep-receipt/2 for the DEB cell
-              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@52cd787341f719191e817d3f1c134fc210fbcc53
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@17584fd4efab8ed82ae89cf58bc3cb0bee880278
               with:
                   cell_id: ${{ matrix.cell_id }}
                   family: deb
@@ -225,8 +227,8 @@ jobs:
                   package_artifact_name: deb__${{ steps.cell.outputs.distro }}__${{ matrix.arch }}
                   package_artifact_digest: ${{ steps.up_pkg.outputs.artifact-digest }}
 
-    # The same call as RAG's release.yml, through @v1_STABLE;
-    # its `secrets:` lines are byte-identical to that patch.
+    # The same call as RAG's release.yml, pinned to the PEP candidate's full SHA instead
+    # of @v1_STABLE; its `secrets:` lines are byte-identical to that patch.
     certify:
         name: Certify packages (PEP)
         needs: [select-cells, determine-repo-type, package-rpm, package-deb]
@@ -234,7 +236,7 @@ jobs:
         permissions:
             contents: read      # nested checkouts of the pinned PEP implementation
             actions: read       # capture lists THIS run's jobs + downloads its artifacts by id
-        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@v1_STABLE
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@17584fd4efab8ed82ae89cf58bc3cb0bee880278
         with:
             rpm_matrix:      ${{ needs.select-cells.outputs.rpm_matrix }}
             deb_matrix:      ${{ needs.select-cells.outputs.deb_matrix }}

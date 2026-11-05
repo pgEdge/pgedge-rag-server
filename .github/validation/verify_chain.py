@@ -14,10 +14,10 @@ is the assert job's own id (job.check_run_id): that job is still running, so it 
 whose log is not read; every other job must have completed with a readable log.
 Exit status 0 only if the evidence matches the expectations below.
 
-The adapter is called through the branch reference @v1_STABLE. The reference and the commit it
-resolved to are checked separately: GitHub records the adapter as `...@v1_STABLE` (ref
-refs/heads/v1_STABLE) and each nested PEP workflow as `...@<commit>`; all must be STABLE_SHA, as
-must PEP's own provenance records and its checkouts.
+The adapter is called by the PEP candidate's full commit SHA (re-pinned from @v1_STABLE for the
+candidate regression; product expectations unchanged). GitHub records a SHA-pinned reusable
+workflow, and each workflow it calls, as `...@<sha>` with that sha and no ref; all must be PEP_SHA,
+as must PEP's own provenance records and its checkouts.
 
 Coverage is counted from evidence, never from job colour: each of the 14 detector cells must be
 accepted once by capture, and each of its 42 legs (cell x PG16/17/18) must appear exactly once
@@ -44,9 +44,8 @@ from collections import Counter
 from pathlib import Path
 from urllib.parse import urlsplit
 
-STABLE_REF = "v1_STABLE"
-STABLE_SHA = "9b3c9e964487568a7b3f3a8f0a3c68000fe0d943"   # v1_STABLE after PEP #38 merged
-BRANCH = "validate/pep-v1-stable-rag-full14"
+PEP_SHA = "17584fd4efab8ed82ae89cf58bc3cb0bee880278"   # PEP candidate (feature/pep-ace-support)
+BRANCH = "validate/pep-17584fd-rag-full14"
 WORKFLOW = ".github/workflows/pep-chain-check-full.yml"
 PEP_WF = "pgEdge/pgedge-pep-test/.github/workflows/"
 NESTED = ("pep-capture.yml", "pep-certify.yml", "pep-integration.yml")
@@ -107,7 +106,7 @@ OTHER_JOBS = ("Detect build matrix", "Select all 14 detector cells",
               CERTIFY + " / certify / capture / capture", CERTIFY + " / certify / plan",
               CERTIFY + " / certify / aggregate", CERTIFY + " / certify / enforce",
               CERTIFY + " / Release certification summary")
-# Jobs that check out PEP (as in run 41037649715): each exactly once, at STABLE_SHA.
+# Jobs that check out PEP (as in run 41037649715): each exactly once, at PEP_SHA.
 CHECKOUT_JOBS = (CERTIFY + " / Release inputs", CERTIFY + " / certify / capture / capture",
                  CERTIFY + " / certify / plan", CERTIFY + " / certify / aggregate",
                  CERTIFY + " / Release certification summary")
@@ -334,7 +333,7 @@ def verify(mode, evidence, source, env):
             check(ok, "capture %s: %r" % (cid, x))
             capture_verdict[cid] = x.get("verdict") if ids.get(cid) == 1 else "duplicate"
         cp = cap.get("provenance") or {}
-        check((cp.get("pep_implementation_ref"), cp.get("pep_resolved_sha")) == (STABLE_SHA, STABLE_SHA),
+        check((cp.get("pep_implementation_ref"), cp.get("pep_resolved_sha")) == (PEP_SHA, PEP_SHA),
               "capture provenance %r" % ((cp.get("pep_implementation_ref"), cp.get("pep_resolved_sha")),))
         check((cp.get("run_id"), cp.get("run_attempt")) == this_run, "capture from run %r" % ((cp.get("run_id"), cp.get("run_attempt")),))
     except (OSError, ValueError) as e:
@@ -407,7 +406,7 @@ def verify(mode, evidence, source, env):
         check(res.get("result_resolved") is True and res.get("reason_code") is None and not res.get("errors"),
               "result resolved/reason/errors %r" % ((res.get("result_resolved"), res.get("reason_code"), res.get("errors")),))
         rp = res.get("provenance") or {}
-        check((rp.get("pep_requested_ref"), rp.get("pep_resolved_sha")) == (STABLE_SHA, STABLE_SHA),
+        check((rp.get("pep_requested_ref"), rp.get("pep_resolved_sha")) == (PEP_SHA, PEP_SHA),
               "result provenance %r" % ((rp.get("pep_requested_ref"), rp.get("pep_resolved_sha")),))
         check((rp.get("run_id"), rp.get("run_attempt")) == this_run, "result from run %r" % ((rp.get("run_id"), rp.get("run_attempt")),))
         check(res.get("release") == RELEASE, "result release %r" % res.get("release"))
@@ -439,7 +438,7 @@ def verify(mode, evidence, source, env):
             ok &= check(l.get("identity_evidence") == IDENTITY and not l.get("unproven_identity_rungs"), tag + "identity %r" % l.get("identity_evidence"))
             ok &= check(l.get("counts") == JUNIT, tag + "counts %r" % l.get("counts"))
             lp = l.get("provenance") or {}
-            ok &= check((lp.get("pep_requested_ref"), lp.get("pep_resolved_sha")) == (STABLE_SHA, STABLE_SHA),
+            ok &= check((lp.get("pep_requested_ref"), lp.get("pep_resolved_sha")) == (PEP_SHA, PEP_SHA),
                         tag + "provenance %r" % lp.get("pep_resolved_sha"))
             ok &= check((lp.get("caller_run_id"), lp.get("caller_run_attempt")) == this_run,
                         tag + "from run %r" % ((lp.get("caller_run_id"), lp.get("caller_run_attempt")),))
@@ -466,7 +465,7 @@ def verify(mode, evidence, source, env):
         fam, (_, arch, alias) = cid.split(".")[2], CELLS[cid]
         tag = "summary %s pg%s: " % key
         sp = s.get("provenance") or {}
-        ok = check((sp.get("pep_requested_ref"), sp.get("pep_resolved_sha")) == (STABLE_SHA, STABLE_SHA),
+        ok = check((sp.get("pep_requested_ref"), sp.get("pep_resolved_sha")) == (PEP_SHA, PEP_SHA),
                    tag + "provenance %r" % ((sp.get("pep_requested_ref"), sp.get("pep_resolved_sha")),))
         ok &= check((sp.get("caller_run_id"), sp.get("caller_run_attempt")) == this_run,
                     tag + "from run %r, not this run %r" % ((sp.get("caller_run_id"), sp.get("caller_run_attempt")), this_run))
@@ -517,12 +516,10 @@ def verify(mode, evidence, source, env):
         refs = [(r.get("path"), r.get("ref"), r.get("sha")) for r in run.get("referenced_workflows") or []]
         adapter = [r for r in refs if (r[0] or "").split("@")[0] == PEP_WF + "pep-release-certify.yml"]
         nested = sorted((r for r in refs if r not in adapter), key=repr)
-        check([r[:2] for r in adapter] == [(PEP_WF + "pep-release-certify.yml@" + STABLE_REF, "refs/heads/" + STABLE_REF)],
-              "adapter not called through @%s: %r" % (STABLE_REF, adapter))
-        check([r[2] for r in adapter] == [STABLE_SHA],
-              "adapter resolved to %r, expected %s" % ([r[2] for r in adapter], STABLE_SHA))
-        check(nested == sorted(((PEP_WF + n + "@" + STABLE_SHA, "refs/heads/" + STABLE_REF, STABLE_SHA) for n in NESTED), key=repr),
-              "nested PEP workflows %r, expected %s at %s" % (nested, ", ".join(NESTED), STABLE_SHA))
+        check(adapter == [(PEP_WF + "pep-release-certify.yml@" + PEP_SHA, None, PEP_SHA)],
+              "adapter not called by its full SHA %s: %r" % (PEP_SHA, adapter))
+        check(nested == sorted(((PEP_WF + n + "@" + PEP_SHA, None, PEP_SHA) for n in NESTED), key=repr),
+              "nested PEP workflows %r, expected %s at %s" % (nested, ", ".join(NESTED), PEP_SHA))
     except (RuntimeError, OSError, ValueError) as e:
         problems.append("run metadata: %s" % e)
     try:
@@ -580,7 +577,7 @@ def verify(mode, evidence, source, env):
             ok &= check("[repo-auth] client certificate: complete" in log, "%s: pair not complete at the check" % name)
             ok &= check("Installed client certificate, pgEdge repositories enabled" in log, "%s: certificate not installed" % name)
             mark(key, "job", ok)
-    check(heads and all(STABLE_SHA.startswith(h) for h in heads), "PEP checkouts at %r, expected %s" % (sorted(heads), STABLE_SHA[:7]))
+    check(heads and all(PEP_SHA.startswith(h) for h in heads), "PEP checkouts at %r, expected %s" % (sorted(heads), PEP_SHA[:7]))
 
     # 10. Coverage from evidence: a leg is tested only with plan, result, summary and job all sound.
     rows = []
@@ -616,7 +613,7 @@ def main(argv):
     summary = env.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a") as f:
-            f.write("## Chain check (full, all 14 cells) through PEP @%s = %s\n\n" % (STABLE_REF, STABLE_SHA[:7]))
+            f.write("## Chain check (full, all 14 cells) through PEP @%s (candidate)\n\n" % PEP_SHA[:7])
             f.write("Validation harness: nothing built or published; the packages are the already-published "
                     "pgedge-rag-server2 2.0.0 release packages, downloaded and sha256-checked against the fixture "
                     "table; the receipts bind them to this run's cells only (no build provenance); "
