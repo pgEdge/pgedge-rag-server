@@ -3,7 +3,7 @@
 #
 # Full certification of all 14 detector cells (42 legs: each cell on PG16/17/18)
 # with RAG's own repository client certificate, through the release adapter and
-# certifier: this workflow -> pep-release-certify (PEP candidate 17584fd, every PEP
+# certifier: this workflow -> pep-release-certify (PEP candidate 9c6e993 (combined next-group candidate), every PEP
 # call pinned to its full SHA) -> pep-certify -> pep-integration. One push of its branch starts this one run; the assert job
 # checks this run's evidence only.
 #
@@ -26,7 +26,7 @@ name: PEP chain check, full, all 14 cells (validation, no build or publication)
 
 on:
     push:
-        branches: [validate/pep-17584fd-rag-full14]
+        branches: [validate/pep-9c6e993-rag-full14]
 
 permissions:
     contents: read
@@ -166,7 +166,7 @@ jobs:
                   path: output/el${{ steps.cell.outputs.os_version }}-${{ matrix.arch }}/
                   retention-days: 7
             - name: Generate pep-receipt/2 for the RPM cell
-              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@17584fd4efab8ed82ae89cf58bc3cb0bee880278
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@9c6e9937e93c1e92fa7bdcc672218e6a3c192a05
               with:
                   cell_id: ${{ matrix.cell_id }}
                   family: rpm
@@ -218,7 +218,7 @@ jobs:
                   path: output/${{ steps.cell.outputs.distro }}-${{ matrix.arch }}/
                   retention-days: 7
             - name: Generate pep-receipt/2 for the DEB cell
-              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@17584fd4efab8ed82ae89cf58bc3cb0bee880278
+              uses: pgEdge/pgedge-pep-test/.github/actions/pep-package-receipt@9c6e9937e93c1e92fa7bdcc672218e6a3c192a05
               with:
                   cell_id: ${{ matrix.cell_id }}
                   family: deb
@@ -236,7 +236,7 @@ jobs:
         permissions:
             contents: read      # nested checkouts of the pinned PEP implementation
             actions: read       # capture lists THIS run's jobs + downloads its artifacts by id
-        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@17584fd4efab8ed82ae89cf58bc3cb0bee880278
+        uses: pgEdge/pgedge-pep-test/.github/workflows/pep-release-certify.yml@9c6e9937e93c1e92fa7bdcc672218e6a3c192a05
         with:
             rpm_matrix:      ${{ needs.select-cells.outputs.rpm_matrix }}
             deb_matrix:      ${{ needs.select-cells.outputs.deb_matrix }}

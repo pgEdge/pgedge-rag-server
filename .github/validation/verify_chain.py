@@ -44,8 +44,8 @@ from collections import Counter
 from pathlib import Path
 from urllib.parse import urlsplit
 
-PEP_SHA = "17584fd4efab8ed82ae89cf58bc3cb0bee880278"   # PEP candidate (feature/pep-ace-support)
-BRANCH = "validate/pep-17584fd-rag-full14"
+PEP_SHA = "9c6e9937e93c1e92fa7bdcc672218e6a3c192a05"   # PEP candidate (validate/pep-next-group-combined)
+BRANCH = "validate/pep-9c6e993-rag-full14"
 WORKFLOW = ".github/workflows/pep-chain-check-full.yml"
 PEP_WF = "pgEdge/pgedge-pep-test/.github/workflows/"
 NESTED = ("pep-capture.yml", "pep-certify.yml", "pep-integration.yml")
