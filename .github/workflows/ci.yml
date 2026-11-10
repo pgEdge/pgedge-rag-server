@@ -24,7 +24,7 @@ jobs:
             - name: Run golangci-lint
               uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa # v7
               with:
-                  version: v2.11.4
+                  version: v2.15.0
 
     test:
         name: Test
@@ -90,7 +90,7 @@ jobs:
               run: make build
 
             - name: Upload binary
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
               with:
                   name: pgedge-rag-server
                   path: bin/pgedge-rag-server
@@ -107,7 +107,7 @@ jobs:
             - name: Set up Python
               uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
               with:
-                  python-version: "3.12"
+                  python-version: "3.15"
 
             - name: Install MkDocs
               run: pip install mkdocs mkdocs-material mkdocs-redoc-tag
