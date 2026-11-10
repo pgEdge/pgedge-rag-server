@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/pgEdge/pgedge-rag-server/internal/config"
 )
 
@@ -248,5 +250,66 @@ func TestBuildConnectionString(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestBuildConnectionStringRoundTrip parses the generated string with
+// pgx itself, so a value containing characters that are special in a
+// keyword/value connection string (backslashes, quotes, whitespace)
+// must reach the driver exactly as configured. pgx drops an unescaped
+// backslash from v5.11.0 onwards, matching libpq.
+func TestBuildConnectionStringRoundTrip(t *testing.T) {
+	passwords := []string{
+		"plain",
+		`back\slash`,
+		`trailing\`,
+		`double\\back`,
+		"it's",
+		`\'`,
+		"with space",
+		"tab\there",
+		"=equals=",
+	}
+	for _, pw := range passwords {
+		t.Run(pw, func(t *testing.T) {
+			cfg := config.DatabaseConfig{
+				Host:     "h1",
+				Port:     5432,
+				Database: "my db",
+				Username: `o'brien\x`,
+				Password: pw,
+			}
+			pc, err := pgconn.ParseConfig(buildConnectionString(cfg))
+			if err != nil {
+				t.Fatalf("ParseConfig: %v", err)
+			}
+			if pc.Password != pw {
+				t.Errorf("password = %q, want %q", pc.Password, pw)
+			}
+			if pc.User != cfg.Username {
+				t.Errorf("user = %q, want %q", pc.User, cfg.Username)
+			}
+			if pc.Database != cfg.Database {
+				t.Errorf("database = %q, want %q", pc.Database, cfg.Database)
+			}
+		})
+	}
+}
+
+func TestConnParam(t *testing.T) {
+	tests := []struct {
+		value string
+		want  string
+	}{
+		{"secret", "k=secret"},
+		{"", "k=''"},
+		{"a b", "k='a b'"},
+		{`a\b`, `k='a\\b'`},
+		{"it's", `k='it\'s'`},
+	}
+	for _, tt := range tests {
+		if got := connParam("k", tt.value); got != tt.want {
+			t.Errorf("connParam(%q) = %s, want %s", tt.value, got, tt.want)
+		}
 	}
 }
