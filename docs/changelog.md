@@ -7,6 +7,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- A query whose LLM provider rejects the server's credentials, or does
+  not have the configured model (a retired model name, one the key's
+  plan cannot use, or one not yet pulled into Ollama), now answers
+  `502` instead of `500`, still with error code `EXECUTION_ERROR`
+  ([#61](https://github.com/pgEdge/pgedge-rag-server/issues/61)). Both
+  are configuration problems upstream rather than server faults, and
+  retrying them cannot succeed. A missing or unavailable model is also
+  reported as `the configured model is not available from the
+  configured provider` rather than the generic `the provider returned
+  an error`, on streaming requests as well, which still answer `200`
+  and report the failure as an `error` event.
+
 ## [2.0.0] - 2026-08-25
 
 ### Added

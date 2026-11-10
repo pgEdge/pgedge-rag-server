@@ -1162,14 +1162,19 @@ func TestPipelineEndpoint_EmptyCorpusStillAnswers200(t *testing.T) {
 
 // TestPipelineEndpoint_NonRetrievalErrorKeepsExecutionError guards the
 // boundary: the retrieval mapping must not swallow every other failure.
-// A provider error is still EXECUTION_ERROR at 500.
+// An unclassified provider error is still EXECUTION_ERROR at 500.
 func TestPipelineEndpoint_NonRetrievalErrorKeepsExecutionError(t *testing.T) {
 	pm := newMockPipelineManager()
 	pm.pipelines["test-pipeline"].executor = &mockQueryExecutor{
 		ExecuteWithOptionsFunc: func(
 			ctx context.Context, req pipeline.QueryRequest,
 		) (*pipeline.QueryResponse, error) {
-			return nil, providerAuthFailure()
+			return nil, fmt.Errorf("failed to generate completion: %w", &llmlib.ProviderError{
+				Err:        llmlib.ErrProviderError,
+				StatusCode: 500,
+				Provider:   "anthropic",
+				Message:    "overloaded",
+			})
 		},
 	}
 	srv := mustNewServer(t, testConfig(), pm)
@@ -1186,5 +1191,67 @@ func TestPipelineEndpoint_NonRetrievalErrorKeepsExecutionError(t *testing.T) {
 	}
 	if resp.Error.Code != "EXECUTION_ERROR" {
 		t.Errorf("expected error code EXECUTION_ERROR, got %q", resp.Error.Code)
+	}
+}
+
+// TestPipelineEndpoint_ProviderMisconfigurationIs502 covers issue #61: a
+// provider that rejects the server's credentials, or does not have the
+// configured model, is a configuration problem upstream rather than a
+// server fault, so it answers 502 with a fixed, classified message.
+func TestPipelineEndpoint_ProviderMisconfigurationIs502(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantMsg string
+	}{
+		{
+			name:    "authentication",
+			err:     providerAuthFailure(),
+			wantMsg: safeerr.MsgAuthentication,
+		},
+		{
+			name: "model not found",
+			err: fmt.Errorf("failed to generate completion: %w", &llmlib.ProviderError{
+				Err:        llmlib.ErrNotFound,
+				StatusCode: 404,
+				Provider:   "anthropic",
+				Message:    "model: example-retired-model",
+			}),
+			wantMsg: safeerr.MsgNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pm := newMockPipelineManager()
+			pm.pipelines["test-pipeline"].executor = &mockQueryExecutor{
+				ExecuteWithOptionsFunc: func(
+					ctx context.Context, req pipeline.QueryRequest,
+				) (*pipeline.QueryResponse, error) {
+					return nil, tt.err
+				},
+			}
+			srv := mustNewServer(t, testConfig(), pm)
+
+			w := postQuery(t, srv, `{"query": "test query"}`)
+
+			if w.Code != http.StatusBadGateway {
+				t.Errorf("expected status %d, got %d", http.StatusBadGateway, w.Code)
+			}
+			if strings.Contains(w.Body.String(), "example-retired-model") {
+				t.Errorf("response relayed the provider's error body:\n%s", w.Body.String())
+			}
+
+			var resp ErrorResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if resp.Error.Code != "EXECUTION_ERROR" {
+				t.Errorf("expected error code EXECUTION_ERROR, got %q", resp.Error.Code)
+			}
+			if resp.Error.Message != tt.wantMsg {
+				t.Errorf("expected message %q, got %q", tt.wantMsg, resp.Error.Message)
+			}
+		})
 	}
 }

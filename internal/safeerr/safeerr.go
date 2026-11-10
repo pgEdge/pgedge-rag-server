@@ -51,6 +51,7 @@ const (
 	MsgAuthentication = "the configured provider rejected the server's credentials"
 	MsgRateLimit      = "the provider rate limit was exceeded; retry later"
 	MsgInvalidRequest = "the provider rejected the request as invalid"
+	MsgNotFound       = "the configured model is not available from the configured provider"
 	MsgNotSupported   = "the requested operation is not supported by the configured provider"
 	MsgProvider       = "the provider returned an error"
 	MsgTimeout        = "the request took too long to process"
@@ -115,6 +116,8 @@ func Message(err error) string {
 		return MsgRateLimit
 	case errors.Is(err, llmlib.ErrInvalidRequest):
 		return MsgInvalidRequest
+	case errors.Is(err, llmlib.ErrNotFound):
+		return MsgNotFound
 	case errors.Is(err, llmlib.ErrNotSupported):
 		return MsgNotSupported
 	case errors.Is(err, llmlib.ErrProviderError):
