@@ -51,7 +51,7 @@ const (
 	MsgAuthentication = "the configured provider rejected the server's credentials"
 	MsgRateLimit      = "the provider rate limit was exceeded; retry later"
 	MsgInvalidRequest = "the provider rejected the request as invalid"
-	MsgNotFound       = "the configured model is not available to the configured credentials"
+	MsgNotFound       = "the configured model is not available from the configured provider"
 	MsgNotSupported   = "the requested operation is not supported by the configured provider"
 	MsgProvider       = "the provider returned an error"
 	MsgTimeout        = "the request took too long to process"
