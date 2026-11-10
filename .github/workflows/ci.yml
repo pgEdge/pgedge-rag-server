@@ -12,23 +12,30 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout code
-              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
 
             - name: Set up Go
-              uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+              uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
               with:
-                  go-version: "1.26.10"
+                  go-version: "1.27.3"
 
             - name: Run golangci-lint
-              uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa # v7
+              uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
               with:
-                  version: v2.11.4
+                  version: v2.15.0
 
     test:
-        name: Test
+        name: Test (Go ${{ matrix.go-version }})
         runs-on: ubuntu-latest
+
+        # Test the build toolchain and the minimum Go version that go.mod
+        # declares, so a change that needs a newer Go fails here.
+        strategy:
+            fail-fast: false
+            matrix:
+                go-version: ["1.26.10", "1.27.3"]
 
         # The identity tests need a real PostgreSQL with pgvector. They
         # skip when RAG_TEST_DATABASE_URL is unset, and a skip is not a
@@ -51,14 +58,14 @@ jobs:
 
         steps:
             - name: Checkout code
-              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
 
             - name: Set up Go
-              uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+              uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
               with:
-                  go-version: "1.26.10"
+                  go-version: ${{ matrix.go-version }}
 
             - name: Run tests
               run: make test
@@ -66,7 +73,8 @@ jobs:
                   RAG_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/ragtest?sslmode=disable
 
             - name: Upload coverage
-              uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
+              if: matrix.go-version == '1.27.3'
+              uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
               with:
                   files: coverage.out
                   fail_ci_if_error: false
@@ -77,20 +85,20 @@ jobs:
         needs: [lint, test]
         steps:
             - name: Checkout code
-              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
 
             - name: Set up Go
-              uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+              uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
               with:
-                  go-version: "1.26.10"
+                  go-version: "1.27.3"
 
             - name: Build binary
               run: make build
 
             - name: Upload binary
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
               with:
                   name: pgedge-rag-server
                   path: bin/pgedge-rag-server
@@ -100,14 +108,14 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout code
-              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
 
             - name: Set up Python
-              uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+              uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
               with:
-                  python-version: "3.12"
+                  python-version: "3.15"
 
             - name: Install MkDocs
               run: pip install mkdocs mkdocs-material mkdocs-redoc-tag

@@ -9,6 +9,21 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-11-10
+
+### Security
+
+- Release binaries and container images are now built with Go 1.27.3,
+  which no longer trusts eight compromised eMudhra intermediate
+  certificate authorities (CVE-2026-111943). Building from source now
+  needs Go 1.26.10 or later, the first 1.26 release with that fix.
+- Responses from an LLM provider are now capped in size, and redirects
+  from a provider endpoint are refused, so a misconfigured or hostile
+  endpoint can no longer exhaust the server's memory, or receive the
+  prompt and API key by redirecting the request to another host. A
+  `base_url` that relies on a redirect, such as an `http://` URL that
+  redirects to `https://`, needs correcting.
+
 ### Changed
 
 - A query whose LLM provider rejects the server's credentials, or does
@@ -22,6 +37,19 @@ and this project adheres to
   configured provider` rather than the generic `the provider returned
   an error`, on streaming requests as well, which still answer `200`
   and report the failure as an `error` event.
+
+### Fixed
+
+- A database password, user name, database name or certificate path
+  containing a space or a single quote no longer stops the server
+  connecting; such values are now quoted and escaped in the connection
+  string.
+
+### Removed
+
+- Packages are no longer built for Debian 11 (bullseye), which reached
+  the end of its regular support on 31 August 2026. Packages are still
+  built for Debian 12 and 13, and Ubuntu 22.04, 24.04 and 26.04.
 
 ## [2.0.0] - 2026-08-25
 
