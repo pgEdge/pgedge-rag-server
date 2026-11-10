@@ -64,7 +64,10 @@ func NewPool(
 	}, nil
 }
 
-// buildConnectionString constructs a PostgreSQL connection string.
+// buildConnectionString constructs a PostgreSQL keyword/value
+// connection string. Every value goes through connParam, so passwords,
+// paths and names containing spaces, quotes or backslashes reach the
+// driver unchanged.
 func buildConnectionString(cfg config.DatabaseConfig) string {
 	var parts []string
 
@@ -76,15 +79,15 @@ func buildConnectionString(cfg config.DatabaseConfig) string {
 			hosts[i] = bracketIPv6(h.Host)
 			ports[i] = fmt.Sprintf("%d", h.Port)
 		}
-		parts = append(parts, fmt.Sprintf("host=%s", strings.Join(hosts, ",")))
-		parts = append(parts, fmt.Sprintf("port=%s", strings.Join(ports, ",")))
+		parts = append(parts, connParam("host", strings.Join(hosts, ",")))
+		parts = append(parts, connParam("port", strings.Join(ports, ",")))
 	} else {
 		// Legacy single-host DSN
-		parts = append(parts, fmt.Sprintf("host=%s", bracketIPv6(cfg.Host)))
-		parts = append(parts, fmt.Sprintf("port=%d", cfg.Port))
+		parts = append(parts, connParam("host", bracketIPv6(cfg.Host)))
+		parts = append(parts, connParam("port", fmt.Sprintf("%d", cfg.Port)))
 	}
 
-	parts = append(parts, fmt.Sprintf("dbname=%s", cfg.Database))
+	parts = append(parts, connParam("dbname", cfg.Database))
 
 	// Username: config > PGUSER > USER
 	username := cfg.Username
@@ -95,34 +98,49 @@ func buildConnectionString(cfg config.DatabaseConfig) string {
 		username = os.Getenv("USER")
 	}
 	if username != "" {
-		parts = append(parts, fmt.Sprintf("user=%s", username))
+		parts = append(parts, connParam("user", username))
 	}
 
 	if cfg.Password != "" {
-		parts = append(parts, fmt.Sprintf("password=%s", cfg.Password))
+		parts = append(parts, connParam("password", cfg.Password))
 	}
 
 	if cfg.SSLMode != "" {
-		parts = append(parts, fmt.Sprintf("sslmode=%s", cfg.SSLMode))
+		parts = append(parts, connParam("sslmode", cfg.SSLMode))
 	}
 
 	// Certificate-based authentication
 	if cfg.SSLCert != "" {
-		parts = append(parts, fmt.Sprintf("sslcert=%s", cfg.SSLCert))
+		parts = append(parts, connParam("sslcert", cfg.SSLCert))
 	}
 	if cfg.SSLKey != "" {
-		parts = append(parts, fmt.Sprintf("sslkey=%s", cfg.SSLKey))
+		parts = append(parts, connParam("sslkey", cfg.SSLKey))
 	}
 	if cfg.SSLRootCA != "" {
-		parts = append(parts, fmt.Sprintf("sslrootcert=%s", cfg.SSLRootCA))
+		parts = append(parts, connParam("sslrootcert", cfg.SSLRootCA))
 	}
 
 	// Multi-host routing
 	if cfg.TargetSessionAttrs != "" {
-		parts = append(parts, fmt.Sprintf("target_session_attrs=%s", cfg.TargetSessionAttrs))
+		parts = append(parts, connParam("target_session_attrs", cfg.TargetSessionAttrs))
 	}
 
 	return strings.Join(parts, " ")
+}
+
+// connParam formats one keyword/value pair using libpq's quoting rules:
+// a backslash escapes the character after it, and a value that is
+// empty or contains whitespace must be single-quoted. pgx follows the
+// same rules from v5.11.0 onwards, so an unescaped backslash in a
+// password would otherwise be silently dropped. Values that need no
+// escaping are written bare, so ordinary connection strings read as
+// they always have.
+func connParam(key, value string) string {
+	escaped := strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(value)
+	if value == "" || strings.ContainsAny(value, " \t\n\r\v\f'\\") {
+		return key + "='" + escaped + "'"
+	}
+	return key + "=" + escaped
 }
 
 // bracketIPv6 wraps an IPv6 address in square brackets for libpq.
