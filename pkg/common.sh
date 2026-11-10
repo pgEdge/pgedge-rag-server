@@ -7,9 +7,9 @@
 
 export RAG_SERVER_REPO="https://github.com/pgEdge/pgedge-rag-server.git"
 # Full tag (e.g. v2.0.0-beta1) — GoReleaser archives are named after this.
-export RAG_SERVER_BRANCH="${COMPONENT_BRANCH:-v2.0.0}"
+export RAG_SERVER_BRANCH="${COMPONENT_BRANCH:-v2.0.1}"
 # Upstream version, suffix-stripped (e.g. 2.0.0) — used in spec/SOURCES names.
-export RAG_SERVER_VERSION=${COMPONENT_VERSION:-2.0.0}
+export RAG_SERVER_VERSION=${COMPONENT_VERSION:-2.0.1}
 export RAG_SERVER_BUILDNUM=${COMPONENT_BUILDNUM:-1}
 
 export REPO_TYPE="${REPO_TYPE:-daily}"
