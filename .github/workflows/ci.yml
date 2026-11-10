@@ -27,8 +27,15 @@ jobs:
                   version: v2.15.0
 
     test:
-        name: Test
+        name: Test (Go ${{ matrix.go-version }})
         runs-on: ubuntu-latest
+
+        # Test the build toolchain and the minimum Go version that go.mod
+        # declares, so a change that needs a newer Go fails here.
+        strategy:
+            fail-fast: false
+            matrix:
+                go-version: ["1.26.10", "1.27.3"]
 
         # The identity tests need a real PostgreSQL with pgvector. They
         # skip when RAG_TEST_DATABASE_URL is unset, and a skip is not a
@@ -58,7 +65,7 @@ jobs:
             - name: Set up Go
               uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
               with:
-                  go-version: "1.27.3"
+                  go-version: ${{ matrix.go-version }}
 
             - name: Run tests
               run: make test
@@ -66,6 +73,7 @@ jobs:
                   RAG_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/ragtest?sslmode=disable
 
             - name: Upload coverage
+              if: matrix.go-version == '1.27.3'
               uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
               with:
                   files: coverage.out
